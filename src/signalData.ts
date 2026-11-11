@@ -1,5 +1,4 @@
 import { signalTilesForRoute, type RouteCandidate, type SignalData } from './core/index.ts'
-import { signalSession, type SignalsResult } from './providers/charlotte/client.ts'
 import { isOsmSignalTile, osmSignalPoints, type OsmSignalTile } from './providers/osm/adapter.ts'
 import { OSM_BUNDLE_PATH } from './providers/osm/bundle.ts'
 import { createBundleLayer } from './providers/osm/bundleLayer.ts'
@@ -12,14 +11,12 @@ import {
   type LoadOptions,
   type TileSource,
 } from './providers/osm/tileSource.ts'
-import { indexedDbStore } from './storage/kv.ts'
+import { deleteIndexedDb, indexedDbStore } from './storage/kv.ts'
 
 /** Where signal data comes from. Swapped out in tests. */
 export interface SignalSources {
   /** OpenStreetMap signals, by tile: the primary source everywhere. */
   tiles: TileSource
-  /** The City of Charlotte list, which only fills gaps. */
-  gapFill: { load: () => Promise<SignalsResult> }
 }
 
 export interface LoadedSignalData {
@@ -38,12 +35,8 @@ export interface LoadedSignalData {
 
 /**
  * Loads the signal data a set of routes needs: the OpenStreetMap tiles the
- * routes touch (and no others), and the City of Charlotte list. Never
- * rejects: a tile that cannot be loaded is reported as missing, and a city
- * list that cannot be loaded is null. Neither stops the other.
- *
- * Nothing is merged here. The two sources are handed to core side by side
- * and are only combined in memory when a route is counted.
+ * routes touch, and no others. Never rejects: a tile that cannot be loaded is
+ * reported as missing.
  *
  * A missing tile the bundle has a clipped part of (see LoadedTiles.partial)
  * adds that part's signals to the primary points without being listed as a
@@ -56,16 +49,12 @@ export async function loadSignalData(
 ): Promise<LoadedSignalData> {
   const tileIds = [...new Set(routes.flatMap((route) => signalTilesForRoute(route.geometry)))].sort()
   const nothing: LoadedTiles = { tiles: new Map(), missing: tileIds, partial: new Map() }
-  const [loaded, city] = await Promise.all([
-    sources.tiles.load(tileIds, options).catch(() => nothing),
-    sources.gapFill.load().catch(() => null),
-  ])
+  const loaded = await sources.tiles.load(tileIds, options).catch(() => nothing)
   const dates = [...loaded.tiles.values()].map((tile) => tile.fetchedAt)
   return {
     data: {
       primary: osmSignalPoints([...loaded.tiles.values(), ...loaded.partial.values()]),
       primaryTileIds: new Set(loaded.tiles.keys()),
-      gapFill: city !== null && city.ok ? city.signals : null,
     },
     missingTileIds: loaded.missing,
     primaryDataDate: dates.length > 0 ? Math.min(...dates) : null,
@@ -78,8 +67,6 @@ export async function loadSignalData(
  * regional extracts: authoritative for the tiles they cover in full) ->
  * device cache (IndexedDB, in a database of its own) -> Overpass. Only a
  * tile the bundle does not cover in full ever reaches the last two.
- * The city list has its own database and its own seed file (see
- * signalSession).
  */
 export const signalSources: SignalSources = {
   tiles: createTileSource({
@@ -89,28 +76,33 @@ export const signalSources: SignalSources = {
       createOverpassClient({ pauseStore: indexedDbStore('routeiq-overpass-pause', 'pause', isOverpassPause) }),
     ),
   }),
-  gapFill: signalSession,
+}
+
+/**
+ * The database the removed City of Charlotte signal list was kept in (#13).
+ * Nothing reads it any more; forgetOldSignalData deletes it from the device.
+ */
+export const RETIRED_DATABASES: readonly string[] = ['routeiq-charlotte-signals']
+
+/** Deletes the databases of data sources the app no longer uses. Called once when the app starts. Never rejects. */
+export function forgetOldSignalData(factory?: IDBFactory | null): Promise<void> {
+  return Promise.all(RETIRED_DATABASES.map((name) => deleteIndexedDb(name, factory))).then(() => undefined)
 }
 
 /**
  * The same sources for a drive that polls (PLAN step 6), where the same
- * tiles are asked for again every minute. Two things are made once-only for
- * as long as the returned sources are kept:
- *
- * - A tile that could not be loaded is never asked for again. The tile
- *   source on its own retries a failed tile once its wait is over (30 s,
- *   doubling to 8 minutes), which over a long drive is still a request to
- *   Overpass every few minutes. Here a tile outside the bundle costs at most
- *   one attempt; after that its routes simply stay partial.
- * - The gap-fill list is loaded once and that answer is kept, even a
- *   failure or the seed copy, which the session itself would try again.
+ * tiles are asked for again every minute. A tile that could not be loaded
+ * is never asked for again for as long as the returned sources are kept.
+ * The tile source on its own retries a failed tile once its wait is over
+ * (30 s, doubling to 8 minutes), which over a long drive is still a request
+ * to Overpass every few minutes. Here a tile outside the bundle costs at most
+ * one attempt; after that its routes simply stay partial.
  *
  * Tiles the bundle covers are not affected: they never reach the network.
  */
 export function askOnce(sources: SignalSources): SignalSources {
   // Tiles given up on, each with the clipped part the bundle had of it (see LoadedTiles.partial), if any.
   const gaveUp = new Map<string, OsmSignalTile | null>()
-  let gapFill: Promise<SignalsResult> | null = null
   return {
     tiles: {
       async load(tileIds) {
@@ -127,7 +119,6 @@ export function askOnce(sources: SignalSources): SignalSources {
         return { tiles: loaded.tiles, missing, partial }
       },
     },
-    gapFill: { load: () => (gapFill ??= sources.gapFill.load()) },
   }
 }
 

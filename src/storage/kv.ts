@@ -99,3 +99,24 @@ export function indexedDbStore<T>(
     },
   }
 }
+
+/**
+ * Deletes database `dbName` from the device, for a dataset the app no longer
+ * keeps. Deleting one that is not there is fine. Never rejects: where
+ * IndexedDB is missing, refuses, or another tab holds the database open
+ * (blocked), it resolves anyway and the deletion is tried again on a later
+ * visit.
+ */
+export function deleteIndexedDb(dbName: string, factory: IDBFactory | null = defaultFactory()): Promise<void> {
+  return new Promise((resolve) => {
+    if (factory === null) return resolve()
+    try {
+      const request = factory.deleteDatabase(dbName)
+      request.onsuccess = () => resolve()
+      request.onerror = () => resolve()
+      request.onblocked = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}

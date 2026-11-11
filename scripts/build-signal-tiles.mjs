@@ -22,8 +22,6 @@
 // directly). No dependencies.
 // Exit codes: 0 written (or dry run finished); 1 bad arguments; 2 an input is missing, damaged or
 // does not match its checksum. A run that fails leaves the files already on disk as they were.
-//
-// The City of Charlotte snapshot has a script of its own: scripts/seed-charlotte.mjs.
 
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'

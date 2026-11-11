@@ -509,11 +509,10 @@ describe('RoutePanel', () => {
     expect(html).toContain('1 signal<')
     // A full count of zero is an answer like any other.
     expect(html).toContain('>0 signals<')
-    // Both sources are credited, OpenStreetMap with the link its license asks for.
+    // OpenStreetMap is credited with the link its license asks for, and it is the only signal data.
     expect(html).toContain('href="https://www.openstreetmap.org/copyright"')
     expect(html).toContain('© OpenStreetMap contributors')
-    expect(html).toContain('City of Charlotte (CDOT)')
-    expect(html).toContain('CC BY-NC-SA 4.0')
+    expect(html).not.toContain('City of Charlotte')
     expect(html).not.toContain('within 20 m')
     expect(html).not.toContain('Retry signals')
     // The Mapbox count is a hover cross-check only, never shown as the count.

@@ -194,8 +194,7 @@ export function RoutePanel({
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
             © OpenStreetMap contributors
           </a>
-          ). Inside Charlotte, gaps are filled from City of Charlotte (CDOT) open data, used non-commercially
-          (CC BY-NC-SA 4.0).
+          ).
         </p>
       )}
       {signalsStatus === 'partial' && (

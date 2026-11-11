@@ -4,7 +4,7 @@
 // - Every request that leaves localhost is answered here: Directions from the
 //   made-up road network (world/roads.ts), Search Box from the hand-written
 //   fixtures in tests/fixtures, the map style with a blank one, and the rest
-//   (telemetry, City of Charlotte, Overpass) as each scenario says. A request
+//   (telemetry, Overpass) as each scenario says. A request
 //   nothing here answers fails the scenario: no test ever reaches the network.
 // - GPS, voice and the clock are stubbed in the page (browserStubs.ts and
 //   Playwright's page.clock), so a 20-minute drive runs in seconds, the same
@@ -112,7 +112,8 @@ export class App {
   /** Waits for the trip to be planned: ranked routes, with every signal count in. */
   async routesReady() {
     const panel = this.page.locator('.route-list, [aria-label="Routes"]').first()
-    await expect(this.page.getByText('Recommended')).toBeVisible({ timeout: 15_000 })
+    // The badge, not any text with the word: a route's reason can say "than the recommended route".
+    await expect(this.page.locator('.route-badge', { hasText: 'Recommended' })).toBeVisible({ timeout: 15_000 })
     await expect(this.page.getByText('Counting signals')).toHaveCount(0, { timeout: 15_000 })
     return panel
   }
@@ -282,8 +283,6 @@ export class App {
       if (url.pathname.startsWith('/map-sessions/')) return route.fulfill({ status: 204 })
     }
     if (url.hostname === 'events.mapbox.com') return route.fulfill({ status: 204 })
-    // City of Charlotte signals: unreachable, so the snapshot shipped with the app is used.
-    if (url.hostname === 'services.arcgis.com') return route.fulfill({ status: 503, body: 'offline in e2e' })
     if (url.hostname === 'overpass-api.de') {
       const query = new URLSearchParams(request.postData() ?? '').get('data') ?? ''
       const answer = overpass?.(query) ?? { status: 504 }

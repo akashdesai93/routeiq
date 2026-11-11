@@ -13,7 +13,6 @@
     "test": "vitest run",
     "lint": "oxlint",
     "build:signals": "node scripts/build-signal-tiles.mjs",
-    "seed:charlotte": "node scripts/seed-charlotte.mjs",
     "preview": "vite preview",
     "e2e:build": "node e2e/build.mjs",
     "e2e": "npm run e2e:build && playwright test",

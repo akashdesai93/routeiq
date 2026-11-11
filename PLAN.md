@@ -13,14 +13,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
 3. **Done: route facts.** Traffic-aware ETA, distance, and difference from typical time
    (null when the API gives no typical duration, never guessed). The default selection
    was the lowest ETA until ranking (step 5) replaced it.
-4. **Done: signals.** City of Charlotte traffic signal points from its public ArcGIS
-   FeatureServer, downloaded whole once per session and matched locally (no route or
-   pin position goes to the city). `src/core/signals.ts` counts distinct signalized
+4. **Done: signals.** First built on the City of Charlotte's public signal list
+   (removed (#13): OpenStreetMap is now the only signal data). `src/core/signals.ts` counts distinct signalized
    intersections per route with a 20 m tolerance and a 40 m merge distance; the count
    stays unknown when the data is unavailable or does not cover the route. Route ids
    now come from the geometry (`src/core/hash.ts`). Mapbox's `traffic_signal` flags
-   are kept as `providerSignalCount` for comparison only. Open issue for later steps:
-   signals outside the city's list (other towns, campuses) are missed.
+   are kept as `providerSignalCount` for comparison only.
    Freeway fix (done with step 5): the Mapbox adapter records the stretches driven on
    controlled-access road (`limitedAccessSpansM`, from the road class and
    `geometry_index` of each step intersection), and signals inside them, more than
@@ -30,23 +28,21 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    `highway=traffic_signals` nodes through Overpass are now the primary source
    everywhere, loaded per 0.1 degree tile for the tiles a route touches
    (`src/core/tiles.ts`, `src/providers/osm`), cached on the device (IndexedDB) and
-   refreshed about monthly (see part 3 for the chain as it is now). The City of Charlotte
-   list only fills gaps, and Mapbox's signal flags stand in where a tile is missing.
+   refreshed about monthly (see part 3 for the chain as it is now). Mapbox's signal
+   flags stand in where a tile is missing (the city list that once filled gaps:
+   removed (#13)).
    The count rules are now: group points within 60 m, keep groups within 30 m of the
    route, keep those within 40 m of a route intersection; the freeway spans stay as a
    second check. Each route carries `signalCoverage` (full, partial, none) next to
    `signalCount`; partial is shown as a lower bound, never as zero, and does not rank.
-   The two datasets are stored apart (different licenses) and merged only in memory.
    Part 2 (superseded by part 3): a seed script was to fetch the Charlotte metro box
    (49 tiles) from Overpass in one request and ship it as seed tiles read between the
    device cache and the network. Its OpenStreetMap half never ran, because Overpass
-   answered 502/429 all of Nov 11, 2026, and it has been removed. What remains of it:
-   the city list is snapshotted into `public/seed/charlotte-signals` (its own folder
-   and license file), and the city client falls back on it when the live server fails. The map
+   answered 502/429 all of Nov 11, 2026, and it has been removed (the city snapshot it
+   left behind: removed (#13)). The map
    carries the OpenStreetMap credit; labels are "24 signals", "≥ 9 signals (partial)"
    and "Signals: unknown". The default trip is now Uptown to US-521 and SC-160 in
-   Indian Land, SC: it crosses the state line, where the city list ends and
-   OpenStreetMap carries the count alone.
+   Indian Land, SC: it crosses the state line, so it needs tiles on both sides.
    Part 3 (done, Nov 11, 2026): Overpass never answered, so the tiles are now built
    by us. `npm run build:signals` (`scripts/build-signal-tiles.mjs`, with its own
    streaming .osm.pbf reader in `scripts/lib/osm-pbf.mjs`) reads the Geofabrik
@@ -60,16 +56,17 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    tiles outside the states or on their clipped outer edge. A tile that failed is
    left alone for 30 s, doubling to 8 minutes (per session), which is what step 6
    needs. The panel shows the data date. The Overpass seed (the metro box, one big
-   query) is retired; `npm run seed:charlotte` keeps the city snapshot.
+   query) is retired.
    Measured on live routes with the real data: the three rule distances (60 m group,
    30 m to the route, 40 m to a route intersection) stay as they are; see README,
-   "Checked against real data". The city gap-fill added nothing on eight ordinary
-   trips (18 of its 909 points have no OpenStreetMap signal within 60 m).
+   "Checked against real data". The city list added nothing on eight ordinary
+   trips (18 of its 909 points have no OpenStreetMap match within 60 m), so it was
+   removed (#13).
    Open for later: the bundle is a snapshot and ages (rebuild it; nothing refreshes
    it tile by tile); 60 m single-linkage grouping merges two pairs of Charlotte
    intersections 54 and 56 m apart; a slip-lane turn beside a signal and a ramp fork
-   on a `trunk` expressway can each add a signal; decide whether the city gap-fill is
-   worth its non-commercial license. (Done: Overpass tiles are now filtered by
+   on a `trunk` expressway can each add a signal. (Done: the city list was removed
+   (#13). Done: Overpass tiles are now filtered by
    signal subtype with the same rule and list as bundled tiles, #11.)
 5. **Done: ranking** (`src/core/rank.ts`). Best traffic-aware ETA first; signal count
    only breaks ties (ETAs within 30 s of the fastest, `DEFAULT_ETA_TIE_WINDOW_SEC`)
@@ -229,10 +226,10 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
   place of IndexedDB). The tile, index and snapshot JSON shapes are the contract. Two
   states are 904 small files (1.2 MB, about 3 MB on disk in 4 KB blocks): pack them
   into one file (or SQLite) for iOS rather than shipping hundreds of resources, and
-  plan how the data is renewed between app releases (a downloadable pack, not Overpass). Both license
-  files have to ship with the data and the credits have to be visible in the app; the
-  City of Charlotte data is non-commercial (CC BY-NC-SA 4.0), so a distributed app
-  needs the city's agreement or has to leave that folder out.
+  plan how the data is renewed between app releases (a downloadable pack, not Overpass). The
+  ODbL license file has to ship with the data and the OpenStreetMap credit has to be
+  visible in the app. OpenStreetMap is the only signal dataset (the non-commercial city
+  data was removed (#13)), so nothing blocks distributing it.
 - CarPlay needs Apple to grant `com.apple.developer.carplay-maps` first. Apple's docs
   say Simulator cannot show a CarPlay app without the entitlement, and Xcode needs a
   CarPlay-enabled provisioning profile, so nothing CarPlay can be tested before the

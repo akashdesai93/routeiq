@@ -58,15 +58,10 @@ function route(id: string, geometry: readonly LngLat[], durationSec = 600): Rout
 }
 
 /** Signal data with the primary tiles loaded for every one of the given routes. */
-function loadedFor(
-  routes: readonly RouteCandidate[],
-  primary: readonly SignalPoint[],
-  gapFill: readonly SignalPoint[] | null = null,
-): SignalData {
+function loadedFor(routes: readonly RouteCandidate[], primary: readonly SignalPoint[]): SignalData {
   return {
     primary,
     primaryTileIds: new Set(routes.flatMap((r) => signalTilesForRoute(r.geometry))),
-    gapFill,
   }
 }
 
@@ -91,19 +86,18 @@ describe('geo helpers for signal matching', () => {
 describe('signalsOnRoute', () => {
   it('documents its defaults in one place', () => {
     // The three rule distances (group 60 m, route 30 m, intersection 40 m), then the
-    // gap-fill distance, the along-route merge and the freeway margin.
+    // along-route merge and the freeway margin.
     expect(DEFAULT_SIGNAL_MATCH).toEqual({
       clusterRadiusM: 60,
       toleranceM: 30,
       intersectionRadiusM: 40,
-      gapFillRadiusM: 60,
       mergeRadiusM: 40,
       limitedAccessMarginM: 30,
     })
   })
 
   it('counts a point just inside the tolerance and not one just outside', () => {
-    // The tolerance is 30 m now (it was 20 m when the city list was the only source).
+    // The tolerance is 30 m.
     const inside = signal('inside', 29.9, 300)
     const outside = signal('outside', -30.1, 700)
     const found = signalsOnRoute(NORTH_1KM, [outside, inside])
@@ -473,16 +467,15 @@ describe('withSignalCounts', () => {
   })
 
   it('says none, with no count, when nothing at all is known about a route', () => {
-    const nothing: SignalData = { primary: [], primaryTileIds: new Set(), gapFill: null }
+    const nothing: SignalData = { primary: [], primaryTileIds: new Set() }
     expect(result(withSignalCounts([inside], nothing).routes[0]!)).toEqual([null, 'none'])
     // Stray points do not help: without its tile loaded, the data says nothing about what else is there.
     const stray: SignalData = { ...nothing, primary: town }
     expect(result(withSignalCounts([inside], stray).routes[0]!)).toEqual([null, 'none'])
   })
 
-  // Replaces "leaves the count unknown for a route that leaves the area the data covers": the box
-  // around the city list is gone. What matters now is whether the tiles a route needs were loaded,
-  // and a route with some of them missing gets a partial count rather than none.
+  // What matters is whether the tiles a route needs were loaded: a route with some of them
+  // missing gets a partial count rather than none.
   it('marks a route partial, never zero as if known, when a tile it needs is missing', () => {
     // 50 km north: far outside the tiles loaded for the short route.
     const leaving = route('leaving', [at(0, 0), at(0, 1000), at(0, 50_000)])
@@ -530,61 +523,6 @@ describe('withSignalCounts', () => {
   })
 })
 
-describe('withSignalCounts: primary data first, gap-fill data only where it has nothing', () => {
-  const inside = route('inside', NORTH_1KM)
-  // Two heads of one junction at 300 m, from the primary source.
-  const primary = [signal('osm-east', 10, 300), signal('osm-west', -10, 300)]
-
-  it('ignores a gap-fill point near a primary intersection and adds one far from any', () => {
-    const city = [
-      signal('city-same-junction', 5, 320),
-      signal('city-missing-from-primary', 0, 700),
-      // Nowhere near the route: makes no difference to anything.
-      signal('city-elsewhere', 20_000, 20_000),
-    ]
-    const { routes, signalsByRouteId } = withSignalCounts([inside], loadedFor([inside], primary, city))
-    expect([routes[0]!.signalCount, routes[0]!.signalCoverage]).toEqual([2, 'full'])
-    expect(signalsByRouteId.get('inside')!.map((s) => [s.id, s.source])).toEqual([
-      ['osm-east', 'primary'],
-      ['city-missing-from-primary', 'gapFill'],
-    ])
-    // Gap-fill only ever adds: the primary intersection is exactly what it is without the city list.
-    const alone = withSignalCounts([inside], loadedFor([inside], primary)).signalsByRouteId.get('inside')!
-    expect(signalsByRouteId.get('inside')![0]).toEqual(alone[0])
-    expect(alone).toHaveLength(1)
-  })
-
-  it('measures "near" from every point of the primary intersection: 60 m by default', () => {
-    const single = [signal('osm', 0, 300)]
-    const count = (northM: number, gapFillRadiusM?: number) =>
-      withSignalCounts(
-        [inside],
-        loadedFor([inside], single, [signal('city', 0, northM)]),
-        gapFillRadiusM === undefined ? {} : { gapFillRadiusM },
-      ).routes[0]!.signalCount
-    expect([359, 361].map((m) => count(m))).toEqual([1, 2])
-    expect(count(400, 120)).toBe(1)
-    // The along-route merge (40 m) is still the last word: with no gap-fill distance at all,
-    // a city point 30 m up the road is the same stop.
-    expect(count(330, 0)).toBe(1)
-  })
-
-  it('never lets the gap-fill data decide the coverage', () => {
-    const town = [signal('a', 0, 300), signal('b', 0, 800)]
-    const result = (data: SignalData) => {
-      const r = withSignalCounts([inside], data).routes[0]!
-      return [r.signalCount, r.signalCoverage]
-    }
-    // A route nowhere near the city's points is still fully covered by its tiles
-    // (the old rule called anything outside the box around the city list unknown).
-    expect(result(loadedFor([inside], town, [signal('city', 300_000, 300_000)]))).toEqual([2, 'full'])
-    // The city list failing to load changes nothing either.
-    expect(result(loadedFor([inside], town, null))).toEqual([2, 'full'])
-    // City list only, no tile loaded: a lower bound, so partial, never full.
-    expect(result({ primary: [], primaryTileIds: new Set(), gapFill: [signal('city', 0, 300)] })).toEqual([1, 'partial'])
-  })
-})
-
 describe('withSignalCounts across tiles', () => {
   // A road running east along latitude 35.25, across the tile edge at longitude -80.8.
   const WEST_TILE = '-809_352'
@@ -606,7 +544,7 @@ describe('withSignalCounts across tiles', () => {
     const east = osm(2, -80.79985)
     expect([tileIdAt(west.position), tileIdAt(east.position)]).toEqual([WEST_TILE, EAST_TILE])
     const crossing = route('crossing', road)
-    const both: SignalData = { primary: [west, east], primaryTileIds: new Set([WEST_TILE, EAST_TILE]), gapFill: null }
+    const both: SignalData = { primary: [west, east], primaryTileIds: new Set([WEST_TILE, EAST_TILE]) }
     const counted = withSignalCounts([crossing], both)
     expect(result(counted.routes[0]!)).toEqual([1, 'full'])
     expect(counted.signalsByRouteId.get('crossing')![0]!.mergedIds).toEqual(['osm-1', 'osm-2'])
@@ -614,7 +552,7 @@ describe('withSignalCounts across tiles', () => {
     const twice: SignalData = { ...both, primary: [west, east, { ...west }, { ...east }] }
     expect(result(withSignalCounts([crossing], twice).routes[0]!)).toEqual([1, 'full'])
     // With only the west tile loaded, the half that is known counts once, and the count is partial.
-    const half: SignalData = { primary: [west], primaryTileIds: new Set([WEST_TILE]), gapFill: null }
+    const half: SignalData = { primary: [west], primaryTileIds: new Set([WEST_TILE]) }
     expect(result(withSignalCounts([crossing], half).routes[0]!)).toEqual([1, 'partial'])
   })
 
@@ -631,7 +569,7 @@ describe('withSignalCounts across tiles', () => {
     const crossing = { ...route('crossing', road), intersections, providerSignalCount: 4 }
     const primary = [osm(7, -80.807)]
 
-    const westOnly: SignalData = { primary, primaryTileIds: new Set([WEST_TILE]), gapFill: null }
+    const westOnly: SignalData = { primary, primaryTileIds: new Set([WEST_TILE]) }
     const counted = withSignalCounts([crossing], westOnly)
     expect(result(counted.routes[0]!)).toEqual([2, 'partial'])
     expect(counted.signalsByRouteId.get('crossing')!.map((s) => s.source)).toEqual(['primary', 'fallback'])
@@ -643,12 +581,24 @@ describe('withSignalCounts across tiles', () => {
     expect(result(withSignalCounts([crossing], both).routes[0]!)).toEqual([1, 'full'])
 
     // No tile loaded: every flag stands in, grouped like any other signal points. Still partial.
-    const none: SignalData = { primary: [], primaryTileIds: new Set(), gapFill: null }
+    const none: SignalData = { primary: [], primaryTileIds: new Set() }
     expect(result(withSignalCounts([crossing], none).routes[0]!)).toEqual([3, 'partial'])
 
-    // A gap-fill point at a flagged junction is the same junction, not one more.
-    const withCity: SignalData = { ...westOnly, gapFill: [{ id: 'city-1', position: [-80.79495, 35.2501], name: 'A_B' }] }
-    expect(result(withSignalCounts([crossing], withCity).routes[0]!)).toEqual([2, 'partial'])
+    // An empty intersection list is still something known: partial, and a partial 0 reads as unknown.
+    const bare = withSignalCounts([{ ...crossing, intersections: [] }], none).routes[0]!
+    expect(result(bare)).toEqual([0, 'partial'])
+    expect(formatSignalCount(bare.signalCount, bare.signalCoverage)).toBe('Signals: unknown')
+  })
+
+  it('counts a junction once when a primary point and a provider flag in the missing tile meet at it', () => {
+    // A junction right on the tile edge: OpenStreetMap has its west head, Mapbox flags it 14 m east.
+    const intersections: RouteIntersection[] = [{ location: [-80.79985, 35.25], signal: true }]
+    const crossing = { ...route('crossing', road), intersections }
+    const westOnly: SignalData = { primary: [osm(1, -80.80015)], primaryTileIds: new Set([WEST_TILE]) }
+    const counted = withSignalCounts([crossing], westOnly)
+    expect(result(counted.routes[0]!)).toEqual([1, 'partial'])
+    // The most trusted source names it.
+    expect(counted.signalsByRouteId.get('crossing')!.map((s) => s.source)).toEqual(['primary'])
   })
 })
 

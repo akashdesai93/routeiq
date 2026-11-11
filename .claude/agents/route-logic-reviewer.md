@@ -22,7 +22,7 @@ and a concrete failure scenario:
    scripted test that shows it is intended.
 5. **Providers:** the adapter stays pure, and the client can be aborted, never rejects and
    maps HTTP errors. New code has fixtures, and no test touches the network.
-6. **Licenses:** OSM and City of Charlotte data are never combined in one file, store or module.
+6. **Licenses:** OSM (ODbL) is the only signal dataset. Any dataset under another license is never combined with it in one file, store or module.
 7. **Privacy:** no position is stored or logged, and no new network destination or payload
    is added without a README Privacy note. Tokens never appear in code or logs.
 8. **Docs:** a changed default or behaviour is reflected in the README tables and in PLAN.md.
