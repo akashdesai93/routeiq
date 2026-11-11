@@ -1,0 +1,5 @@
+node_modules/
+# Built on the build machine: the web app (npm run build) and the Xcode project (npm run ios:generate)
+/www/
+/ios/
+/build/

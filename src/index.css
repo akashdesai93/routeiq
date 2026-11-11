@@ -149,3 +149,8 @@ button.link:hover { background: none; color: #0550ae; }
 .live-summary-switches { padding-left: 20px; }
 .app.live .map .mapboxgl-ctrl-top-right { display: none; }
 .side-street-notice:empty { margin: 0; }
+/* The iPhone shell: the "paste your token" screen and the "Change token" button in the bar (ShellRoot.tsx). */
+.token-screen input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; padding: 8px 10px; font: inherit; border: 1px solid #8c959f; border-radius: 6px; }
+.token-screen p { margin: 8px 0; }
+.token-actions { display: flex; gap: 8px; }
+.change-token { margin-left: auto; }

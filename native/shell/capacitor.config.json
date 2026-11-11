@@ -1,0 +1,8 @@
+{
+  "appId": "dev.routeiq.shell",
+  "appName": "RouteIQ",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "always"
+  }
+}

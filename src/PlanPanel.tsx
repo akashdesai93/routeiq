@@ -14,7 +14,8 @@ import {
   type PlaceSuggestion,
   type SavedPlace,
 } from './core/index.ts'
-import { currentPosition, type LocationResult } from './device/geolocation.ts'
+import type { LocationResult } from './device/geolocation.ts'
+import { locateDevice } from './device/native/index.ts'
 import { PIN_COLOR, PIN_NAME, PIN_ROLES, type PinRole } from './map/pins.ts'
 import type { PlaceBookState } from './usePlaceBook.ts'
 import { usePlaceSearch } from './usePlaceSearch.ts'
@@ -232,7 +233,7 @@ function shortcutOf(saved: SavedPlace): Shortcut {
  * found by the Mapbox search provider, the place book's rules are in
  * src/core/places.ts, and the trip itself belongs to App.
  */
-export function PlanPanel({ pins, token, places, getProximity, onPlace, onSwap, onReset, locate = currentPosition }: PlanPanelProps) {
+export function PlanPanel({ pins, token, places, getProximity, onPlace, onSwap, onReset, locate = locateDevice }: PlanPanelProps) {
   const { book } = places
   const [locating, setLocating] = useState(false)
   const [locationProblem, setLocationProblem] = useState<string | null>(null)

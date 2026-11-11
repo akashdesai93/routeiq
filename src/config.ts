@@ -1,3 +1,5 @@
+import { isNativeShell } from './device/native/plugin.ts'
+
 export type TokenStatus =
   | { kind: 'ok'; token: string }
   | { kind: 'missing' }
@@ -19,8 +21,15 @@ export function checkToken(raw: string | undefined): TokenStatus {
 /**
  * Turns the HTTP status of a failed Mapbox request into setup help, or null
  * when the error is not about the token (a dropped tile, for example).
+ * In the iPhone shell the fix is the "Change token" button, not .env.local.
  */
-export function tokenErrorHelp(status: number | undefined): string | null {
+export function tokenErrorHelp(status: number | undefined, shell: boolean = isNativeShell()): string | null {
+  if (shell) {
+    if (status === 401) return 'Mapbox rejected the token (401). Tap "Change token" and paste a valid, active public token.'
+    if (status === 403)
+      return 'Mapbox refused the token for this app (403). A token with URL restrictions does not work in the phone app. Tap "Change token" and paste a pk. token without them.'
+    return null
+  }
   if (status === 401)
     return 'Mapbox rejected the token (401). Check VITE_MAPBOX_TOKEN in .env.local is a valid, active public token, then restart npm run dev.'
   if (status === 403)
