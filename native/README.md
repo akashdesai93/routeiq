@@ -38,8 +38,10 @@ native/
    [RouteIQCore/README.md](RouteIQCore/README.md).
 2. **The app target** is SwiftUI on `MapboxNavigationCore` + `MapboxNavigationUIKit`, version
    3.34.2 through Swift Package Manager. Its minimum is iOS 17, owner to confirm; the SDK itself
-   supports iOS 14+. It needs Xcode 16.2 or newer: the SDK README says 16.0, its CHANGELOG says
-   16.2 since 3.9.0, and the `macos-15` runner defaults to 16.4.
+   supports iOS 14+. In practice it needs **Xcode 26**: the 3.34.2 binaries (MapboxCommon
+   24.34.2) are built with Swift 6.3.2, and Xcode 16.4 (Swift 6.1.2) refuses them. The first CI
+   build found this on 2026-11-11; the SDK README's "Xcode 16" is out of date. CI uses the
+   `macos-26` runner with Xcode 26.6.
 3. **The Navigation adapter** is thin glue, and the only place that knows both worlds:
    - **In.** `NavigationRoutes.mainRoute` and `alternativeRoutes` (MapboxDirections `Route`:
      `shape`, `expectedTravelTime`, `typicalTravelTime`, `distance`, legs, steps, and
@@ -104,7 +106,8 @@ Each one lands with tests before the next starts.
 | # | Milestone | Done looks like |
 | --- | --- | --- |
 | 1 | **RouteIQCore** | Package under `native/RouteIQCore`; XCTest cases mirror the Vitest suites of the ported modules; `native-core.yml` is green on Linux. |
-| 2 | **App skeleton, unsigned** | App spec checked in; CI on `macos-15` generates the project, resolves the Mapbox SDK, builds an **unsigned** `.ipa` and uploads it as an artifact; first screen shows a Mapbox map and a route between Uptown Charlotte and SouthPark (public test points) with ETA, distance and signal count from RouteIQCore. |
+| 2 | **App skeleton, unsigned** | XcodeGen spec checked in (`native/RouteIQ/project.yml`). CI on `macos-26` (Xcode 26.6) generates the project, resolves the Mapbox SDKs, builds an **unsigned** `.ipa` and uploads it as an artifact. The first screen shows a Mapbox map with the routes between Uptown Charlotte and SouthPark (public test points), ranked by RouteIQCore, with ETA, distance, difference from typical and the reason for each route's place. The Directions client and the screen's data live in `RouteIQKit`, tested on Windows and Linux. Signal counts read "unknown" until 2b. |
+| 2b | **Bundled signal data** | The OpenStreetMap signal tiles are packed into one app resource with their license, and every route on the first screen shows its signal count. |
 | 3 | **Guidance on the phone** | Sideloaded build (free Apple ID) starts turn-by-turn on the chosen route; voice and location continue with the phone locked; Mapbox simulation (`locationSource: .simulation`) works in the simulator. |
 | 4 | **Zero-tap switching** | Adapter feeds `continuousAlternatives` to `decideReroute`. A simulated drive switches once on a steady 3 minute gain and never on oscillating ETAs, as in the web tests. The switch sentence is spoken, and a drive log stays on the device. |
 | 5 | **TestFlight** | Signed build uploaded from CI with the App Store Connect API key. Needs owner items 1–4 below. |
@@ -115,8 +118,8 @@ Each one lands with tests before the next starts.
 | Workflow | Runner | When | What |
 | --- | --- | --- | --- |
 | `native-core.yml` | `ubuntu-24.04` (Linux, cheap) | push or PR touching `native/RouteIQCore/**` or `tests/fixtures/**` | `swift build --build-tests`, `swift test` |
-| `native-app.yml` (milestone 2) | `macos-15` (10x price) | push touching `native/RouteIQ/**`, or by hand | generate project, build unsigned `.ipa`, artifact |
-| `native-testflight.yml` (milestone 5) | `macos-15` | by hand only | archive, sign, upload to TestFlight |
+| `native-app.yml` (milestone 2) | `macos-26` (Xcode 26.6) | pull requests and pushes to main touching the app, or by hand | generate project, build unsigned `.ipa`, artifact |
+| `native-testflight.yml` (milestone 5) | `macos-26` | by hand only | archive, sign, upload to TestFlight |
 
 macOS runs are kept rare on purpose: path filters, no scheduled runs, and cancel-in-progress.
 GitHub Free on a private repository includes $12 of compute a month. That buys about 2,000 Linux

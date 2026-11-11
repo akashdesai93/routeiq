@@ -1,0 +1,175 @@
+name: native-app
+
+# Generates the RouteIQ Xcode project from native/RouteIQ/project.yml
+# (XcodeGen), resolves the Mapbox SDKs, and builds an UNSIGNED .ipa for
+# sideloading. Nothing here signs or uploads to Apple.
+#
+# Secrets (both optional, both added by the owner, never printed):
+# - MAPBOX_PUBLIC_TOKEN: the public pk. token the app runs with. Without it the
+#   app builds and opens, then says the token is missing.
+# - MAPBOX_DOWNLOADS_TOKEN: a secret token with only DOWNLOADS:READ, used only if
+#   Mapbox ever requires credentials to download its SDK binaries again (on
+#   2026-11-11 they downloaded without any).
+# Push runs only on main; a branch is built through its pull request, so each
+# change builds once.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/RouteIQ/**'
+      - 'native/RouteIQCore/Package.swift'
+      - 'native/RouteIQCore/Sources/**'
+      - '.github/workflows/native-app.yml'
+  pull_request:
+    paths:
+      - 'native/RouteIQ/**'
+      - 'native/RouteIQCore/Package.swift'
+      - 'native/RouteIQCore/Sources/**'
+      - '.github/workflows/native-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build unsigned ipa
+    # Mapbox ships its 3.34.2 binaries built with Swift 6.3.2 (Xcode 26), which
+    # Xcode 16 cannot read, so this needs the macos-26 image.
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: native/RouteIQ
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Mapbox download credentials (only if the secret exists)
+        env:
+          MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+        run: |
+          if [ -n "$MAPBOX_DOWNLOADS_TOKEN" ]; then
+            printf 'machine api.mapbox.com\nlogin mapbox\npassword %s\n' "$MAPBOX_DOWNLOADS_TOKEN" > ~/.netrc
+            chmod 600 ~/.netrc
+            echo "Using MAPBOX_DOWNLOADS_TOKEN for SDK downloads."
+          else
+            echo "No MAPBOX_DOWNLOADS_TOKEN: downloading the SDK without credentials."
+          fi
+
+      - name: Public token for the app (only if the secret exists)
+        env:
+          MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
+        run: |
+          if [ -n "$MAPBOX_PUBLIC_TOKEN" ]; then
+            case "$MAPBOX_PUBLIC_TOKEN" in
+              pk.*) ;;
+              *) echo "::error::MAPBOX_PUBLIC_TOKEN must be a public token (pk.)"; exit 1 ;;
+            esac
+            printf 'MBX_ACCESS_TOKEN = %s\n' "$MAPBOX_PUBLIC_TOKEN" > Config/Secrets.xcconfig
+            echo "Public token written to Config/Secrets.xcconfig (not printed)."
+          else
+            echo "::warning::No MAPBOX_PUBLIC_TOKEN secret: the app will build but cannot load maps or routes."
+          fi
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: native/RouteIQ/build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('native/RouteIQ/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project RouteIQ.xcodeproj -scheme RouteIQ \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages"
+          cat RouteIQ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | grep -E '"identity"|"version"' || true
+
+      - name: Build for a generic iOS device, unsigned
+        run: |
+          status=0
+          xcodebuild build \
+            -project RouteIQ.xcodeproj -scheme RouteIQ -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/build/DerivedData" \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO > build/xcodebuild.log 2>&1 || status=$?
+          # The full log is long; show compiler diagnostics and the ending.
+          grep -E "(error|warning): " build/xcodebuild.log | grep -v "/SourcePackages/" | sort -u | head -100 || true
+          tail -30 build/xcodebuild.log
+          if [ "$status" -ne 0 ]; then
+            echo "::error::xcodebuild failed with status $status"
+            exit "$status"
+          fi
+
+      - name: Check the built app
+        run: |
+          APP=build/DerivedData/Build/Products/Release-iphoneos/RouteIQ.app
+          test -d "$APP"
+          plutil -extract CFBundleIdentifier raw "$APP/Info.plist"
+          plutil -extract MinimumOSVersion raw "$APP/Info.plist"
+          token=$(plutil -extract MBXAccessToken raw "$APP/Info.plist" 2>/dev/null || true)
+          case "$token" in
+            pk.*) echo "MBXAccessToken: a public token is present (not printed)" ;;
+            "") echo "MBXAccessToken: empty (no MAPBOX_PUBLIC_TOKEN secret)" ;;
+            *) echo "::error::MBXAccessToken holds something other than a public token"; exit 1 ;;
+          esac
+          lipo -info "$APP/RouteIQ"
+          # MapboxMaps is a source package linked into the app binary (its resources
+          # land as a bundle at the app root); MapboxCoreMaps and MapboxCommon are
+          # binary xcframeworks and must be embedded under Frameworks/.
+          echo "Embedded frameworks:"
+          ls "$APP/Frameworks"
+          echo "Resource bundles:"
+          ls "$APP" | grep '\.bundle$' || true
+          ls "$APP/Frameworks" | grep -q MapboxCoreMaps
+          ls "$APP/Frameworks" | grep -q MapboxCommon
+
+      - name: Package Payload/RouteIQ.app as an ipa
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/RouteIQ.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../RouteIQ-unsigned.ipa Payload)
+          ls -lh build/RouteIQ-unsigned.ipa
+          echo "ipa size: $(du -h build/RouteIQ-unsigned.ipa | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: RouteIQ-unsigned
+          path: native/RouteIQ/build/RouteIQ-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Package.resolved (to commit, so later builds use the same versions)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Package.resolved
+          path: native/RouteIQ/RouteIQ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xcodebuild-log
+          path: native/RouteIQ/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7

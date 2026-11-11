@@ -1,0 +1,82 @@
+# XcodeGen spec for the RouteIQ iPhone app. The .xcodeproj is generated from
+# this file on the build machine (`xcodegen generate`) and never committed.
+#
+# The bundle identifier is a placeholder until the owner picks the real one
+# (native/README.md, owner checklist item 2). Sideloading tools rewrite it.
+name: RouteIQ
+options:
+  bundleIdPrefix: dev.routeiq
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "26.6"
+  minimumXcodeGenVersion: 2.46.0
+packages:
+  # Navigation SDK v3 (guidance, CarPlay) from milestone 3 on. Linked now so
+  # that CI proves it resolves and builds without a secret download token.
+  # Pinned exactly, like Maps: each Navigation release pins one exact Maps
+  # version, so the two move together, by hand.
+  MapboxNavigation:
+    url: https://github.com/mapbox/mapbox-navigation-ios
+    exactVersion: 3.34.2
+  # The Navigation SDK 3.34.2 pins Maps 11.34.2 exactly; the app uses the
+  # Maps SwiftUI API directly for the route map.
+  MapboxMaps:
+    url: https://github.com/mapbox/mapbox-maps-ios
+    exactVersion: 11.34.2
+  # The ported core and the app's plain-data layer (tested on Linux and Windows).
+  RouteIQCore:
+    path: ../RouteIQCore
+targets:
+  RouteIQ:
+    type: application
+    platform: iOS
+    sources:
+      - path: RouteIQ
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.routeiq.app
+        PRODUCT_NAME: RouteIQ
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: "NO"
+    info:
+      path: RouteIQ/Info.plist
+      properties:
+        CFBundleDisplayName: RouteIQ
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The Mapbox public token (pk.), filled from the build setting that
+        # CI writes into Config/Secrets.xcconfig. Never a secret token.
+        MBXAccessToken: $(MBX_ACCESS_TOKEN)
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+    dependencies:
+      - package: MapboxNavigation
+        products:
+          - MapboxNavigationCore
+          - MapboxNavigationUIKit
+      - package: MapboxMaps
+        product: MapboxMaps
+      - package: RouteIQCore
+        products:
+          - RouteIQCore
+          - RouteIQKit
+schemes:
+  RouteIQ:
+    build:
+      targets:
+        RouteIQ: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    management:
+      shared: true
