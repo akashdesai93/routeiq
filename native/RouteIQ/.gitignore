@@ -1,6 +1,8 @@
 # Generated on the build machine by `xcodegen generate`.
 RouteIQ.xcodeproj/
 RouteIQ/Info.plist
+# Packed from public/seed/osm-signals by native/scripts/pack-signal-bundle.mjs.
+Resources/
 # Written by CI from the MAPBOX_PUBLIC_TOKEN secret; never committed.
 Config/Secrets.xcconfig
 build/

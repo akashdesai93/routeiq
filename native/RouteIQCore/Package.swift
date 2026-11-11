@@ -23,6 +23,7 @@ let package = Package(
         .target(name: "RouteIQCore"),
         .target(name: "RouteIQKit", dependencies: ["RouteIQCore"]),
         .testTarget(name: "RouteIQCoreTests", dependencies: ["RouteIQCore"]),
-        .testTarget(name: "RouteIQKitTests", dependencies: ["RouteIQKit", "RouteIQCore"]),
+        // Fixtures/ holds the web app's expected signal counts; the tests read it by path.
+        .testTarget(name: "RouteIQKitTests", dependencies: ["RouteIQKit", "RouteIQCore"], exclude: ["Fixtures"]),
     ]
 )

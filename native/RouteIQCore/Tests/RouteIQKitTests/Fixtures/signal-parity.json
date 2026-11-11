@@ -1,0 +1,647 @@
+{
+ "generatedBy": "native/scripts/signal-parity-reference.mjs",
+ "bundleDataDate": 1794345699000,
+ "sets": [
+  {
+   "name": "directions.ok.json",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -80.8431,
+       35.2271
+      ],
+      [
+       -80.8436,
+       35.2201
+      ],
+      [
+       -80.8402,
+       35.1903
+      ],
+      [
+       -80.8331,
+       35.1611
+      ],
+      [
+       -80.8295,
+       35.1527
+      ]
+     ],
+     "intersections": [
+      {
+       "location": [
+        -80.8431,
+        35.2271
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.8434,
+        35.224
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.8436,
+        35.2201
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.8331,
+        35.1611
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.8295,
+        35.1527
+       ],
+       "signal": false
+      }
+     ],
+     "limitedAccessSpansM": null
+    },
+    {
+     "geometry": [
+      [
+       -80.8431,
+       35.2271
+      ],
+      [
+       -80.8352,
+       35.2143
+      ],
+      [
+       -80.8223,
+       35.1852
+      ],
+      [
+       -80.8262,
+       35.1604
+      ],
+      [
+       -80.8295,
+       35.1527
+      ]
+     ],
+     "intersections": null,
+     "limitedAccessSpansM": null
+    },
+    {
+     "geometry": [
+      [
+       -80.8431,
+       35.2271
+      ],
+      [
+       -80.8514,
+       35.2052
+      ],
+      [
+       -80.8493,
+       35.1741
+      ],
+      [
+       -80.8295,
+       35.1527
+      ]
+     ],
+     "intersections": null,
+     "limitedAccessSpansM": null
+    }
+   ],
+   "missingTileIds": [],
+   "primaryPointCount": 769,
+   "results": [
+    {
+     "signalCount": 1,
+     "signalCoverage": "full",
+     "signalIds": [
+      "osm-172358289"
+     ]
+    },
+    {
+     "signalCount": 6,
+     "signalCoverage": "full",
+     "signalIds": [
+      "osm-172358289",
+      "osm-172291738",
+      "osm-172291747",
+      "osm-2768620765",
+      "osm-172443342",
+      "osm-10778918486"
+     ]
+    },
+    {
+     "signalCount": 6,
+     "signalCoverage": "full",
+     "signalIds": [
+      "osm-172358289",
+      "osm-172380335",
+      "osm-11047517264",
+      "osm-2768346246",
+      "osm-172463935",
+      "osm-9276007031"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "directions.corridor.json",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -80.85,
+       35.03
+      ],
+      [
+       -80.85,
+       35.0275
+      ],
+      [
+       -80.85,
+       35.025
+      ],
+      [
+       -80.85,
+       35.0225
+      ],
+      [
+       -80.85,
+       35.02
+      ],
+      [
+       -80.85,
+       35.0175
+      ],
+      [
+       -80.85,
+       35.015
+      ],
+      [
+       -80.85,
+       35.0125
+      ],
+      [
+       -80.85,
+       35.01
+      ],
+      [
+       -80.85,
+       35.0075
+      ],
+      [
+       -80.85,
+       35.005
+      ],
+      [
+       -80.85,
+       35.0025
+      ],
+      [
+       -80.85,
+       35
+      ],
+      [
+       -80.85,
+       34.9975
+      ],
+      [
+       -80.85,
+       34.995
+      ],
+      [
+       -80.85,
+       34.9925
+      ],
+      [
+       -80.85,
+       34.99
+      ],
+      [
+       -80.85,
+       34.9875
+      ],
+      [
+       -80.85,
+       34.985
+      ]
+     ],
+     "intersections": [
+      {
+       "location": [
+        -80.85,
+        35.03
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.85,
+        35.025
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.85,
+        35.0175
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.85,
+        35.0125
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.85,
+        35.0075
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.85,
+        35
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.85,
+        34.995
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.85,
+        34.99
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.85,
+        34.985
+       ],
+       "signal": false
+      }
+     ],
+     "limitedAccessSpansM": []
+    }
+   ],
+   "missingTileIds": [],
+   "primaryPointCount": 243,
+   "results": [
+    {
+     "signalCount": 1,
+     "signalCoverage": "full",
+     "signalIds": [
+      "osm-172179539"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "directions.freeway.json",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -80.84,
+       35.2
+      ],
+      [
+       -80.84,
+       35.201
+      ],
+      [
+       -80.84,
+       35.202
+      ],
+      [
+       -80.84,
+       35.203
+      ],
+      [
+       -80.84,
+       35.204
+      ],
+      [
+       -80.84,
+       35.205
+      ],
+      [
+       -80.84,
+       35.206
+      ],
+      [
+       -80.84,
+       35.207
+      ],
+      [
+       -80.84,
+       35.208
+      ]
+     ],
+     "intersections": [
+      {
+       "location": [
+        -80.84,
+        35.2
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.201
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.84,
+        35.202
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.203
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.205
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.206
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.207
+       ],
+       "signal": true
+      },
+      {
+       "location": [
+        -80.84,
+        35.208
+       ],
+       "signal": false
+      }
+     ],
+     "limitedAccessSpansM": [
+      [
+       222.3901604665475,
+       667.1704814012228
+      ]
+     ]
+    },
+    {
+     "geometry": [
+      [
+       -80.84,
+       35.2
+      ],
+      [
+       -80.841,
+       35.204
+      ],
+      [
+       -80.84,
+       35.208
+      ]
+     ],
+     "intersections": [
+      {
+       "location": [
+        -80.84,
+        35.2
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.841,
+        35.204
+       ],
+       "signal": false
+      },
+      {
+       "location": [
+        -80.84,
+        35.208
+       ],
+       "signal": false
+      }
+     ],
+     "limitedAccessSpansM": []
+    }
+   ],
+   "missingTileIds": [],
+   "primaryPointCount": 769,
+   "results": [
+    {
+     "signalCount": 0,
+     "signalCoverage": "full",
+     "signalIds": []
+    },
+    {
+     "signalCount": 0,
+     "signalCoverage": "full",
+     "signalIds": []
+    }
+   ]
+  },
+  {
+   "name": "leaves-carolinas",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -80.8431,
+       35.2271
+      ],
+      [
+       -81.5,
+       34.9
+      ],
+      [
+       -84.388,
+       33.749
+      ]
+     ],
+     "intersections": null,
+     "limitedAccessSpansM": null
+    }
+   ],
+   "missingTileIds": [
+    "-828_343",
+    "-829_343",
+    "-830_342",
+    "-830_343",
+    "-831_342",
+    "-831_343",
+    "-832_342",
+    "-833_341",
+    "-833_342",
+    "-834_341",
+    "-835_340",
+    "-835_341",
+    "-836_340",
+    "-836_341",
+    "-837_340",
+    "-838_339",
+    "-838_340",
+    "-839_339",
+    "-840_338",
+    "-840_339",
+    "-841_338",
+    "-841_339",
+    "-842_338",
+    "-843_337",
+    "-843_338",
+    "-844_337"
+   ],
+   "primaryPointCount": 1208,
+   "results": [
+    {
+     "signalCount": 7,
+     "signalCoverage": "partial",
+     "signalIds": [
+      "osm-172358289",
+      "osm-172291716",
+      "osm-172144084",
+      "osm-172574351",
+      "osm-172391794",
+      "osm-172251468",
+      "osm-114527227"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "clipped--820_334",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -81.9167458,
+       33.4930372
+      ],
+      [
+       -81.9602785,
+       33.4973104
+      ]
+     ],
+     "intersections": [],
+     "limitedAccessSpansM": null
+    }
+   ],
+   "missingTileIds": [
+    "-820_334"
+   ],
+   "primaryPointCount": 28,
+   "results": [
+    {
+     "signalCount": 2,
+     "signalCoverage": "partial",
+     "signalIds": [
+      "osm-109406368",
+      "osm-11115286909"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "clipped--822_335",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -82.1517126,
+       33.5495393
+      ],
+      [
+       -82.1604711,
+       33.5570469
+      ]
+     ],
+     "intersections": [],
+     "limitedAccessSpansM": null
+    }
+   ],
+   "missingTileIds": [
+    "-822_335"
+   ],
+   "primaryPointCount": 2,
+   "results": [
+    {
+     "signalCount": 2,
+     "signalCoverage": "partial",
+     "signalIds": [
+      "osm-67845962",
+      "osm-67845980"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "clipped--820_335",
+   "routes": [
+    {
+     "geometry": [
+      [
+       -81.9358385,
+       33.5629218
+      ],
+      [
+       -81.9591574,
+       33.5025649
+      ]
+     ],
+     "intersections": [],
+     "limitedAccessSpansM": null
+    }
+   ],
+   "missingTileIds": [
+    "-820_335"
+   ],
+   "primaryPointCount": 54,
+   "results": [
+    {
+     "signalCount": 2,
+     "signalCoverage": "partial",
+     "signalIds": [
+      "osm-109392144",
+      "osm-11115286913"
+     ]
+    }
+   ]
+  }
+ ]
+}

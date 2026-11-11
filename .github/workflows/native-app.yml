@@ -17,12 +17,16 @@ on:
     branches: [main]
     paths:
       - 'native/RouteIQ/**'
+      - 'native/scripts/**'
+      - 'public/seed/osm-signals/**'
       - 'native/RouteIQCore/Package.swift'
       - 'native/RouteIQCore/Sources/**'
       - '.github/workflows/native-app.yml'
   pull_request:
     paths:
       - 'native/RouteIQ/**'
+      - 'native/scripts/**'
+      - 'public/seed/osm-signals/**'
       - 'native/RouteIQCore/Package.swift'
       - 'native/RouteIQCore/Sources/**'
       - '.github/workflows/native-app.yml'
@@ -82,6 +86,12 @@ jobs:
             echo "::warning::No MAPBOX_PUBLIC_TOKEN secret: the app will build but cannot load maps or routes."
           fi
 
+      - name: Pack the signal tiles into the app's resources
+        run: |
+          node --version
+          node ../scripts/pack-signal-bundle.mjs ../../public/seed/osm-signals Resources
+          ls -l Resources
+
       - name: Generate the Xcode project
         run: xcodegen generate
 
@@ -137,6 +147,10 @@ jobs:
           ls "$APP/Frameworks"
           echo "Resource bundles:"
           ls "$APP" | grep '\.bundle$' || true
+          # The signal data and its license must ship together.
+          test -s "$APP/osm-signals.json"
+          test -s "$APP/osm-signals-LICENSE.md"
+          ls -l "$APP/osm-signals.json" "$APP/osm-signals-LICENSE.md"
           ls "$APP/Frameworks" | grep -q MapboxCoreMaps
           ls "$APP/Frameworks" | grep -q MapboxCommon
 

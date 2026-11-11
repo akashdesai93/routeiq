@@ -21,6 +21,8 @@ same JSON fixtures straight from `tests/fixtures`.
 | `Format.swift` | `format.ts`, `facts.ts` | `routeFacts.test.ts`, `signals.test.ts` (formatSignalCount) |
 | `TestPoints.swift` | `testPoints.ts` | `core.test.ts` |
 | `Directions.swift`, `JSONValue.swift` | `providers/mapbox/adapter.ts` | `mapbox.test.ts` (parseDirections) |
+| `RouteIQKit/DirectionsClient.swift` | `providers/mapbox/client.ts` (fetchDirections) | `mapbox.test.ts` (fetchDirections), with a fake transport |
+| `RouteIQKit/SignalBundle.swift` | `providers/osm/bundle.ts`, `bundleLayer.ts`, `signalData.ts` (bundle only) | Parity: `Tests/RouteIQKitTests/Fixtures/signal-parity.json`, the web app's own counts on the real bundle |
 | `JS.swift` | (none) | JavaScript number and string semantics the TypeScript relies on |
 
 Not ported yet:
@@ -28,6 +30,19 @@ Not ported yet:
 - `places.ts` and `search.ts`: saved places and search sessions, needed when the app gets a Plan
   screen.
 - the web app's live-drive modules being added on `main`.
+
+## The signal parity reference
+
+`Tests/RouteIQKitTests/Fixtures/signal-parity.json` holds the signal counts the web app's own
+TypeScript gives on the bundled tiles. That covers the three Directions fixtures, a route that
+leaves the Carolinas, and three clipped edge tiles. `SignalBundleParityTests` requires the Swift
+counts to match exactly. The test also checks the bundle's data date, so it fails when
+`public/seed/osm-signals` is rebuilt. Regenerate the reference then, from the repository root,
+with Node 24:
+
+```bash
+node native/scripts/signal-parity-reference.mjs > native/RouteIQCore/Tests/RouteIQKitTests/Fixtures/signal-parity.json
+```
 
 ## Running the tests
 
