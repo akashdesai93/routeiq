@@ -549,8 +549,10 @@ function checked(
       positionAlongM: sent.alongM,
       speedMps: tracking.speedMps,
       candidates: routes,
-      // The tracker's verdict, not one reading: only a search for a new route says "off".
-      offRouteM: sent.purpose === 'replan' ? Math.max(sent.distanceFromRouteM, rerouteOffRouteM + 1) : 0,
+      // The tracker's verdict, not one reading: only a search for a new route says "off",
+      // and only while the car is still off the line when it is answered. Answered once
+      // the car is back on, it goes through the usual rules like any check.
+      offRouteM: sent.purpose === 'replan' && tracking.offFixes > 0 ? Math.max(sent.distanceFromRouteM, rerouteOffRouteM + 1) : 0,
       baseline,
     },
     opts.reroute,
@@ -707,6 +709,8 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           guidance: armGuidance(undo.route.guidance, back.alongRouteM, false),
           eta: undo.eta,
           turn: null,
+          // The check that is out is cancelled below; its answer will never come.
+          request: null,
           switchBanner: null,
           undo: null,
           switches: state.switches.slice(0, -1),

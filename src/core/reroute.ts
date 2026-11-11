@@ -1094,6 +1094,8 @@ export function declineRoute(
   return {
     ...state,
     pending: null,
+    // Counting lost polls is a confirmation in progress too: start it again.
+    lostPolls: 0,
     declined: [...(state.declined ?? []), { geometry: geometryAhead, untilSec }],
   }
 }

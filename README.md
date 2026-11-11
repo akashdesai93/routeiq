@@ -796,7 +796,9 @@ together with the place the request was sent from. Off the route (the tracker's
 verdict, never one fix) a new route is asked for at once from the device's own
 position, whatever was asked a moment ago; if the car is still off after that (a car
 park), again only every 30 seconds and not while it stands still. Five requests are
-kept in reserve for that. Signal counts come through the drive's once-only sources
+kept in reserve for that. If the car is back on the route line by the time that answer
+comes, the answer is taken like any check (minimum saving, confirmation, cooldown, lead),
+not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
 
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,

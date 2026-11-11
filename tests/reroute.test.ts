@@ -1051,5 +1051,12 @@ describe('a route the driver turned down', () => {
     expect(first.code).toBe('confirming')
     expect(offer(120, first.nextState, 1500)).toMatchObject({ action: 'switch', code: 'faster-route' })
   })
+
+  it('drops a route-lost count in progress, so a lost road needs the full count again (#28)', () => {
+    const b = candidate('B', at(900, 0), 1500)!
+    const declined = declineRoute({ ...INITIAL_REROUTE_STATE, lostPolls: 2 }, b.geometry, 600)
+    expect(declined.lostPolls).toBe(0)
+    expect(declined.pending).toBeNull()
+  })
 })
 
