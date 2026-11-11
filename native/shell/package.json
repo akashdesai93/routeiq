@@ -1,0 +1,22 @@
+{
+  "name": "routeiq-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RouteIQ iPhone shell: the web app in an installable Capacitor app with native location and speech, so a drive continues while the phone is locked.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "test": "node --test",
+    "ios:generate": "node scripts/generate-ios.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.0",
+    "@capacitor/ios": "8.6.0",
+    "routeiq-shell-native": "file:shell-native"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "esbuild": "0.28.2",
+    "plist": "3.1.1"
+  }
+}

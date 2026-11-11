@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CURRENT_LOCATION_ID,
   DEFAULT_TRIP,
@@ -52,9 +52,11 @@ interface AppProps {
   status?: TokenStatus
   /** Swapped out in tests for a store in memory. */
   placeStore?: TextStore
+  /** Shown in the top bar, after the name. The iPhone shell puts its "Change token" button here. */
+  barExtra?: ReactNode
 }
 
-export default function App({ status = tokenStatus, placeStore = deviceStore }: AppProps) {
+export default function App({ status = tokenStatus, placeStore = deviceStore, barExtra = null }: AppProps) {
   const places = usePlaceBook(placeStore)
   // The last trip, when this device has one; otherwise the built-in trip.
   const [pins, setPins] = useState<Pins>(() =>
@@ -183,6 +185,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
     <div className={live.active ? 'app live' : 'app'}>
       <header className="bar">
         <strong>RouteIQ</strong>
+        {barExtra}
       </header>
       {token !== null ? (
         <div className="main">
