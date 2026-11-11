@@ -9,8 +9,8 @@ test('I open the app and get ranked routes with light counts and one Recommended
 
   const routes = page.locator('ol.routes > li')
   await expect(routes).toHaveCount(3)
-  await expect(page.getByText('Recommended')).toHaveCount(1)
-  await expect(routes.first()).toContainText('Recommended')
+  await expect(page.locator('.route-badge', { hasText: 'Recommended' })).toHaveCount(1)
+  await expect(routes.first().locator('.route-badge')).toHaveText('Recommended')
   // Every route has a whole light count: a number, not "unknown", "partial" or a guess.
   for (const signals of await page.locator('.route-signals').allTextContents()) expect(signals).toMatch(/^\d+ signals?$/)
   // Ranked fastest first.

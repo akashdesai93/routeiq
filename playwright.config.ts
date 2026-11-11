@@ -1,8 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import { APP_PORT, NO_TOKEN_PORT } from './e2e/ports.ts'
 
 // End-to-end scenarios: the production build in headless Chromium, fully
 // offline (see e2e/harness.ts). `npm run e2e` builds and runs them.
-// Ports 4317 and 4318, so a dev server on 5173 is never in the way.
+// Each checkout serves the test builds on its own pair of ports (e2e/ports.ts),
+// so parallel runs in other worktrees and the dev server on 5173 never collide.
 
 export default defineConfig({
   testDir: 'e2e',
@@ -19,7 +21,7 @@ export default defineConfig({
   ],
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: 'http://localhost:4317',
+    baseURL: `http://localhost:${APP_PORT}`,
     viewport: { width: 1280, height: 800 },
     video: 'on',
     trace: 'retain-on-failure',
@@ -29,13 +31,13 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'npx vite preview --outDir dist-e2e --port 4317 --strictPort',
-      url: 'http://localhost:4317',
+      command: `npx vite preview --outDir dist-e2e --port ${APP_PORT} --strictPort`,
+      url: `http://localhost:${APP_PORT}`,
       reuseExistingServer: false,
     },
     {
-      command: 'npx vite preview --outDir dist-e2e-notoken --port 4318 --strictPort',
-      url: 'http://localhost:4318',
+      command: `npx vite preview --outDir dist-e2e-notoken --port ${NO_TOKEN_PORT} --strictPort`,
+      url: `http://localhost:${NO_TOKEN_PORT}`,
       reuseExistingServer: false,
     },
   ],
