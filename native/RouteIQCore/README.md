@@ -66,10 +66,24 @@ All are about types, not about decisions:
   given; the TypeScript rounds one.
 - **Route identity.** Swift structs are values, so `rankRoutes` works with positions instead of
   object identity. The result is the same, including for two equal routes.
-- **`tileIdAt` on a non-finite coordinate** returns `"NaN_NaN"` instead of trapping. Valid
-  coordinates are unaffected.
-- **`formatLatLng`** uses `printf`-style rounding. It differs from `toFixed(4)` only on an exact
-  binary tie at the fifth decimal, which no real coordinate is. A negative zero would print as
-  `-0.0000`.
 - **The Directions parser** takes a `JSONValue`, which keeps `true` and `1` apart exactly like
   JavaScript `typeof`. The rule "only a literal `true` is a traffic signal" holds.
+  `Directions.parse(data:)` decodes through `JSONDecoder`, which is stricter than `JSON.parse`. A
+  number too large for a Double (`1e400`) or a lone surrogate escape (`"\ud800"`) makes the whole
+  body malformed. JavaScript would read it as Infinity, or keep the odd string. Mapbox sends
+  neither.
+- **`hypot`** comes from the platform C library, not V8's own algorithm. The two can differ in the
+  last bit, which matters only for a point within a billionth of a meter of a tolerance edge.
+  Tests compare such distances with an accuracy, as the Vitest suites do with `toBeCloseTo`.
+
+An independent review checked these edge cases against the TypeScript, and the Swift now matches:
+
+- `Math.min` and `Math.max` propagating NaN
+- `tileIdAt` on infinite or huge coordinates, one axis at a time
+- leading zeros in a tile id
+- `toFixed(4)` rounding ties up, with no sign on negative zero
+- `Number#toString` for large and small numbers
+- Date months in the proleptic Gregorian calendar
+- string keys compared by UTF-16 code units
+- poll counters that cannot overflow
+- grid cells that cannot overflow for an absurd tolerance
