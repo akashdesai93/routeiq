@@ -584,6 +584,33 @@ fresh route ("current route is no longer offered"); further on the same road the
 was exact at every check. Whether Mapbox really drops the route there or the 10 m
 path match is too strict for that stretch has not been established.
 
+## Side-street probing (planned)
+
+Mapbox Directions returns at most three routes, so a faster cut-through outside them is
+never seen. Step 11 widens the search with via points: `selectViaPoints` (src/core/probe.ts,
+step 11a, pure) picks a few points just off the fastest route, and step 11b will ask
+Mapbox for origin → via → destination and rank the results like any other route, so a
+side street wins only by ETA. Nothing in the app calls it yet.
+
+How the points are chosen: the fastest candidate's surface-street stretches (everything
+outside its freeway spans, with the first and last kilometer cut off) are taken longest
+first, and each is probed at its middle, square to the route, on both sides. A point that
+lands near any known route is moved further out or dropped, since it would only repeat
+that route. The first side of every stretch comes before any second side, so a small
+budget spreads over the trip. Unknown road kinds count as surface street. Freeway-only
+trips and trips under 3 km get no points. RouteCandidate has no congestion or
+per-segment times yet, so the longest stretch stands in for the slowest.
+
+| `DEFAULT_PROBE_OPTIONS` | Default | Meaning |
+| --- | --- | --- |
+| `maxPoints` | 3 | Most via points returned (each one is a Directions request later) |
+| `minTripM` | 3000 m | Shorter trips get no probes |
+| `endpointClearanceM` | 1000 m | No probing this close to the origin or destination |
+| `minStretchM` | 1500 m | Shortest surface-street stretch worth probing |
+| `offsetsM` | 500, 800 m | Distances from the route tried per side, nearest first |
+| `clearOfRoutesM` | 250 m | A point this close to any known route is not used |
+| `headingWindowM` | 150 m | Route heading at the probe spot is taken over ± this |
+
 ## Live drive
 
 "Start drive" at the top of the route list is the one tap. After it nothing needs

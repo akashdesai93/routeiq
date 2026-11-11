@@ -191,6 +191,13 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       budget is rationed like the drive's: a few probes per plan and per reroute check,
       and none on freeway-only trips. Probed routes go through the same ranking and
       reroute rules, so a side street wins only by ETA.
+      11a (done, Nov 11, 2026): `selectViaPoints` in `src/core/probe.ts` picks up to
+      three points 500 or 800 m to either side of the fastest route's longest
+      surface-street stretches, clear of known routes and of both ends, with every
+      threshold in `DEFAULT_PROBE_OPTIONS` (README, Side-street probing). Open for 11b:
+      the Directions request with a via, the `source: 'probe'` tag and the budget.
+      RouteCandidate has no congestion annotation, so "slowest" is approximated by
+      "longest"; adding `annotations=congestion` to the adapter would sharpen it.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.
