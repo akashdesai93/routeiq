@@ -166,6 +166,13 @@ export {
   type TrackingState,
 } from './tracking.ts'
 export {
+  DEFAULT_PROBE_OPTIONS,
+  selectViaPoints,
+  type ProbeOptions,
+  type ProbeSide,
+  type ViaPoint,
+} from './probe.ts'
+export {
   resolveSelectedId,
   SAME_ROUTE_TOLERANCE_M,
   sameRouteGeometry,
