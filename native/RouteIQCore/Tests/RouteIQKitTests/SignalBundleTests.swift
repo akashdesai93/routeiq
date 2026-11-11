@@ -103,6 +103,35 @@ final class SignalBundleTests: XCTestCase {
         XCTAssertEqual(Format.formatSignalCount(counted.signalCount, counted.signalCoverage), "0 signals")
     }
 
+    func testACoveredTileWhoseFileCannotBeReadIsMissingNotZero() throws {
+        let index = Data(#"{"version":2,"dataDate":0,"covered":{"352":[-810,-808]},"files":{"352":[-809,-809]}}"#.utf8)
+        let broken = Data(#"{"tileId":"-809_352","nodes":"not a list"}"#.utf8)
+        let bundle = try SignalBundle(indexJSON: index, tileFiles: [broken])
+        // A route inside -809_352: the index promises signals there, but none could be read.
+        let route = RouteCandidate(id: "r", geometry: [LngLat(-80.85, 35.25), LngLat(-80.84, 35.26)], durationSec: 60, typicalDurationSec: 60, distanceM: 1000, intersections: [])
+        let loaded = bundle.signalData(for: [route])
+        XCTAssertTrue(loaded.missingTileIds.contains("-809_352"))
+        XCTAssertFalse(loaded.data.primaryTileIds.contains("-809_352"))
+        let counted = Signals.withSignalCounts([route], loaded.data).routes[0]
+        XCTAssertEqual(counted.signalCoverage, .partial)
+        XCTAssertEqual(Format.formatSignalCount(counted.signalCount, counted.signalCoverage), "Signals: unknown")
+    }
+
+    func testANodeOnATileEdgeInTwoFilesIsOneSignal() throws {
+        // groupIntoTiles writes a node exactly on an edge into both tiles.
+        let index = Data(#"{"version":2,"dataDate":0,"covered":{"352":[-810,-809]},"files":{"352":[-810,-809]}}"#.utf8)
+        let west = Data(#"{"tileId":"-810_352","fetchedAt":0,"nodes":[{"id":7,"lng":-80.9,"lat":35.25}]}"#.utf8)
+        let east = Data(#"{"tileId":"-809_352","fetchedAt":0,"nodes":[{"id":7,"lng":-80.9,"lat":35.25}]}"#.utf8)
+        let bundle = try SignalBundle(indexJSON: index, tileFiles: [west, east])
+        let route = RouteCandidate(id: "r", geometry: [LngLat(-80.95, 35.25), LngLat(-80.85, 35.25)], durationSec: 60, typicalDurationSec: 60, distanceM: 9000)
+        let loaded = bundle.signalData(for: [route])
+        XCTAssertEqual(loaded.missingTileIds, [])
+        XCTAssertEqual(loaded.data.primary.map(\.id), ["osm-7"])
+        let counted = Signals.withSignalCounts([route], loaded.data).routes[0]
+        XCTAssertEqual(counted.signalCount, 1)
+        XCTAssertEqual(counted.signalCoverage, .full)
+    }
+
     func testRefusesSomethingThatIsNotABundle() {
         XCTAssertThrowsError(try SignalBundle(packed: Data("{}".utf8)))
         XCTAssertThrowsError(try SignalBundle(packed: Data(#"{"version":2,"index":{},"tiles":[]}"#.utf8)))

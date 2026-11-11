@@ -183,8 +183,16 @@ public struct SignalBundle: Sendable {
         for id in needed {
             switch coverage(id) {
             case .covered:
-                loaded.append(id)
-                if let tile = tiles[id] { withNodes.append(tile) }
+                if !files.has(id) {
+                    // Inside the covered area, no file means no signals: that is knowledge, not a gap.
+                    loaded.append(id)
+                } else if let tile = tiles[id] {
+                    loaded.append(id)
+                    withNodes.append(tile)
+                } else {
+                    // Listed in the index but its file could not be read: missing, as in the web app.
+                    missing.append(id)
+                }
             case .clipped:
                 missing.append(id)
                 if let tile = tiles[id] { partial.append(tile) }
