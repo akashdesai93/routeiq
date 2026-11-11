@@ -8,7 +8,8 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
 2. **Done: routes.** Origin and destination as draggable pins (swap, reset; no address
    search yet); Mapbox Directions API, `driving-traffic` profile with alternatives
    (up to two, so three routes at most). A Mapbox adapter in `src/providers/mapbox`
-   turns the response into `RouteCandidate`. Fetches on drag end only, no polling.
+   turns the response into `RouteCandidate`. Fetches on drag end only; polling came
+   with the simulated drive (step 6).
 3. **Done: route facts.** Traffic-aware ETA, distance, and difference from typical time
    (null when the API gives no typical duration, never guessed). The default selection
    was the lowest ETA until ranking (step 5) replaced it.
@@ -76,15 +77,39 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    A signal count whose coverage is not full is unknown to the ranking.
    The top-ranked route is the default selection and is marked "Recommended"; each
    route shows the reason for its place.
-6. **Simulated rerouting.** Configurable polling interval, minimum time saved,
-   switching cooldown, and no switch when the new route needs a maneuver too soon.
-   Signal data is ready for it: counting a refetched route costs no request while its
-   tiles are in memory, the bundle or the cache, and a tile that failed is not asked
-   for again until its wait is over (30 s, doubling to 8 minutes, in
-   `createTileSource`), on top of the Overpass client's own pause. A poll must call
-   `loadSignalData` without `retryFailed`; only the "Retry signals" button sets it.
-7. **Synthetic tests.** Oscillating ETAs, no alternatives, missing traffic data,
-   duplicate signals, late maneuvers.
+6. **Done: simulated rerouting.** `src/core/reroute.ts` is the switching brain: a pure
+   state machine, `decideReroute(state, observation, options)`, with the time passed
+   in and every threshold in `DEFAULT_REROUTE_OPTIONS` (minimum saving 120 s and 5%,
+   two confirming polls, 300 s cooldown, 600 s no-return at twice the saving, lead
+   400 m / 20 s / 1200 m on freeway, three polls before leaving a route no longer
+   offered, 50 m off route). The current route is matched to a fresh candidate by
+   path, never by id. Every decision has a sentence that can be spoken. In the web
+   app "Simulate drive" moves a car along the selected route at 1x, 5x or 20x, polls
+   Mapbox from its position with its heading (`bearings`) every 60 s of simulated
+   time, at most one request per 5 real seconds and 60 per drive, switches by itself
+   and logs each decision. A development-only what-if control adds a simulated delay
+   to the current route so a switch can be watched. Polls never pass `retryFailed`,
+   and `askOnce` holds a tile outside the bundle to one attempt per session.
+   Open for the native app: the engine expects a position already matched to the
+   route (distance along it) and a sane speed. Real GPS needs map matching, an
+   off-route test that waits for a few fixes before trusting a jump, smoothed speed,
+   and the position each query was sent from kept with its answer (the engine
+   forgives 50 m). The off-route rule switches at once with no lead check, on the
+   assumption that the provider's route from the true position is drivable. After a
+   switch the engine drives the candidate's line as fetched; a native app should
+   hand the chosen route to the navigation SDK and report progress along that.
+   Lead distances are along the route to the turn-off and take no account of the
+   lane the driver is in. With no typical duration on a route the engine stays;
+   Mapbox always sent one on `driving-traffic` in testing.
+7. **Done: synthetic tests.** `tests/reroute.test.ts` runs scripted drives through the
+   engine on a made-up road network with a fake clock, no network: oscillating ETAs
+   (no switch), a steady 3 minute gain (one switch after two polls), a gain inside
+   the lead distance (refused, then gone), cooldown, no return, no alternatives,
+   missing traffic data, failed polls, current route not among the candidates, off
+   route, freeway lead, a tiny remaining trip, duplicate signals and partial coverage,
+   determinism, and 40 seeded random drives in which switches are never closer
+   together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
+   request budget, the what-if delay and a whole simulated drive offline.
 8. **Route hand-off** (`src/core/handoff.ts`). After you accept a route, open it in
    another navigation app:
    - **Google Maps (primary).** Pick waypoints along the accepted route that pin

@@ -95,3 +95,69 @@ export function pointToSegment(p: XY, a: XY, b: XY): { distanceM: number; t: num
 export function allWithin(points: readonly LngLat[], [west, south, east, north]: BBox): boolean {
   return points.every(([lng, lat]) => lng >= west && lng <= east && lat >= south && lat <= north)
 }
+
+/** Compass heading of the straight line from A to B: degrees clockwise from true north, 0 to 360. */
+export function bearingDeg(a: LngLat, b: LngLat): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLng = toRad(b[0] - a[0])
+  const y = Math.sin(dLng) * Math.cos(toRad(b[1]))
+  const x =
+    Math.cos(toRad(a[1])) * Math.sin(toRad(b[1])) -
+    Math.sin(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.cos(dLng)
+  const deg = (Math.atan2(y, x) * 180) / Math.PI
+  return (deg + 360) % 360
+}
+
+/** A place on a polyline: the point itself, which segment it is on, and the heading of that segment. */
+export interface PointOnLine {
+  readonly point: LngLat
+  /** Index of the vertex at or before the point: the point lies on the segment from it to the next vertex. */
+  readonly index: number
+  /** Heading of travel there, degrees clockwise from true north (0 when the line has no length). */
+  readonly bearingDeg: number
+}
+
+/**
+ * The point `alongM` meters from the start of a polyline (the same meters as
+ * alongRouteM). A distance below 0 gives the start and one past the end gives
+ * the end. Null when the line has no point. The point is interpolated
+ * straight between two vertices, exact enough between the vertices of a road.
+ */
+export function pointAtDistance(line: readonly LngLat[], alongM: number): PointOnLine | null {
+  const first = line[0]
+  if (first === undefined) return null
+  const along = alongRouteM(line)
+  const target = Math.min(Math.max(Number.isFinite(alongM) ? alongM : 0, 0), along.at(-1)!)
+  // The first segment with a length that reaches the target.
+  let index = 0
+  for (let i = 0; i < line.length - 1; i++) {
+    if (along[i + 1]! >= target && along[i + 1]! > along[i]!) {
+      index = i
+      break
+    }
+  }
+  const a = line[index]!
+  const b = line[index + 1]
+  if (b === undefined) return { point: a, index, bearingDeg: 0 }
+  const length = along[index + 1]! - along[index]!
+  const t = length > 0 ? Math.min(1, Math.max(0, (target - along[index]!) / length)) : 0
+  return {
+    point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+    index,
+    bearingDeg: length > 0 ? bearingDeg(a, b) : 0,
+  }
+}
+
+/**
+ * The rest of a polyline from `alongM` meters after its start: the point
+ * there (see pointAtDistance), then every later vertex. Always at least one
+ * point for a line that has one; an empty line gives an empty line.
+ */
+export function lineFrom(line: readonly LngLat[], alongM: number): LngLat[] {
+  const at = pointAtDistance(line, alongM)
+  if (at === null) return []
+  const rest = line.slice(at.index + 1)
+  const next = rest[0]
+  // Standing exactly on a vertex: do not list it twice.
+  return next !== undefined && next[0] === at.point[0] && next[1] === at.point[1] ? rest : [at.point, ...rest]
+}

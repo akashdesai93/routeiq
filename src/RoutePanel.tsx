@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   delayVsTypicalSec,
   formatDelay,
@@ -25,6 +26,8 @@ interface RoutePanelProps {
   onRetrySignals: () => void
   /** How old the OpenStreetMap signal data is, in milliseconds since 1970. Null or left out when unknown. */
   signalDataDate?: number | null
+  /** Shown under the route list: the simulated drive controls. */
+  children?: ReactNode
 }
 
 /**
@@ -58,6 +61,7 @@ export function RoutePanel({
   signalsError,
   onRetrySignals,
   signalDataDate = null,
+  children,
 }: RoutePanelProps) {
   const dataMonth = formatDataMonth(signalDataDate)
   return (
@@ -98,6 +102,7 @@ export function RoutePanel({
           </li>
         ))}
       </ol>
+      {children}
       {!loading && !error && ranked.length > 0 && (
         <p className="hint">Times include live traffic. Drag a pin to change the trip.</p>
       )}

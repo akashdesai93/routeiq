@@ -10,6 +10,7 @@ import {
 } from '../core/index.ts'
 import { tokenErrorHelp } from '../config.ts'
 import { SIGNAL_DATA_ATTRIBUTION } from './attribution.ts'
+import { driveFeatures, type DriveOverlay } from './driveFeatures.ts'
 import { PIN_COLOR, PIN_NAME, PIN_ROLES, type PinRole } from './pins.ts'
 import { routeFeatures } from './routeFeatures.ts'
 import { signalFeatures } from './signalFeatures.ts'
@@ -21,6 +22,8 @@ interface MapViewProps {
   selectedRouteId: string | null
   /** Signals on the selected route, drawn as small dots. */
   signals: readonly RouteSignal[]
+  /** A simulated drive to draw: the car, the route being driven and the turn-off of a switch. Null or left out for none. */
+  drive?: DriveOverlay | null
   /** Called once when a drag ends, never while the pin is moving. */
   onPinMove: (role: PinRole, position: LngLat) => void
   onSelectRoute: (id: string) => void
@@ -29,6 +32,7 @@ interface MapViewProps {
 const ROUTE_SOURCE = 'routes'
 const HIT_LAYER = 'routes-hit'
 const SIGNAL_SOURCE = 'route-signals'
+const DRIVE_SOURCE = 'drive'
 const FIT_PADDING = 80
 
 function pinLabel(role: PinRole, place: Place): string {
@@ -36,7 +40,8 @@ function pinLabel(role: PinRole, place: Place): string {
 }
 
 /**
- * Thin Mapbox GL JS wrapper. It draws the pins, routes and signals it is given and
+ * Thin Mapbox GL JS wrapper. It draws the pins, routes and signals it is given (and a
+ * simulated drive, when there is one) and
  * reports drags and clicks upward; it decides nothing. Following Mapbox's
  * React guide, the map is created once in an effect and removed on unmount.
  */
@@ -46,6 +51,7 @@ export function MapView({
   routes,
   selectedRouteId,
   signals,
+  drive = null,
   onPinMove,
   onSelectRoute,
 }: MapViewProps) {
@@ -178,6 +184,41 @@ export function MapView({
       map.on('mouseleave', HIT_LAYER, () => {
         map.getCanvas().style.cursor = ''
       })
+      // The simulated drive, above everything else: the route being driven, the
+      // turn-off of a switch (hollow while the switch is still waiting), and the car.
+      map.addSource(DRIVE_SOURCE, { type: 'geojson', data: driveFeatures(null) })
+      map.addLayer({
+        id: 'drive-route',
+        type: 'line',
+        source: DRIVE_SOURCE,
+        filter: ['==', ['get', 'kind'], 'route'],
+        layout,
+        paint: { 'line-color': '#1a7f37', 'line-width': 4 },
+      })
+      map.addLayer({
+        id: 'drive-turn',
+        type: 'circle',
+        source: DRIVE_SOURCE,
+        filter: ['==', ['get', 'kind'], 'turn'],
+        paint: {
+          'circle-radius': 8,
+          'circle-color': ['case', ['get', 'pending'], '#ffffff', '#bf8700'],
+          'circle-stroke-color': '#bf8700',
+          'circle-stroke-width': 3,
+        },
+      })
+      map.addLayer({
+        id: 'drive-car',
+        type: 'circle',
+        source: DRIVE_SOURCE,
+        filter: ['==', ['get', 'kind'], 'car'],
+        paint: {
+          'circle-radius': 7,
+          'circle-color': '#1f2328',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 3,
+        },
+      })
       setReadyMap(map)
     })
 
@@ -227,6 +268,12 @@ export function MapView({
     const source = readyMap.getSource<mapboxgl.GeoJSONSource>(SIGNAL_SOURCE)
     source?.setData(signalFeatures(signals))
   }, [readyMap, signals])
+
+  useEffect(() => {
+    if (!readyMap) return
+    const source = readyMap.getSource<mapboxgl.GeoJSONSource>(DRIVE_SOURCE)
+    source?.setData(driveFeatures(drive))
+  }, [readyMap, drive])
 
   return (
     <>

@@ -380,6 +380,29 @@ describe('buildDirectionsUrl', () => {
     expect(buildDirectionsUrl([NaN, 35], SOUTHPARK.position, TOKEN)).toBeNull()
     expect(buildDirectionsUrl(UPTOWN_CHARLOTTE.position, [-80, 91], TOKEN)).toBeNull()
   })
+
+  it('sends no bearings for a trip planned from a pin', () => {
+    expect(new URL(url).searchParams.has('bearings')).toBe(false)
+    expect(url).not.toContain('depart_at')
+    const odd = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { originHeadingDeg: NaN })!
+    expect(odd).toBe(url)
+  })
+
+  it('sends the heading of a moving vehicle for the origin only, and leaves the destination free', () => {
+    const moving = (originHeadingDeg: number) =>
+      new URL(buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { originHeadingDeg })!).searchParams
+    // "angle,range" for the origin, then an empty entry for the destination.
+    expect(moving(187.4).get('bearings')).toBe('187,45;')
+    expect(moving(0).get('bearings')).toBe('0,45;')
+    // Mapbox takes 0 to 360; headings are brought into range.
+    expect(moving(359.7).get('bearings')).toBe('0,45;')
+    expect(moving(-90).get('bearings')).toBe('270,45;')
+    expect(moving(450).get('bearings')).toBe('90,45;')
+    // Everything else about the request is the same, and the semicolon is encoded.
+    const withHeading = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { originHeadingDeg: 187 })!
+    expect(withHeading).toContain('bearings=187%2C45%3B')
+    expect(withHeading.replace('&bearings=187%2C45%3B', '')).toBe(url)
+  })
 })
 
 describe('fetchDirections', () => {
@@ -404,6 +427,13 @@ describe('fetchDirections', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.url).toBe(buildDirectionsUrl(where.origin, where.destination, TOKEN))
     expect(calls[0]!.signal).toBe(controller.signal)
+  })
+
+  it('passes the heading of a moving vehicle on to the request', async () => {
+    const { fetchImpl, calls } = fakeFetch(200, OK)
+    const result = await fetchDirections({ ...where, originHeadingDeg: 187, fetchImpl })
+    expect(result.ok).toBe(true)
+    expect(new URL(calls[0]!.url).searchParams.get('bearings')).toBe('187,45;')
   })
 
   it('passes a 200 NoRoute body through as no-route', async () => {

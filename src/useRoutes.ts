@@ -91,7 +91,7 @@ function useSignalData(routes: readonly RouteCandidate[]) {
 
 /**
  * Fetches routes whenever the origin or destination changes and aborts the
- * request it replaces. One fetch per change, no polling (that is PLAN step 6).
+ * request it replaces. One fetch per change, no polling here (the simulated drive polls: useDriveSim.ts).
  * A null token means "do not fetch".
  *
  * Signal counts are added on top when the signal data arrives: routes show

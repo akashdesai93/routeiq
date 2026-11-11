@@ -1,6 +1,8 @@
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { rankRoutes, type RouteCandidate, type SignalCoverage } from '../src/core/index.ts'
+import { DEFAULT_REROUTE_OPTIONS, rankRoutes, type RouteCandidate, type SignalCoverage } from '../src/core/index.ts'
+import { DEFAULT_DRIVE_SETTINGS } from '../src/drive/simulation.ts'
+import type { DriveSim, DriveView } from '../src/useDriveSim.ts'
 
 // Mapbox GL needs WebGL, which Node does not have. The smoke test checks the
 // React tree renders and wires the right pieces; the real map is checked in a browser.
@@ -9,6 +11,7 @@ vi.mock('mapbox-gl/dist/mapbox-gl.css', () => ({}))
 
 const { default: App } = await import('../src/App.tsx')
 const { RoutePanel } = await import('../src/RoutePanel.tsx')
+const { DrivePanel } = await import('../src/DrivePanel.tsx')
 
 describe('App smoke test', () => {
   it('shows setup help when no token is set', () => {
@@ -44,6 +47,108 @@ describe('App smoke test', () => {
     const without = renderToString(<App status={{ kind: 'missing' }} />)
     expect(without).not.toContain('Swap')
     expect(without).not.toContain('Finding routes')
+  })
+
+  it('offers the simulated drive in the panel, not startable before there is a route', () => {
+    const html = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} />)
+    expect(html).toContain('Simulate drive')
+    expect(html).toMatch(/<button type="button" disabled="">Start drive<\/button>/)
+    expect(html).toContain('Reroute settings')
+    expect(renderToString(<App status={{ kind: 'missing' }} />)).not.toContain('Simulate drive')
+  })
+})
+
+describe('DrivePanel', () => {
+  const nothing = () => {}
+  const idle: DriveSim = {
+    status: 'idle',
+    view: null,
+    multiplier: 5,
+    setMultiplier: nothing,
+    settings: DEFAULT_DRIVE_SETTINGS,
+    setSettings: nothing,
+    rerouteOptions: DEFAULT_REROUTE_OPTIONS,
+    setRerouteOptions: nothing,
+    whatIfDelaySec: 0,
+    setWhatIfDelaySec: nothing,
+    canStart: true,
+    start: nothing,
+    pause: nothing,
+    resume: nothing,
+    stop: nothing,
+  }
+  const view: DriveView = {
+    simTimeSec: 185,
+    car: [-80.85, 35.2],
+    routeAhead: [
+      [-80.85, 35.2],
+      [-80.86, 35.0],
+    ],
+    remainingM: 24_140,
+    requestsUsed: 3,
+    polling: false,
+    candidates: null,
+    ranked: [],
+    currentCandidateId: null,
+    signals: [],
+    turn: null,
+    log: [
+      { id: 1, simTimeSec: 0, kind: 'note', text: 'Drive started: 35 min, 21 mi.', simulated: false },
+      { id: 2, simTimeSec: 60, kind: 'stay', text: 'Staying: current route is still the fastest', simulated: false },
+      { id: 3, simTimeSec: 120, kind: 'stay', text: 'Staying: faster route saves 3 minutes, confirming, check 1 of 2', simulated: true },
+      { id: 4, simTimeSec: 180, kind: 'switch', text: 'Switching: saves 3 minutes, turn in 0.8 miles', simulated: true },
+    ],
+  }
+
+  it('idle: speed choices, a start button, the request budget in words, and the thresholds', () => {
+    const html = renderToString(<DrivePanel sim={idle} />).replace(/<!-- -->/g, '')
+    expect(html).toContain('>1×<')
+    expect(html).toContain('>20×<')
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
+    expect(html).toContain('<button type="button">Start drive</button>')
+    expect(html).toContain('at most one request per 5 real seconds and 60 per drive')
+    expect(html).not.toContain('Pause')
+    expect(html).not.toContain('Stop')
+    // Every default threshold is on show, the 5% as a percentage.
+    for (const text of ['Minimum saving (seconds)', 'Checks in a row before switching', 'Cooldown after a switch (seconds)', 'Minimum distance to a freeway exit (meters)']) {
+      expect(html).toContain(text)
+    }
+    for (const value of [60, 120, 5, 2, 300, 600, 400, 20, 1200, 3]) expect(html).toContain(`value="${value}"`)
+    // The what-if control is a development aid and off unless asked for.
+    expect(html).not.toContain('What-if')
+    expect(renderToString(<DrivePanel sim={{ ...idle, canStart: false }} />)).toContain('disabled="">Start drive')
+  })
+
+  it('running: pause and stop, simulated time, requests used of the cap, and the log newest first', () => {
+    const html = renderToString(<DrivePanel sim={{ ...idle, status: 'running', view }} />).replace(/<!-- -->/g, '')
+    expect(html).toContain('Pause')
+    expect(html).toContain('Stop')
+    expect(html).not.toContain('Start drive')
+    expect(html).toContain('simulated time 3:05')
+    expect(html).toContain('15 mi to go')
+    expect(html).toContain('Directions requests: 3 of 60 (at most one per 5 s)')
+    const order = ['Switching: saves 3 minutes, turn in 0.8 miles', 'confirming, check 1 of 2', 'current route is still the fastest', 'Drive started']
+    const places = order.map((text) => html.indexOf(text))
+    expect(places.every((p) => p >= 0)).toBe(true)
+    expect([...places].sort((a, b) => a - b)).toEqual(places)
+    expect(html).toContain('class="drive-log-switch"')
+    expect(html).toContain('>3:00</span>')
+    expect(renderToString(<DrivePanel sim={{ ...idle, status: 'paused', view }} />)).toContain('Resume')
+    expect(renderToString(<DrivePanel sim={{ ...idle, status: 'arrived', view }} />)).toContain('Drive again')
+  })
+
+  it('what-if: shown only when asked for, and always labelled as simulated', () => {
+    const off = renderToString(<DrivePanel sim={{ ...idle, status: 'running', view }} showWhatIf />).replace(/<!-- -->/g, '')
+    expect(off).toContain('What-if (simulated, not real traffic)')
+    expect(off).toContain('Add delay from the next check')
+    expect(off).not.toContain('Clear')
+    const on = renderToString(
+      <DrivePanel sim={{ ...idle, status: 'running', view, whatIfDelaySec: 300 }} showWhatIf />,
+    ).replace(/<!-- -->/g, '')
+    expect(on).toContain('Simulated: +5 min on the current route')
+    expect(on).toContain('Clear')
+    // Nothing to delay before a drive is on.
+    expect(renderToString(<DrivePanel sim={idle} showWhatIf />)).toContain('disabled="">Add delay from the next check')
   })
 })
 

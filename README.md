@@ -10,8 +10,10 @@ signals on the selected route shown as dots. Counting works on any route, not on
 Charlotte. The signal data for North and South Carolina ships with the app, built from
 OpenStreetMap extracts, so a trip inside the two states asks no signal server at all; where
 signal data cannot be loaded the count is marked partial, never shown as zero. The routes are ranked: best ETA first, with the signal count breaking
-ties of 30 seconds or less, and the top one is marked "Recommended". Rerouting comes
-next, one piece at a time (see [PLAN.md](PLAN.md)).
+ties of 30 seconds or less, and the top one is marked "Recommended". A simulated drive
+moves a car along the selected route, asks Mapbox for fresh routes as it goes and changes
+route by itself when a faster one holds up (see Rerouting). What comes next is in
+[PLAN.md](PLAN.md).
 
 ## Run it on Windows
 
@@ -79,8 +81,16 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 that is not full is treated as unknown.
                 select.ts keeps a route you picked selected across refetches and
                 otherwise selects the top-ranked one.
-                No React, Mapbox, DOM or network. Reroute rules go here too, so they
-                can be ported to Swift or served.
+                reroute.ts is the switching brain: decideReroute takes the state it
+                returned last time, what a poll just found (the time, the position
+                along the current route, the speed, the fresh routes) and the
+                thresholds, and answers stay or switch with a sentence that can be
+                spoken. Time is an input and the state is plain data, so the same
+                inputs always give the same answer. All thresholds are in
+                DEFAULT_REROUTE_OPTIONS. geo.ts also finds the point and heading a
+                distance along a line, and the rest of a line from there.
+                No React, Mapbox, DOM or network, so all of it can be ported to Swift
+                or served.
 src/providers/mapbox/
                 adapter.ts: pure Directions API JSON -> RouteCandidate[] (typed failures),
                 including every step intersection with its signal flag (intersections),
@@ -89,7 +99,8 @@ src/providers/mapbox/
                 (limitedAccessSpansM, from each step intersection's road class and
                 geometry_index).
                 client.ts: builds the driving-traffic URL and fetches it (abortable;
-                401/403/429/network become readable errors).
+                401/403/429/network become readable errors). A request made while
+                moving carries the vehicle's heading (`bearings`, origin only).
 src/providers/charlotte/
                 adapter.ts: pure ArcGIS GeoJSON page -> SignalPoint[] (operating traffic
                 signals only; typed failures).
@@ -121,10 +132,17 @@ src/storage/    kv.ts: the tiny key-value store everything on the device goes th
                 IndexedDB, or memory where IndexedDB is not available.
 src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch, and
                 the city list) and wires up the sources the app uses, the bundled
-                tiles ahead of the device cache and the network.
+                tiles ahead of the device cache and the network. askOnce wraps them
+                for a drive that polls: a tile outside the bundle is asked for at most
+                once per session, the city list once.
+src/drive/      simulation.ts: the pure parts of the simulated drive: the simulated
+                clock, when a poll is due, the budget of real Directions requests
+                and the what-if delay. Decides no route.
 src/map/        Mapbox GL JS wrapper (draws only, decides nothing): draggable pins,
-                route lines, signal dots. pins.ts is the one source for pin roles and
-                colors; attribution.ts is the OpenStreetMap credit shown on the map.
+                route lines, signal dots, and for a simulated drive the car, the route
+                being driven and the turn-off of a switch (driveFeatures.ts). pins.ts
+                is the one source for pin roles and colors; attribution.ts is the
+                OpenStreetMap credit shown on the map.
 scripts/        Plain Node 24, no dependencies. Both import the app's own tile
                 arithmetic and adapters, so the files they write are the shapes the app
                 reads.
@@ -140,6 +158,12 @@ data/           Not in git: the downloaded extracts the tiles are built from.
 src/useRoutes.ts   Fetches routes when a pin moves (on drag end), aborts the old request,
                 adds signal counts when the signal data arrives, ranks the routes and
                 tracks the selected one. Routes never wait for signals.
+src/useDriveSim.ts Runs a simulated drive on a timer: moves the car, polls Mapbox from
+                its position inside the request budget, loads signal counts for the
+                fresh routes (never with retryFailed), asks core/reroute.ts and
+                applies a switch. Orchestrates only.
+src/DrivePanel.tsx The "Simulate drive" controls, the thresholds, the what-if control
+                (development builds only) and the event log.
 src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
                 typical time, the reason for its place, and a "Recommended" badge on
                 the top route. The highlight follows the selection, not the rank.
@@ -157,7 +181,16 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 the build script and the Charlotte seed script run whole in a temporary
                 folder, the City of Charlotte fallback, a US-521 style corridor trip
                 across the state line and a tile edge, the key-value store, token check,
-                core-purity guard, App and RoutePanel smoke tests.
+                core-purity guard, App, RoutePanel and DrivePanel smoke tests.
+                reroute.test.ts drives the reroute engine through scripted trips on a
+                made-up road network (helpers/driveWorld.ts) with a fake clock:
+                oscillating ETAs, a steady gain, a gain that comes too late, cooldown,
+                no return, no alternatives, missing data, failed polls, a current
+                route that is no longer offered, off route, freeway exits, tiny trips,
+                signals, determinism, and seeded random ETAs. drive.test.ts covers the
+                simulated clock, the request budget at 1x, 5x and 20x, the what-if
+                delay, a whole simulated drive offline, and the once-only signal
+                sources.
 check-prereqs.ps1  Windows prerequisite check.
 ```
 
@@ -322,6 +355,105 @@ How ranking works: the route with the best traffic-aware ETA comes first. Routes
 route whose signal count is unknown or partial keeps the place its ETA gives it. No time is added
 per signal, because a traffic-aware ETA already includes the usual wait at signals.
 
+## Rerouting (simulated drive)
+
+"Simulate drive" in the panel puts a car on the selected route and drives it on a
+simulated clock at 1x, 5x or 20x. Every 60 seconds of simulated time the app asks
+Mapbox for routes from the car's position to the destination, hands them to the reroute
+engine, and applies a switch by itself. The event log lists every decision with its
+simulated time and the engine's reason, newest first. Pause, Resume and Stop are next to
+it; moving a pin, Swap and Reset end the drive. While a drive is on, the route list and
+the map show what the last check returned from the car's position, the route being
+driven is drawn in green with the car on it, and an amber dot marks where a switch
+leaves the old route (hollow while the switch is still waiting to be confirmed).
+
+The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
+
+1. A failed check changes nothing but a counter.
+2. Off route (the fresh routes start more than 50 m from the current route's line):
+   take the best fresh route at once.
+3. Like for like: the fresh route that IS the rest of the current route (same path
+   within 10 m from the car to the destination; route ids are never compared between
+   checks) gives the current route's fresh ETA. Everything is compared with that.
+4. Current route no longer offered (Mapbox returns three routes at most): its ETA is
+   unknown. Nothing happens on one such check; after three in a row the best fresh
+   route is taken, if its turn-off is far enough ahead and the cooldown is over.
+5. Missing data (no alternative, no travel time, no typical duration to show the time
+   includes traffic): stay.
+6. Minimum saving: at least 120 seconds AND at least 5% of the time left.
+7. No return: a route left less than 10 minutes ago needs twice the minimum saving.
+8. Too late: the turn-off (where the alternative leaves the current route, or its
+   first maneuver the current route does not share, whichever is sooner) must be at
+   least 400 m ahead, at least 20 seconds of driving ahead, and at least 1200 m when
+   it is a freeway exit.
+9. Confirmation: the same alternative has to pass rules 6 to 8 two checks in a row.
+10. Cooldown: no second switch within 5 minutes of the last one.
+
+Alternatives are tried in ranking order (best ETA, signals only breaking ties of 30
+seconds), so signals can choose between two alternatives that both save enough, but
+never justify a switch on their own. A signal count that is partial or unknown has no
+say. Every decision comes with one short sentence fit to be spoken, such as "Staying:
+faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 miles".
+
+| Threshold (`DEFAULT_REROUTE_OPTIONS`) | Default |
+| --- | --- |
+| `minSavingSec` | 120 s |
+| `minSavingFraction` | 0.05 (5% of the time left) |
+| `confirmPolls` | 2 |
+| `cooldownSec` | 300 s |
+| `noReturnSec`, `returnSavingFactor` | 600 s, 2x |
+| `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
+| `freewayLeadDistanceM` | 1200 m |
+| `routeLostPolls` | 3 |
+| `offRouteM` | 50 m |
+| `sameRouteToleranceM` | 10 m |
+| `returnOverlapFraction` | 0.5 |
+| `requireTypicalDuration` | true |
+| `etaTieWindowSec` | 30 s |
+
+"Reroute settings" in the panel changes them, and the poll interval, for the page's
+lifetime; changes apply from the next check.
+
+**Request budget.** A simulated drive makes real Directions requests, so they are
+rationed: at most one per 5 real seconds whatever the speed (at 20x that stretches the
+check interval to about 100 simulated seconds), and at most 60 per drive, after which
+the car drives on without checking. The panel shows the count. The simulated clock
+stands still while a check is out, so the answer is always for the place the car is at.
+The default trip took 25 requests at 20x (Nov 2026); at 1x or 5x it takes about 40.
+
+**The request.** A check is the same `driving-traffic` request as the first one, from
+the car's position, plus `bearings=<heading>,45;`: the car's heading with 45 degrees
+either side for the origin, nothing for the destination, so the routes start in the
+direction of travel and not with a U-turn or on the opposite carriageway. No
+`depart_at` is sent: without it the profile routes for now on live traffic. Checked in
+the Mapbox Directions docs, Nov 2026: `bearings` needs one entry per coordinate and an
+entry may be left empty; `radiuses` (how far a coordinate may snap) is left at its
+default; `waypoints` and `continue_straight` only matter with intermediate coordinates,
+which a check does not have; `avoid_maneuver_radius` (1 to 1000 m, no maneuver that
+close to the origin) exists for this case but is not used, because the engine's own
+too-late rule gives a reason that can be shown.
+
+**Signals during a drive.** Fresh routes are counted from the bundled tiles like any
+other route. A check never passes `retryFailed`. Outside the bundle the plain tile
+source would ask Overpass again for a failed tile every 30 seconds to 8 minutes; a
+drive goes through `askOnce` (`src/signalData.ts`), which asks for such a tile at most
+once per page session and keeps the city list's first answer.
+
+**What-if (development builds only).** There is rarely a faster route to be had on
+demand, so `npm run dev` shows a boxed control, labelled as simulated: it adds a delay
+you choose (5 minutes by default) to the current route's ETA at every check from the
+next one on, until a switch or Clear. Log lines made with it are marked `[what-if: ...]`.
+It lives in `src/drive/simulation.ts`, outside `src/core`; the engine cannot tell and
+applies its normal rules. Note what follows a what-if switch: the delay is gone, the
+route just left is truly the faster one again, and the engine goes back to it by its
+own rules (after the cooldown and for twice the saving, or after three checks if Mapbox
+no longer offers the slower route it was moved to).
+
+**Not covered by the simulation.** The car sits exactly on the route line at a steady
+speed. Real GPS needs more before this engine: positions matched to the road, an
+off-route test with some patience, a speed that is smoothed, and the position the
+directions query was sent from (not a later one) passed with its answer.
+
 ## Pinned versions (checked Nov 11, 2026)
 
 | Package | Version | Note |
@@ -343,6 +475,9 @@ Nothing records or stores location yet. When live location arrives it stays in m
 only by default, with no history written to disk or sent anywhere unless you turn it on.
 
 Pin positions go to Mapbox, which is how routes are found. They go nowhere else.
+During a simulated drive the simulated car's position and heading go to Mapbox the same
+way, once per check; that position is a point on the route already on screen, not
+anyone's location. The drive, its log and the reroute settings are kept in memory only.
 
 For signal counts, a trip that stays inside the bundled area (North and South Carolina,
 except tiles on the states' outer edge) sends nothing to any signal server: the tiles

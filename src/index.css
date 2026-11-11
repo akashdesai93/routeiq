@@ -32,6 +32,25 @@ button:hover { background: #eaeef2; }
 .hint { color: #57606a; font-size: 13px; }
 button.link { padding: 0; border: 0; background: none; font-size: inherit; color: #0969da; text-decoration: underline; }
 button.link:hover { background: none; color: #0550ae; }
+.drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid #d0d7de; }
+.drive h3 { margin: 0 0 8px; font-size: 15px; }
+.drive-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.drive button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
+.drive button:disabled { color: #8c959f; cursor: default; }
+.drive-status { margin: 0 0 8px; }
+.whatif { margin: 0 0 8px; padding: 8px; border: 1px dashed #bf8700; border-radius: 6px; background: #fff8c5; }
+.whatif .drive-row { margin: 6px 0 0; }
+.whatif .hint { margin: 6px 0 0; }
+.setting { display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; margin: 4px 0; font-size: 13px; }
+.setting input { width: 72px; font: inherit; font-size: 13px; padding: 2px 4px; }
+.drive-settings { margin-bottom: 8px; }
+.drive-settings summary { cursor: pointer; }
+.drive-log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; }
+.drive-log li { padding: 4px 8px; border-bottom: 1px solid #eaeef2; }
+.drive-log li:last-child { border-bottom: 0; }
+.drive-log-time { color: #57606a; font-variant-numeric: tabular-nums; }
+.drive-log-switch { font-weight: 600; background: #dafbe1; }
+.drive-log-note { color: #57606a; }
 .notice { margin: 24px 16px; padding: 16px; border: 1px solid #d4a72c; background: #fff8c5; border-radius: 6px; max-width: 640px; line-height: 1.5; }
 @media (max-width: 700px) {
   .main { flex-direction: column; }

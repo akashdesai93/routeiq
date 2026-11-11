@@ -1,9 +1,11 @@
-import { useCallback, useState, type CSSProperties } from 'react'
+import { useCallback, useMemo, useState, type CSSProperties } from 'react'
 import { DEFAULT_TRIP, formatLatLng, type LngLat, type Place } from './core/index.ts'
 import { tokenStatus, type TokenStatus } from './config.ts'
+import { DrivePanel } from './DrivePanel.tsx'
 import { MapView } from './map/MapView.tsx'
 import { PIN_COLOR, PIN_NAME, PIN_ROLES, type PinRole } from './map/pins.ts'
 import { RoutePanel } from './RoutePanel.tsx'
+import { useDriveSim } from './useDriveSim.ts'
 import { useRoutes } from './useRoutes.ts'
 
 const TOKEN_HELP: Record<Exclude<TokenStatus['kind'], 'ok'>, string> = {
@@ -18,21 +20,52 @@ type Pins = Readonly<Record<PinRole, Place>>
 
 const TEST_PINS: Pins = DEFAULT_TRIP
 
+/** While a simulated drive is on, the route list and the map are not for picking routes. */
+const ignore = () => {}
+
 export default function App({ status = tokenStatus }: { status?: TokenStatus }) {
   const [pins, setPins] = useState<Pins>(TEST_PINS)
   const token = status.kind === 'ok' ? status.token : null
   const routing = useRoutes(token, pins.origin.position, pins.destination.position)
+  const selectedRoute = routing.routes.find((r) => r.id === routing.selectedId) ?? null
+  // The simulated drive (PLAN step 6) starts on the selected route. Changing the trip ends it.
+  const sim = useDriveSim(token, pins.destination.position, selectedRoute)
+  const stopDrive = sim.stop
 
-  const movePin = useCallback((role: PinRole, position: LngLat) => {
-    const dropped: Place = {
-      id: `${role}-pin`,
-      label: `Dropped pin (${formatLatLng(position)})`,
-      position,
-    }
-    setPins((current) => ({ ...current, [role]: dropped }))
-  }, [])
-  const swap = () => setPins((p) => ({ origin: p.destination, destination: p.origin }))
-  const reset = () => setPins(TEST_PINS)
+  const movePin = useCallback(
+    (role: PinRole, position: LngLat) => {
+      const dropped: Place = {
+        id: `${role}-pin`,
+        label: `Dropped pin (${formatLatLng(position)})`,
+        position,
+      }
+      stopDrive()
+      setPins((current) => ({ ...current, [role]: dropped }))
+    },
+    [stopDrive],
+  )
+  const swap = () => {
+    stopDrive()
+    setPins((p) => ({ origin: p.destination, destination: p.origin }))
+  }
+  const reset = () => {
+    stopDrive()
+    setPins(TEST_PINS)
+  }
+
+  // During a drive the list and the map show what the last check returned from the
+  // car's position, with the route being driven selected; before the first check,
+  // and with no drive on, they show the routes of the trip.
+  const view = sim.view
+  const driving = view !== null
+  const polled = view !== null && view.candidates !== null ? view : null
+  const car = view?.car
+  const routeAhead = view?.routeAhead
+  const turn = view?.turn
+  const driveOverlay = useMemo(
+    () => (car === undefined || routeAhead === undefined ? null : { car, routeAhead, turn: turn ?? null }),
+    [car, routeAhead, turn],
+  )
 
   return (
     <div className="app">
@@ -61,24 +94,27 @@ export default function App({ status = tokenStatus }: { status?: TokenStatus }) 
           <MapView
             token={token}
             pins={pins}
-            routes={routing.routes}
-            selectedRouteId={routing.selectedId}
-            signals={routing.selectedSignals}
+            routes={polled?.candidates ?? routing.routes}
+            selectedRouteId={polled !== null ? polled.currentCandidateId : routing.selectedId}
+            signals={polled !== null ? polled.signals : routing.selectedSignals}
+            drive={driveOverlay}
             onPinMove={movePin}
-            onSelectRoute={routing.select}
+            onSelectRoute={driving ? ignore : routing.select}
           />
           <RoutePanel
-            ranked={routing.ranked}
-            selectedId={routing.selectedId}
+            ranked={polled !== null ? polled.ranked : routing.ranked}
+            selectedId={polled !== null ? polled.currentCandidateId : routing.selectedId}
             loading={routing.loading}
             error={routing.error}
-            onSelect={routing.select}
+            onSelect={driving ? ignore : routing.select}
             onRetry={routing.retry}
             signalsStatus={routing.signalsStatus}
             signalsError={routing.signalsError}
             onRetrySignals={routing.retrySignals}
             signalDataDate={routing.signalDataDate}
-          />
+          >
+            <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />
+          </RoutePanel>
         </div>
       ) : (
         <main className="notice" role="alert">

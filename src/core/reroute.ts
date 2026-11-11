@@ -1,0 +1,725 @@
+import { alongRouteM, isValidLngLat, lineFrom, localProjector, pointToSegment, type XY } from './geo.ts'
+import { DEFAULT_ETA_TIE_WINDOW_SEC, rankRoutes } from './rank.ts'
+import { SAME_ROUTE_TOLERANCE_M } from './select.ts'
+import type { DistanceSpanM, LngLat, Maneuver, RouteCandidate } from './types.ts'
+
+/**
+ * The switching brain: given what a poll just returned, should the driver stay
+ * on the route being driven or change to another one, with no tap.
+ *
+ * A pure, deterministic state machine. Time is an input (nowSec), never read
+ * from a clock; the state is plain data that the caller keeps between polls.
+ * The same state, observation and options always give the same decision, so a
+ * Swift port or a native wrapper can run it as it is.
+ */
+
+/** Every threshold of the reroute rules, in one place. See DEFAULT_REROUTE_OPTIONS for the values. */
+export interface RerouteOptions {
+  /** An alternative must beat the current route's fresh ETA by at least this many seconds. */
+  readonly minSavingSec: number
+  /**
+   * ...and by at least this share of the time left on the current route
+   * (0.05 is 5%). The two together: 2 minutes gained on a 90 minute leg is
+   * under 5% and not worth a change, and 5% of a 4 minute leg is 12 seconds
+   * of noise, which the seconds floor rejects.
+   */
+  readonly minSavingFraction: number
+  /** The same alternative has to win this many polls in a row before a switch. 1 switches on the first. */
+  readonly confirmPolls: number
+  /** After a switch, no other switch for this many seconds. */
+  readonly cooldownSec: number
+  /** A route left less than this many seconds ago is only taken again for a bigger saving (returnSavingFactor). */
+  readonly noReturnSec: number
+  /** Going back to a route left recently needs this many times the minimum saving, seconds and share both. */
+  readonly returnSavingFactor: number
+  /** Never switch when the alternative turns off closer than this, in meters. */
+  readonly minLeadDistanceM: number
+  /** ...or closer than this many seconds of driving at the current speed. The larger of the two distances applies. */
+  readonly minLeadTimeSec: number
+  /** On a freeway the turn-off is an exit that needs lane changes: it must be at least this far ahead, in meters. */
+  readonly freewayLeadDistanceM: number
+  /**
+   * When no fresh route is the rest of the current one, the current route's
+   * ETA is unknown. That is not acted on until it has been so for this many
+   * polls in a row; then the best fresh route is taken.
+   */
+  readonly routeLostPolls: number
+  /** The driver is off the current route when the fresh routes start farther than this from its line, in meters. */
+  readonly offRouteM: number
+  /** How far apart two lines may run and still be the same road, in meters (see SAME_ROUTE_TOLERANCE_M). */
+  readonly sameRouteToleranceM: number
+  /**
+   * An alternative is "going back" to a route left recently when at least
+   * this share of its own part (the part not shared with the current route)
+   * runs along that route.
+   */
+  readonly returnOverlapFraction: number
+  /**
+   * Compare ETAs only when both routes carry a typical duration. The
+   * driving-traffic profile always sends one, so a route without it did not
+   * come with traffic data and its time is not a like-for-like ETA.
+   */
+  readonly requireTypicalDuration: boolean
+  /** Passed on to rankRoutes: ETAs this close are a tie that signals may break. */
+  readonly etaTieWindowSec: number
+}
+
+/** The one place the defaults are set. Pass any subset to decideReroute to override. */
+export const DEFAULT_REROUTE_OPTIONS: RerouteOptions = {
+  minSavingSec: 120,
+  minSavingFraction: 0.05,
+  confirmPolls: 2,
+  cooldownSec: 300,
+  noReturnSec: 600,
+  returnSavingFactor: 2,
+  minLeadDistanceM: 400,
+  minLeadTimeSec: 20,
+  freewayLeadDistanceM: 1200,
+  routeLostPolls: 3,
+  offRouteM: 50,
+  sameRouteToleranceM: SAME_ROUTE_TOLERANCE_M,
+  returnOverlapFraction: 0.5,
+  requireTypicalDuration: true,
+  etaTieWindowSec: DEFAULT_ETA_TIE_WINDOW_SEC,
+}
+
+/** What the engine remembers between polls. Plain data: keep it, pass it back, never edit it. */
+export interface RerouteState {
+  /**
+   * The alternative that won the last poll and how many polls in a row it
+   * has won. Remembered by its path, because route ids change from poll to
+   * poll. Null when no alternative won the last poll.
+   */
+  readonly pending: { readonly geometry: readonly LngLat[]; readonly polls: number } | null
+  /** When the last switch was made (the nowSec of that poll). Null before the first. */
+  readonly lastSwitchAtSec: number | null
+  /** The routes left by a switch, each as the path that was still ahead at that moment. Old entries are dropped. */
+  readonly abandoned: readonly { readonly geometry: readonly LngLat[]; readonly atSec: number }[]
+  /** Polls in a row that failed (no answer). A failed poll changes nothing else. */
+  readonly failedPolls: number
+  /** Polls in a row in which no fresh route was the rest of the current one. */
+  readonly lostPolls: number
+}
+
+/** The state to start a drive with. */
+export const INITIAL_REROUTE_STATE: RerouteState = {
+  pending: null,
+  lastSwitchAtSec: null,
+  abandoned: [],
+  failedPolls: 0,
+  lostPolls: 0,
+}
+
+/** What one poll found. */
+export interface RerouteObservation {
+  /** The time of the poll, in seconds on any clock that only moves forward. Injected, never read here. */
+  readonly nowSec: number
+  /** The route being driven. */
+  readonly route: Pick<RouteCandidate, 'geometry' | 'maneuvers' | 'limitedAccessSpansM'>
+  /**
+   * How far along `route` the driver was when the directions query was sent,
+   * in meters from its start (see alongRouteM). It has to be the place the
+   * candidates start from. A position taken a moment later is forgiven up to
+   * `offRouteM` along the route; beyond that the start of every candidate
+   * lies behind the driver and none of them matches the current route.
+   */
+  readonly positionAlongM: number
+  /** The driver's speed, in meters per second. */
+  readonly speedMps: number
+  /**
+   * The routes a directions query FROM the driver's position just returned,
+   * with signal counts when they are known. Null when the poll failed
+   * (network error, rate limit): nothing is known this time.
+   */
+  readonly candidates: readonly RouteCandidate[] | null
+  /**
+   * How far the driver is from the current route's line, in meters, when the
+   * caller measures it (GPS). Left out, it is taken from where the fresh
+   * routes start, which is the driver's position snapped to a road.
+   */
+  readonly offRouteM?: number
+}
+
+/** Why a decision came out as it did, for logs and tests. The `reason` text says the same in words. */
+export type RerouteCode =
+  | 'poll-failed'
+  | 'no-routes'
+  | 'off-route'
+  | 'route-lost-waiting'
+  | 'route-lost'
+  | 'no-eta'
+  | 'no-traffic-data'
+  | 'no-alternative'
+  | 'current-best'
+  | 'saving-too-small'
+  | 'saving-share-too-small'
+  | 'recently-abandoned'
+  | 'too-late'
+  | 'confirming'
+  | 'cooldown'
+  | 'faster-route'
+
+/** The alternative a decision was about: the one switched to, or the one that came closest. */
+export interface RerouteAlternative {
+  /** Its id among this poll's candidates. Ids are only good within one poll. */
+  readonly routeId: string
+  /** Seconds it saves against the current route's fresh ETA. Null when the current route's ETA is unknown. */
+  readonly savingSec: number | null
+  /** Meters from the driver to where it leaves the current route (or to its own first maneuver, if that is sooner). */
+  readonly turnInM: number
+  /** That point on the map. */
+  readonly turnAt: LngLat
+  /** The lead distance the rules ask for here, in meters. */
+  readonly requiredLeadM: number
+  /** True when the turn-off is on controlled-access road, where the longer lead applies. */
+  readonly onFreeway: boolean
+}
+
+export interface RerouteDecision {
+  readonly action: 'stay' | 'switch'
+  /** With 'switch': the id of the candidate (of this poll) to drive from now on. */
+  readonly toRouteId?: string
+  /** One short plain-English sentence, fit to be spoken aloud. */
+  readonly reason: string
+  readonly code: RerouteCode
+  /** Null when the decision was not about one particular alternative. */
+  readonly considered: RerouteAlternative | null
+  /** Pass this back with the next observation. */
+  readonly nextState: RerouteState
+}
+
+function numberOr(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+/** Fills in defaults. A threshold that is negative or not a number falls back to its default. */
+function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
+  const d = DEFAULT_REROUTE_OPTIONS
+  return {
+    minSavingSec: numberOr(options.minSavingSec, d.minSavingSec),
+    minSavingFraction: numberOr(options.minSavingFraction, d.minSavingFraction),
+    confirmPolls: Math.max(1, Math.round(numberOr(options.confirmPolls, d.confirmPolls))),
+    cooldownSec: numberOr(options.cooldownSec, d.cooldownSec),
+    noReturnSec: numberOr(options.noReturnSec, d.noReturnSec),
+    returnSavingFactor: Math.max(1, numberOr(options.returnSavingFactor, d.returnSavingFactor)),
+    minLeadDistanceM: numberOr(options.minLeadDistanceM, d.minLeadDistanceM),
+    minLeadTimeSec: numberOr(options.minLeadTimeSec, d.minLeadTimeSec),
+    freewayLeadDistanceM: numberOr(options.freewayLeadDistanceM, d.freewayLeadDistanceM),
+    routeLostPolls: Math.max(1, Math.round(numberOr(options.routeLostPolls, d.routeLostPolls))),
+    offRouteM: numberOr(options.offRouteM, d.offRouteM),
+    sameRouteToleranceM: numberOr(options.sameRouteToleranceM, d.sameRouteToleranceM),
+    returnOverlapFraction: numberOr(options.returnOverlapFraction, d.returnOverlapFraction),
+    requireTypicalDuration: options.requireTypicalDuration ?? d.requireTypicalDuration,
+    etaTieWindowSec: numberOr(options.etaTieWindowSec, d.etaTieWindowSec),
+  }
+}
+
+/** "40 seconds", "1.9 minutes", "3 minutes". Rounded down, so a saving is never overstated. */
+function spokenDuration(sec: number): string {
+  const s = Number.isFinite(sec) ? Math.max(0, sec) : 0
+  if (s < 90) {
+    const whole = Math.floor(s)
+    return whole === 1 ? '1 second' : `${whole} seconds`
+  }
+  const tenths = Math.floor(s / 6) / 10
+  const minutes = tenths < 10 ? tenths : Math.floor(tenths)
+  return minutes === 1 ? '1 minute' : `${minutes} minutes`
+}
+
+const M_PER_MILE = 1609.344
+const FT_PER_M = 3.28084
+
+/** "300 feet", "0.8 miles", "1 mile". Rounded down, so a turn is never said to be farther than it is. */
+function spokenDistance(meters: number): string {
+  const m = Number.isFinite(meters) ? Math.max(0, meters) : 0
+  const tenths = Math.floor((m / M_PER_MILE) * 10) / 10
+  if (tenths < 0.1) return `${Math.floor((m * FT_PER_M) / 50) * 50} feet`
+  return tenths === 1 ? '1 mile' : `${tenths} miles`
+}
+
+/** The closest point of a line to P: how far it is, and where along the line (as segment index and share of it). */
+function nearestOnLine(p: XY, line: readonly XY[]): { distanceM: number; index: number; t: number } {
+  let best = { distanceM: Infinity, index: 0, t: 0 }
+  const only = line[0]
+  if (line.length === 1 && only !== undefined) {
+    return { distanceM: Math.hypot(p[0] - only[0], p[1] - only[1]), index: 0, t: 0 }
+  }
+  for (let i = 1; i < line.length; i++) {
+    const hit = pointToSegment(p, line[i - 1]!, line[i]!)
+    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, index: i - 1, t: hit.t }
+  }
+  return best
+}
+
+function isNear(p: XY, line: readonly XY[], toleranceM: number): boolean {
+  for (let i = 1; i < line.length; i++) {
+    if (pointToSegment(p, line[i - 1]!, line[i]!).distanceM <= toleranceM) return true
+  }
+  return false
+}
+
+const apart = (p: XY, q: XY) => Math.hypot(p[0] - q[0], p[1] - q[1])
+
+/**
+ * True when `fresh` is the rest of `path`: it starts on `path` (within the
+ * tolerance of its line, anywhere along it), and from there to the end the two
+ * follow the same roads, every vertex of each within the tolerance of the
+ * other and the ends together. This is sameRouteGeometry (select.ts) for a
+ * route that has been partly driven: the fresh route starts where the driver
+ * is, not where the old one started.
+ */
+function continuesPath(path: readonly XY[], fresh: readonly XY[], toleranceM: number): boolean {
+  const start = fresh[0]
+  const end = fresh.at(-1)
+  const pathEnd = path.at(-1)
+  if (start === undefined || end === undefined || pathEnd === undefined || fresh.length < 2 || path.length < 2) return false
+  if (apart(end, pathEnd) > toleranceM) return false
+  const at = nearestOnLine(start, path)
+  if (at.distanceM > toleranceM) return false
+  const a = path[at.index]!
+  const b = path[at.index + 1]!
+  const joined: XY = [a[0] + (b[0] - a[0]) * at.t, a[1] + (b[1] - a[1]) * at.t]
+  const rest = [joined, ...path.slice(at.index + 1)]
+  return fresh.every((p) => isNear(p, rest, toleranceM)) && rest.every((p) => isNear(p, fresh, toleranceM))
+}
+
+/** Everything the rules need to know about the lines of one poll, on one flat plane. */
+interface Plane {
+  readonly project: (p: LngLat) => XY
+  /** The current route from the driver's position (less a little slack, see aheadOf) on. */
+  readonly ahead: readonly XY[]
+  readonly toleranceM: number
+}
+
+/**
+ * The current route from a little behind the reported position on
+ * (`slackM`), so that fresh routes fetched a moment before the position was
+ * taken, which start slightly behind the driver, still start on the line.
+ */
+function aheadOf(geometry: readonly LngLat[], positionAlongM: number, slackM: number): LngLat[] {
+  return lineFrom(geometry.filter(isValidLngLat), Math.max(0, positionAlongM - slackM))
+}
+
+function planeOf(observation: RerouteObservation, toleranceM: number, slackM: number): Plane | null {
+  const ahead = aheadOf(observation.route.geometry, observation.positionAlongM, slackM)
+  const origin = ahead[0]
+  if (origin === undefined) return null
+  const project = localProjector(origin)
+  return { project, ahead: ahead.map(project), toleranceM }
+}
+
+/**
+ * Which fresh candidate IS the rest of the route being driven: the like-for-
+ * like baseline. Matched by path only (ids differ between polls and are never
+ * compared). When more than one matches, the first in the given order. Null
+ * when none does: the provider no longer offers the current route.
+ */
+export function findCurrentRoute(
+  route: Pick<RouteCandidate, 'geometry'>,
+  positionAlongM: number,
+  candidates: readonly RouteCandidate[],
+  toleranceM: number = SAME_ROUTE_TOLERANCE_M,
+): RouteCandidate | null {
+  const ahead = aheadOf(route.geometry, positionAlongM, DEFAULT_REROUTE_OPTIONS.offRouteM)
+  const origin = ahead[0]
+  if (origin === undefined) return null
+  const project = localProjector(origin)
+  const path = ahead.map(project)
+  return candidates.find((c) => continuesPath(path, c.geometry.filter(isValidLngLat).map(project), toleranceM)) ?? null
+}
+
+/**
+ * Where a candidate leaves the current route ahead of the driver: the last
+ * vertex of the candidate that is still on the current route before the
+ * first one that is not, as meters along the candidate (which starts at the
+ * driver, so this is the distance to the turn-off). Null when it never
+ * leaves, or has no usable line.
+ */
+function divergence(
+  line: readonly LngLat[],
+  xy: readonly XY[],
+  plane: Plane,
+): { atM: number; at: LngLat; index: number } | null {
+  const firstOff = xy.findIndex((p) => !isNear(p, plane.ahead, plane.toleranceM))
+  if (firstOff < 0) return null
+  const index = Math.max(0, firstOff - 1)
+  return { atM: alongRouteM(line.slice(0, index + 1)).at(-1) ?? 0, at: line[index]!, index }
+}
+
+const isEndpointManeuver = (m: Maneuver) => m.kind.startsWith('depart') || m.kind.startsWith('arrive')
+
+/**
+ * The candidate's first maneuver that the current route does not also make:
+ * no maneuver of the same kind at the same place (within the tolerance) on
+ * the current route. Departing and arriving are not maneuvers to plan for.
+ */
+function firstOwnManeuver(
+  candidate: RouteCandidate,
+  current: readonly Maneuver[],
+  plane: Plane,
+): Maneuver | null {
+  const shared = current.filter((m) => !isEndpointManeuver(m)).map((m) => ({ kind: m.kind, at: plane.project(m.location) }))
+  for (const m of candidate.maneuvers) {
+    if (isEndpointManeuver(m) || !Number.isFinite(m.atDistanceM) || !isValidLngLat(m.location)) continue
+    const at = plane.project(m.location)
+    if (!shared.some((s) => s.kind === m.kind && apart(s.at, at) <= plane.toleranceM)) return m
+  }
+  return null
+}
+
+function insideSpan(spans: readonly DistanceSpanM[] | null, atM: number): boolean {
+  return spans !== null && spans.some(([startM, endM]) => atM >= startM - 1 && atM <= endM + 1)
+}
+
+/**
+ * The share of a candidate's own part (from where it leaves the current
+ * route on, the stretches not on the current route) that runs along `other`.
+ */
+function shareAlong(xy: readonly XY[], fromIndex: number, plane: Plane, other: readonly XY[]): number {
+  let ownM = 0
+  let alongOtherM = 0
+  let previousOwn = false
+  for (let i = fromIndex + 1; i < xy.length; i++) {
+    const own = !isNear(xy[i]!, plane.ahead, plane.toleranceM)
+    if (own || previousOwn) {
+      const lengthM = apart(xy[i - 1]!, xy[i]!)
+      ownM += lengthM
+      if (isNear(xy[i - 1]!, other, plane.toleranceM) && isNear(xy[i]!, other, plane.toleranceM)) alongOtherM += lengthM
+    }
+    previousOwn = own
+  }
+  return ownM > 0 ? alongOtherM / ownM : 0
+}
+
+/** One alternative, measured against the current route. */
+interface Measured {
+  readonly candidate: RouteCandidate
+  readonly xy: readonly XY[]
+  readonly alternative: RerouteAlternative
+  readonly divergedAtIndex: number
+}
+
+/**
+ * Where and how soon the driver would have to act to take `candidate`, and
+ * the lead the rules ask for there. Null when the candidate never leaves the
+ * current route (it is the current route, or part of it).
+ */
+function measure(
+  candidate: RouteCandidate,
+  savingSec: number | null,
+  currentManeuvers: readonly Maneuver[],
+  currentSpans: readonly DistanceSpanM[] | null,
+  speedMps: number,
+  plane: Plane,
+  options: RerouteOptions,
+): Measured | null {
+  const line = candidate.geometry.filter(isValidLngLat)
+  const xy = line.map(plane.project)
+  const split = divergence(line, xy, plane)
+  if (split === null) return null
+  // Geometry alone can see the split late: an exit ramp runs within a few
+  // meters of the freeway for its first stretch. The maneuver says where the
+  // driver really has to act, so the sooner of the two is used.
+  const own = firstOwnManeuver(candidate, currentManeuvers, plane)
+  const byManeuver = own !== null && own.atDistanceM < split.atM
+  const turnInM = byManeuver ? Math.max(0, own.atDistanceM) : split.atM
+  const turnAt = byManeuver ? own.location : split.at
+  // Freeway when the road at the turn-off is controlled-access on the candidate's
+  // own record, or else on the current route's. Unknown road class is not freeway:
+  // the speed rule (minLeadTimeSec) still stretches the lead at freeway speeds.
+  const onFreeway = insideSpan(candidate.limitedAccessSpansM ?? currentSpans, turnInM)
+  const speed = Number.isFinite(speedMps) && speedMps > 0 ? speedMps : 0
+  const requiredLeadM = Math.max(
+    options.minLeadDistanceM,
+    speed * options.minLeadTimeSec,
+    onFreeway ? options.freewayLeadDistanceM : 0,
+  )
+  return {
+    candidate,
+    xy,
+    alternative: { routeId: candidate.id, savingSec, turnInM, turnAt, requiredLeadM, onFreeway },
+    divergedAtIndex: split.index,
+  }
+}
+
+/** The limited-access spans of the route being driven, re-measured from the driver's position. */
+function spansAhead(spans: readonly DistanceSpanM[] | null, positionAlongM: number): DistanceSpanM[] | null {
+  if (spans === null) return null
+  return spans
+    .filter(([, endM]) => endM > positionAlongM)
+    .map(([startM, endM]): DistanceSpanM => [Math.max(0, startM - positionAlongM), endM - positionAlongM])
+}
+
+function usableEta(route: RouteCandidate): boolean {
+  return Number.isFinite(route.durationSec) && route.durationSec >= 0
+}
+
+/**
+ * Decides, after one poll, whether to stay on the route being driven or to
+ * switch to another one. Call it once per poll with the state the last call
+ * returned (INITIAL_REROUTE_STATE at the start of a drive). On 'switch' the
+ * caller starts driving the candidate `toRouteId` and from then on reports
+ * positions along that route.
+ *
+ * The rules, in the order they are applied:
+ *
+ * 1. **Failed poll** (candidates null): stay. Only the failedPolls counter
+ *    changes, however many polls fail in a row; a confirmation in progress
+ *    is neither advanced nor lost.
+ * 2. **No usable routes** (empty list, or no route with a line to drive): stay.
+ * 3. **Off route**: the fresh routes start more than `offRouteM` from the
+ *    current route's line, anywhere along it (or the caller says so with
+ *    observation.offRouteM).
+ *    The current route is not being driven any more, so the top-ranked fresh
+ *    route is taken at once: no saving, confirmation, cooldown or lead test.
+ * 4. **Like-for-like baseline.** The fresh candidate that IS the rest of the
+ *    current route (findCurrentRoute: same path within `sameRouteToleranceM`
+ *    from the driver to the destination) gives the current route's fresh ETA.
+ *    Route ids are never compared across polls.
+ * 5. **Current route no longer offered** (no candidate matches): its ETA is
+ *    unknown, and one such poll proves nothing (the provider returns three
+ *    routes at most, and a small change can push the current one out). Stay
+ *    until that has happened `routeLostPolls` polls in a row; then take the
+ *    best-ranked fresh route that still passes the too-late guard, once the
+ *    cooldown is over. The no-return rule cannot be applied here (there is
+ *    no saving to double without a baseline) and is not: a current route the
+ *    provider has dropped from its best three is no longer the route to
+ *    defend, even against the one left a few minutes ago. The wait of
+ *    `routeLostPolls` polls and the cooldown are what prevent flip-flopping.
+ * 6. **Missing data.** No travel time on the current route, or (with
+ *    `requireTypicalDuration`) no typical duration on it, so its ETA is not
+ *    known to include traffic: stay. An alternative lacking either is passed
+ *    over. No alternative at all: stay.
+ * 7. **Order of preference** is rankRoutes: best ETA first, signal count only
+ *    breaking ETA ties, counts with partial coverage unknown. The
+ *    alternatives are tried in that order and the first to pass rules 8 to
+ *    10 wins the poll. So signals choose between alternatives the ETA cannot
+ *    tell apart, and never justify a switch on their own: fewer signals with
+ *    an equal ETA is not worth a change of route in the middle of a drive.
+ * 8. **Minimum saving**: baseline ETA minus the alternative's ETA must be at
+ *    least `minSavingSec` AND at least `minSavingFraction` of the baseline.
+ * 9. **No return**: an alternative that goes back to a route left less than
+ *    `noReturnSec` ago (see returnOverlapFraction) needs `returnSavingFactor`
+ *    times both minimums.
+ * 10. **Too late**: the turn-off is where the alternative's line leaves the
+ *    current route's line ahead of the driver, or the alternative's first
+ *    maneuver that the current route does not share, whichever is sooner.
+ *    It must be at least max(`minLeadDistanceM`, speed x `minLeadTimeSec`)
+ *    ahead, and at least `freewayLeadDistanceM` when it is on controlled-
+ *    access road (limitedAccessSpansM).
+ * 11. **Confirmation**: the winner must be the same alternative (same path
+ *    ahead) for `confirmPolls` polls in a row. A poll with no winner, or a
+ *    different one, starts the count again.
+ * 12. **Cooldown**: no switch within `cooldownSec` of the last one. The
+ *    confirmation count keeps running meanwhile.
+ *
+ * Pure: no clock, no randomness, no I/O. Never throws on odd input.
+ */
+export function decideReroute(
+  state: RerouteState,
+  observation: RerouteObservation,
+  options: Partial<RerouteOptions> = {},
+): RerouteDecision {
+  const opts = resolveOptions(options)
+  const nowSec = observation.nowSec
+  const stay = (
+    code: RerouteCode,
+    reason: string,
+    nextState: RerouteState,
+    considered: RerouteAlternative | null = null,
+  ): RerouteDecision => ({ action: 'stay', reason: `Staying: ${reason}`, code, considered, nextState })
+
+  // Rule 1.
+  if (observation.candidates === null) {
+    const failedPolls = state.failedPolls + 1
+    return stay(
+      'poll-failed',
+      failedPolls === 1 ? 'could not check for faster routes' : `could not check for faster routes, ${failedPolls} tries in a row`,
+      { ...state, failedPolls },
+    )
+  }
+
+  // What every answered poll does to the state, whatever is decided.
+  const base: RerouteState = {
+    ...state,
+    failedPolls: 0,
+    abandoned: state.abandoned.filter((a) => nowSec - a.atSec < opts.noReturnSec),
+  }
+  const noWinner: RerouteState = { ...base, pending: null }
+
+  // Rule 2.
+  const candidates = observation.candidates.filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
+  const plane = planeOf(observation, opts.sameRouteToleranceM, opts.offRouteM)
+  if (candidates.length === 0 || plane === null) return stay('no-routes', 'no routes available right now', noWinner)
+  // A route without a travel time ranks last (see rankRoutes) and is never switched to.
+  const ranked = rankRoutes(candidates, { etaTieWindowSec: opts.etaTieWindowSec }).map((r) => r.route)
+
+  const switchTo = (
+    code: RerouteCode,
+    reason: string,
+    to: RouteCandidate,
+    considered: RerouteAlternative | null,
+  ): RerouteDecision => ({
+    action: 'switch',
+    toRouteId: to.id,
+    reason: `Switching: ${reason}`,
+    code,
+    considered,
+    nextState: {
+      pending: null,
+      lastSwitchAtSec: nowSec,
+      abandoned: [...base.abandoned, { geometry: lineFrom(observation.route.geometry, observation.positionAlongM), atSec: nowSec }],
+      failedPolls: 0,
+      lostPolls: 0,
+    },
+  })
+
+  // Rule 3. Measured against the whole route, the part already driven included:
+  // fresh routes that start on the route but behind the driver are a stale
+  // answer (see RerouteObservation.positionAlongM), not a driver who left the route.
+  const startsAt = plane.project(candidates[0]!.geometry.filter(isValidLngLat)[0]!)
+  const offBy =
+    observation.offRouteM !== undefined && Number.isFinite(observation.offRouteM)
+      ? observation.offRouteM
+      : nearestOnLine(startsAt, observation.route.geometry.filter(isValidLngLat).map(plane.project)).distanceM
+  if (offBy > opts.offRouteM) {
+    return switchTo('off-route', 'off the planned route, taking the fastest route from here', ranked[0]!, null)
+  }
+
+  const sinceSwitchSec = base.lastSwitchAtSec === null ? Infinity : nowSec - base.lastSwitchAtSec
+  const coolingDown = sinceSwitchSec < opts.cooldownSec
+  const abandonedLines = base.abandoned.map((a) => ({
+    atSec: a.atSec,
+    xy: a.geometry.filter(isValidLngLat).map(plane.project),
+  }))
+  /** The route left most recently that this alternative goes back to, if any. */
+  const returnsTo = (m: Measured) =>
+    abandonedLines
+      .filter((a) => shareAlong(m.xy, m.divergedAtIndex, plane, a.xy) >= opts.returnOverlapFraction)
+      .sort((a, b) => b.atSec - a.atSec)[0] ?? null
+  const tooLate = (a: RerouteAlternative) => a.turnInM < a.requiredLeadM
+  const tooLateReason = (a: RerouteAlternative, what: string) =>
+    `${what} turns off in ${spokenDistance(a.turnInM)}, too late to take safely`
+  const turnPhrase = (a: RerouteAlternative) => `turn in ${spokenDistance(a.turnInM)}`
+
+  // Rule 4.
+  const isCurrent = (c: RouteCandidate) =>
+    continuesPath(plane.ahead, c.geometry.filter(isValidLngLat).map(plane.project), opts.sameRouteToleranceM)
+  const current = ranked.find(isCurrent) ?? null
+
+  // Rule 5.
+  if (current === null) {
+    const lostPolls = base.lostPolls + 1
+    const lost: RerouteState = { ...noWinner, lostPolls }
+    if (lostPolls < opts.routeLostPolls) {
+      return stay(
+        'route-lost-waiting',
+        `current route is missing from the fresh routes, check ${lostPolls} of ${opts.routeLostPolls}`,
+        lost,
+      )
+    }
+    if (coolingDown) {
+      return stay('cooldown', `switched routes ${spokenDuration(sinceSwitchSec)} ago, and the current route is no longer offered`, lost)
+    }
+    const spans = spansAhead(observation.route.limitedAccessSpansM, observation.positionAlongM)
+    let closest: RerouteAlternative | null = null
+    for (const candidate of ranked.filter(usableEta)) {
+      const m = measure(candidate, null, observation.route.maneuvers, spans, observation.speedMps, plane, opts)
+      if (m === null) continue
+      closest ??= m.alternative
+      if (tooLate(m.alternative)) continue
+      return switchTo(
+        'route-lost',
+        `current route is no longer offered, ${turnPhrase(m.alternative)}`,
+        candidate,
+        m.alternative,
+      )
+    }
+    return closest === null
+      ? stay('route-lost', 'current route is no longer offered, and there is no other route to take', lost)
+      : stay('too-late', tooLateReason(closest, 'current route is no longer offered, but the other route'), lost, closest)
+  }
+  const found: RerouteState = { ...base, lostPolls: 0 }
+  const foundNoWinner: RerouteState = { ...found, pending: null }
+
+  // Rule 6.
+  const baselineSec = current.durationSec
+  if (!usableEta(current)) return stay('no-eta', 'no travel time for the current route', foundNoWinner)
+  if (opts.requireTypicalDuration && current.typicalDurationSec === null) {
+    return stay('no-traffic-data', 'no traffic data for the current route', foundNoWinner)
+  }
+  const others = ranked.filter((c) => c !== current && !isCurrent(c))
+  if (others.length === 0) return stay('no-alternative', 'no other route available right now', foundNoWinner)
+  const comparable = others.filter(
+    (c) => usableEta(c) && (!opts.requireTypicalDuration || c.typicalDurationSec !== null),
+  )
+  if (comparable.length === 0) return stay('no-traffic-data', 'no comparable travel time for the other routes', foundNoWinner)
+
+  // Rules 7 to 10: the first alternative, in rank order, that passes them all.
+  let winner: Measured | null = null
+  let refusal: { code: RerouteCode; reason: string; considered: RerouteAlternative } | null = null
+  for (const candidate of comparable) {
+    const savingSec = baselineSec - candidate.durationSec
+    if (savingSec <= 0) continue
+    const m = measure(candidate, savingSec, current.maneuvers, current.limitedAccessSpansM, observation.speedMps, plane, opts)
+    if (m === null) continue
+    const a = m.alternative
+    const refuse = (code: RerouteCode, reason: string) => {
+      refusal ??= { code, reason, considered: a }
+    }
+    if (savingSec < opts.minSavingSec) {
+      refuse('saving-too-small', `faster route saves only ${spokenDuration(savingSec)}`)
+      continue
+    }
+    if (savingSec < opts.minSavingFraction * baselineSec) {
+      refuse(
+        'saving-share-too-small',
+        `faster route saves only ${spokenDuration(savingSec)} of the remaining ${spokenDuration(baselineSec)}`,
+      )
+      continue
+    }
+    const left = returnsTo(m)
+    if (
+      left !== null &&
+      (savingSec < opts.returnSavingFactor * opts.minSavingSec ||
+        savingSec < opts.returnSavingFactor * opts.minSavingFraction * baselineSec)
+    ) {
+      refuse(
+        'recently-abandoned',
+        `faster route is the one we left ${spokenDuration(nowSec - left.atSec)} ago, and it saves only ${spokenDuration(savingSec)}`,
+      )
+      continue
+    }
+    if (tooLate(a)) {
+      refuse('too-late', tooLateReason(a, 'faster route'))
+      continue
+    }
+    winner = m
+    break
+  }
+
+  if (winner === null) {
+    // TypeScript cannot see the assignments made inside the loop's closure.
+    const refused = refusal as { code: RerouteCode; reason: string; considered: RerouteAlternative } | null
+    return refused === null
+      ? stay('current-best', 'current route is still the fastest', foundNoWinner)
+      : stay(refused.code, refused.reason, foundNoWinner, refused.considered)
+  }
+
+  // Rule 11.
+  const a = winner.alternative
+  const saves = `saves ${spokenDuration(a.savingSec ?? 0)}`
+  const sameAsPending =
+    found.pending !== null &&
+    continuesPath(found.pending.geometry.filter(isValidLngLat).map(plane.project), winner.xy, opts.sameRouteToleranceM)
+  const polls = sameAsPending ? found.pending!.polls + 1 : 1
+  const confirmed: RerouteState = { ...found, pending: { geometry: winner.candidate.geometry, polls } }
+  if (polls < opts.confirmPolls) {
+    return stay('confirming', `faster route ${saves}, confirming, check ${polls} of ${opts.confirmPolls}`, confirmed, a)
+  }
+  // Rule 12.
+  if (coolingDown) {
+    return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a)
+  }
+  return switchTo('faster-route', `${saves}, ${turnPhrase(a)}`, winner.candidate, a)
+}

@@ -16,11 +16,15 @@ export type {
 export {
   allWithin,
   alongRouteM,
+  bearingDeg,
   boundsOf,
   distanceM,
   isValidLngLat,
+  lineFrom,
   localProjector,
+  pointAtDistance,
   pointToSegment,
+  type PointOnLine,
   type XY,
 } from './geo.ts'
 export { delayVsTypicalSec } from './facts.ts'
@@ -40,6 +44,18 @@ export {
   recommendedRouteId,
   type RankOptions,
 } from './rank.ts'
+export {
+  decideReroute,
+  DEFAULT_REROUTE_OPTIONS,
+  findCurrentRoute,
+  INITIAL_REROUTE_STATE,
+  type RerouteAlternative,
+  type RerouteCode,
+  type RerouteDecision,
+  type RerouteObservation,
+  type RerouteOptions,
+  type RerouteState,
+} from './reroute.ts'
 export {
   resolveSelectedId,
   SAME_ROUTE_TOLERANCE_M,
