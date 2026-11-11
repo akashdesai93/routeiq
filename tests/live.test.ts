@@ -752,3 +752,94 @@ describe('arriving and ending', () => {
     expect(s.start()[0]).toEqual({ type: 'set-muted', muted: true })
   })
 })
+
+describe('stalls and stale answers (#26, #27, #28)', () => {
+  it('#26: keep-previous with a check in flight lets checks go on at the poll interval', () => {
+    const opts = { pollIntervalSec: 10 }
+    const faster = (xM: number) => routesAt(xM, { A: 1300, B: 1000 })
+    const s = driving(opts)
+    let sentAt: number | null = null
+    let t = 0
+    // Every answer takes 3 s, so a check is out while the switch banner is still up.
+    while (s.state.switches.length === 0 && t < 400) {
+      t++
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null && sentAt === null) sentAt = t
+      if (s.state.request !== null && sentAt !== null && t - sentAt >= 3) {
+        s.answer(faster(15 * sentAt))
+        sentAt = null
+      }
+    }
+    while (s.state.request === null) {
+      t++
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+    }
+    expect(s.state.switchBanner).not.toBeNull()
+    // The runner aborts the fetch: no 'routes' event will come for it.
+    const effects = s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    expect(effects[0]).toEqual({ type: 'cancel-request' })
+    expect(s.state.request).toBeNull()
+    const before = s.requests().length
+    for (let k = t + 1; k <= t + 600; k++) {
+      s.setTime(k)
+      s.fix(15 * k)
+      s.tick()
+      if (s.state.request !== null) s.answer(routesAt(15 * k, { A: 1300 }))
+    }
+    expect(s.requests().length - before).toBeGreaterThan(0)
+  })
+
+  it('#27: a replan answered after the car is back on the line does not force an off-route switch', () => {
+    const s = driving()
+    cruise(s, 65)
+    for (const t of [66, 67, 68]) {
+      s.setTime(t)
+      s.fix(15 * t, 120) // 3 fixes 120 m to the side: replan sent
+    }
+    expect(s.state.request).toMatchObject({ purpose: 'replan' })
+    for (const t of [69, 70]) {
+      s.setTime(t)
+      s.fix(15 * t, 0) // back on A
+    }
+    expect(s.state.tracking!.offFixes).toBe(0)
+    s.setTime(71)
+    s.answer(routesAt(15 * 68, { A: 1300, C: 1290 })) // A itself, and C only 10 s faster
+    expect(nameOf(s.state.route!)).toBe('A')
+    expect(s.state.switches).toEqual([])
+    // The answer went through the usual rules: 10 s is below the minimum saving.
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'saving-too-small' })
+    expect(s.spoken().some((line) => line.startsWith('New route'))).toBe(false)
+  })
+
+  it('#28: keep-previous after a route-lost switch waits for the full count again', () => {
+    const s = driving()
+    cruise(s, 59)
+    // The road ahead on A is never found again (baseline: []): lost checks, then a route-lost switch.
+    const lost = (t: number) => {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null) s.answer(routesAt(15 * t, { B: 1300, C: 1310 }), undefined, [])
+    }
+    let t = 60
+    while (s.state.switches.length === 0 && t <= 400) lost(t++)
+    expect(s.state.switches.map((w) => w.code)).toEqual(['route-lost'])
+    s.setTime(t)
+    s.fix(15 * t)
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() }) // driver keeps A
+    expect(nameOf(s.state.route!)).toBe('A')
+    // The next lost check after the decline is check 1 of 3, not a second switch.
+    const checksBefore = s.requests().length
+    const until = t + 200
+    for (t = t + 1; s.requests().length === checksBefore && t <= until; t++) lost(t)
+    expect(s.requests().length).toBe(checksBefore + 1)
+    expect(s.state.switches).toEqual([])
+    expect(nameOf(s.state.route!)).toBe('A')
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    expect(s.state.lastDecision!.reason).toContain('check 1 of 3')
+  })
+})
