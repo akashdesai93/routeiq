@@ -743,10 +743,22 @@ then ranks what comes back with the other routes, by the same rules
 (ETA first, signals only inside 30 s), so a side street wins only on ETA. A probed route
 is marked "via side streets" in the route list.
 
+- **Selection.** When a probed route comes back faster and the user has not picked a
+  route, the selection moves to it (it is now the recommended one), and a polite live
+  region says so: "Faster route found via side streets, saves N min." (`sideStreetNotice`,
+  src/core/probe.ts: minutes against the best route Mapbox offered, rounded; "under a
+  minute" below 30 s; a probe that won only on the signal tie-break is not called faster).
+  The pointer over the route list or Start drive, or keyboard focus on either, counts as a
+  pick of the route selected then, so a route that joins (and reorders the list) cannot
+  move the selection under a tap or a Start drive already on its way.
+- **Signal counts.** While a probed route's signal tiles load, the routes already counted
+  keep their counts (and their tie-break); only the new route shows "Counting signals…".
+
 - **When.** Probes go out 800 ms after the main routes arrive (`debounceMs`). The main
   routes never wait for them: they show, rank and get their signal counts first, and a
   probed route joins the list (and the ranking) when it comes back. A pin move, a picked
-  place or a retry cancels the wait and aborts any probe in flight.
+  place or a retry cancels the wait and aborts any probe in flight, and an answer for the
+  old trip that arrives anyway is ignored.
 - **How many.** At most `requestsPerPlan` (2) probe requests per plan, cut from
   `selectViaPoints`' order. A trip with nothing to probe (freeway-only, or under 3 km)
   makes none. Probes are not made during a drive yet (the reroute engine, #5).
@@ -756,7 +768,14 @@ is marked "via side streets" in the route list.
   parameter can "guide the path of the route without introducing additional legs"
   ([Directions API, `waypoints`](https://docs.mapbox.com/api/navigation/directions/),
   checked Nov 11, 2026), so the answer is one leg, with no stop or "arrive" at the via,
-  and its ETA is a drive straight through.
+  and its ETA is a drive straight through. It also sends `radiuses=unlimited;250;unlimited`
+  (`viaRadiusM`): the docs say "There must be as many radiuses as there are coordinates in
+  the request", each "any number greater than 0 or the string unlimited", and "A NoSegment
+  error is returned if no routable road is located within the radius"
+  ([Directions API, `radiuses`](https://docs.mapbox.com/api/navigation/directions/#optional-parameters),
+  checked Nov 11, 2026). A via in a field or a lake then comes back as NoSegment instead of
+  snapping onto the nearest road, which is often the fastest route itself (a billed request
+  for a certain repeat) or a dead end. The origin and destination may move as far as they must.
 - **Failures are dropped.** A via too far from a road (`NoSegment`, HTTP 200 per the
   docs' error table), no route, rate limiting, an HTTP or network error or an abort makes
   that probe come back empty. Nothing is shown and the plan is untouched.
@@ -765,6 +784,11 @@ is marked "via side streets" in the route list.
   only when its path differs from every route in the list (`sameRouteGeometry`, 10 m, the
   same test that keeps a picked route selected; ids are not compared), and tags it
   `source: 'probe'`.
+- **Dead-end spurs are dropped.** A probed route that passes within 10 m of every point of
+  a route already in the list, that route sampled every `coverSampleM` (10 m), is that route
+  plus a spur or loop out to the via: never faster, and not a side street. `coversRoute`
+  checks one way only, so the probe's extra roads are allowed, and the sampling between
+  vertices keeps a real cut-through that leaves a long straight segment.
 
 | `DEFAULT_PROBE_BUDGET` | Default | Meaning |
 | --- | --- | --- |
@@ -801,6 +825,8 @@ per-segment times yet, so the longest stretch stands in for the slowest.
 | `offsetsM` | 500, 800 m | Distances from the route tried per side, nearest first |
 | `clearOfRoutesM` | 250 m | A point this close to any known route is not used |
 | `headingWindowM` | 150 m | Route heading at the probe spot is taken over ± this |
+| `viaRadiusM` | 250 m | How far Mapbox may move the via onto a road (`radiuses`); no more than `clearOfRoutesM`, so a via never snaps back onto a known route |
+| `coverSampleM` | 10 m | A known route is sampled this often when checking whether a probe covers it (dead-end spur) |
 
 ## Live drive
 
@@ -972,7 +998,10 @@ Pin positions go to Mapbox, which is how routes are found. They go nowhere else.
 Side-street probes (up to two per plan) send Mapbox the same trip again with one point
 in between: a point 500 or 800 m beside the fastest route Mapbox itself returned, made on
 the device from that route. It says nothing new about you and goes to Mapbox only, in a
-Directions request like the plan's own; it is not stored or logged.
+Directions request like the plan's own; it is not stored or logged. A probed route is
+counted for signals like any other route: inside the bundled area its tiles are the app's
+own files, and outside it a tile the bundle does not cover can be asked of Overpass (the
+tile's bounding box only, as below).
 During a simulated drive the simulated car's position and heading go to Mapbox the same
 way, once per check; that position is a point on the route already on screen, not
 anyone's location. The drive, its log and the reroute settings are kept in memory only.

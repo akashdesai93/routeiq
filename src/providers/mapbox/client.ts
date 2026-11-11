@@ -21,6 +21,12 @@ export interface ViaPoint {
   readonly point: LngLat
   /** Degrees clockwise from true north. Sent as that coordinate's `bearings` entry. */
   readonly bearingDeg?: number
+  /**
+   * How far Mapbox may move the point to snap it onto a road, in meters. Sent
+   * as that coordinate's `radiuses` entry; left out (or not a positive number)
+   * it is `unlimited`, as the origin and destination always are.
+   */
+  readonly radiusM?: number
 }
 
 /**
@@ -86,6 +92,13 @@ export function buildDirectionsUrl(
     deg !== undefined && Number.isFinite(deg) ? `${((Math.round(deg) % 360) + 360) % 360},${HEADING_RANGE_DEG}` : ''
   const bearings = [bearing(options.originHeadingDeg), ...via.map((v) => bearing(v.bearingDeg)), '']
   if (bearings.some((b) => b !== '')) query.set('bearings', bearings.join(';'))
+  // Mapbox docs (Directions, `radiuses`, checked Nov 2026): "There must be as many radiuses
+  // as there are coordinates in the request", each "any number greater than 0 or the string
+  // unlimited", and "A NoSegment error is returned if no routable road is located within the
+  // radius". Sent only when a via sets one.
+  const radius = (m: number | undefined) => (m !== undefined && Number.isFinite(m) && m > 0 ? String(Math.max(1, Math.round(m))) : 'unlimited')
+  const radiuses = ['unlimited', ...via.map((v) => radius(v.radiusM)), 'unlimited']
+  if (radiuses.some((r) => r !== 'unlimited')) query.set('radiuses', radiuses.join(';'))
   // Only the first and the last coordinate are waypoints; the ones between guide the path.
   if (via.length > 0) query.set('waypoints', `0;${via.length + 1}`)
   query.set('access_token', token)
@@ -167,6 +180,11 @@ export interface FetchProbeRouteOptions {
   via: LngLat
   destination: LngLat
   token: string
+  /**
+   * How far the via may be moved onto a road, in meters (ProbeOptions.viaRadiusM).
+   * A via with no road this close comes back as NoSegment, so null. Left out: unlimited.
+   */
+  viaRadiusM?: number
   signal?: AbortSignal
   fetchImpl?: typeof fetch
 }
@@ -177,15 +195,18 @@ export interface FetchProbeRouteOptions {
  * the answer is one leg with no stop at the via and its ETA is a drive
  * straight through. Mapbox docs (Directions, `waypoints`, checked Nov 2026):
  * "guide the path of the route without introducing additional legs".
+ * The via goes with a `radiuses` entry of `viaRadiusM` (the ends unlimited),
+ * so a via in a field or a lake is NoSegment rather than snapped onto the
+ * nearest road, which is often the base route itself or a dead end.
  *
  * Null for anything but a usable route: NoSegment (the via is too far from a
  * road), NoRoute, an HTTP or network error, rate limiting, an abort. A probe
  * is extra, so its failure is dropped silently and never reaches the user.
  */
 export async function fetchProbeRoute(options: FetchProbeRouteOptions): Promise<RouteCandidate | null> {
-  const { origin, via, destination, token, signal, fetchImpl } = options
+  const { origin, via, destination, token, viaRadiusM, signal, fetchImpl } = options
   // buildDirectionsUrl leaves a bad via out, which would ask for the plain trip instead.
   if (!isValidLngLat(via)) return null
-  const result = await fetchDirections({ origin, destination, token, via: [{ point: via }], signal, fetchImpl })
+  const result = await fetchDirections({ origin, destination, token, via: [{ point: via, radiusM: viaRadiusM }], signal, fetchImpl })
   return result.ok ? (result.routes[0] ?? null) : null
 }

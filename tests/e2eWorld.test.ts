@@ -63,5 +63,8 @@ describe('e2e road network', () => {
     expect(far.road).toBeNull()
     const noSegment = parseDirections(far.answer)
     expect(!noSegment.ok && noSegment.kind).toBe('no-segment')
+    // With a 250 m radius (the probes' radiuses entry) S, 200 m away, is still reached; A, 500 m away, is not.
+    expect(withS.through(UPTOWN, west, FREE_FLOW, 1, 250).road).toBe('S')
+    expect(world.through(UPTOWN, west, FREE_FLOW, 1, 250).road).toBeNull()
   })
 })

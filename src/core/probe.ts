@@ -48,6 +48,22 @@ export interface ProbeOptions {
    * and after it, so a vertex or a kink in the line does not tilt the offset.
    */
   readonly headingWindowM: number
+  /**
+   * How far Mapbox may move the via point to snap it onto a road, in meters:
+   * sent as the via's `radiuses` entry (the origin and destination stay
+   * `unlimited`). No more than clearOfRoutesM, so a via can never snap back
+   * onto a route already known; a via with no road this close comes back as
+   * NoSegment instead of snapping onto a far road or a dead end.
+   */
+  readonly viaRadiusM: number
+  /**
+   * A probed route that passes within the same-route tolerance of every point
+   * of a known route, that route sampled this often (meters), is the known
+   * route plus a detour (a dead-end spur or a loop) and is dropped by
+   * mergeProbeRoutes. Sampling between the vertices keeps a real cut-through
+   * that leaves a long straight segment from being taken for one.
+   */
+  readonly coverSampleM: number
 }
 
 export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
@@ -58,6 +74,8 @@ export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
   offsetsM: [500, 800],
   clearOfRoutesM: 250,
   headingWindowM: 150,
+  viaRadiusM: 250,
+  coverSampleM: 10,
 }
 
 /** Which side of the base route, facing the direction of travel. */
@@ -247,26 +265,116 @@ export function planProbes(
 }
 
 /**
+ * The line sampled every `sampleM` meters along it, its own vertices
+ * included. A step that is not a positive number gives the vertices only.
+ */
+function sampled(line: readonly LngLat[], sampleM: number): LngLat[] {
+  if (!(Number.isFinite(sampleM) && sampleM > 0)) return [...line]
+  const out: LngLat[] = []
+  for (let i = 0; i < line.length; i++) {
+    const p = line[i]!
+    const prev = line[i - 1]
+    if (prev !== undefined) {
+      const pieces = Math.ceil(distanceM(prev, p) / sampleM)
+      for (let k = 1; k < pieces; k++) {
+        out.push([prev[0] + ((p[0] - prev[0]) * k) / pieces, prev[1] + ((p[1] - prev[1]) * k) / pieces])
+      }
+    }
+    out.push(p)
+  }
+  return out
+}
+
+/**
+ * True when `probe` passes within `toleranceM` of every point of `known`,
+ * `known` sampled every `sampleM` meters: the probe drives all of the known
+ * route and something more (a dead-end spur, a loop to the via), so it can
+ * only be slower. One-way on purpose: the probe's own extra roads are
+ * allowed. Sampling between vertices matters: a cut-through that leaves a
+ * long straight segment of the known route (no vertices of its own there)
+ * would otherwise pass for covering it.
+ */
+export function coversRoute(
+  probe: readonly LngLat[],
+  known: readonly LngLat[],
+  toleranceM: number = SAME_ROUTE_TOLERANCE_M,
+  sampleM: number = DEFAULT_PROBE_OPTIONS.coverSampleM,
+): boolean {
+  if (probe.length < 2 || known.length < 2) return false
+  const project = localProjector(known[0]!)
+  const line = probe.map(project)
+  const segments = line.length - 1
+  // Consecutive samples are usually beside the same segment: each search starts at the last hit.
+  let last = 0
+  return sampled(known, sampleM).every((point) => {
+    const p = project(point)
+    for (let k = 0; k < segments; k++) {
+      const i = (last + k) % segments
+      if (pointToSegment(p, line[i]!, line[i + 1]!).distanceM <= toleranceM) {
+        last = i
+        return true
+      }
+    }
+    return false
+  })
+}
+
+/**
  * The provider's routes with the probed ones added (PLAN step 11b). A probed
  * route is tagged `source: 'probe'` and kept only when it is a new path. One
  * that follows the same roads as a route already in the set (sameRouteGeometry
  * in select.ts; ids are not compared) is dropped: that is what happens when
- * Mapbox snaps a via point back onto a known route. Probes are deduplicated
- * among themselves too, the earlier one kept, and a probed route with no
- * usable travel time or line is dropped. The provider's routes come first, as
- * they came. Ranking is left to rankRoutes, unchanged, so a probed route wins
- * only on ETA.
+ * Mapbox snaps a via point back onto a known route. So is one that covers a
+ * route already in the set (coversRoute): that route plus a dead-end spur or
+ * a loop out to the via, never faster and not a side street. Probes are
+ * deduplicated among themselves too, the earlier one kept, and a probed route
+ * with no usable travel time or line is dropped. The provider's routes come
+ * first, as they came. Ranking is left to rankRoutes, unchanged, so a probed
+ * route wins only on ETA.
  */
 export function mergeProbeRoutes(
   candidates: readonly RouteCandidate[],
   probed: readonly RouteCandidate[],
   toleranceM: number = SAME_ROUTE_TOLERANCE_M,
+  coverSampleM: number = DEFAULT_PROBE_OPTIONS.coverSampleM,
 ): RouteCandidate[] {
   const merged = [...candidates]
   for (const route of probed) {
     if (!usable(route)) continue
     if (merged.some((known) => sameRouteGeometry(known.geometry, route.geometry, toleranceM))) continue
+    if (merged.some((known) => usable(known) && coversRoute(route.geometry, known.geometry, toleranceM, coverSampleM))) continue
     merged.push({ ...route, source: 'probe' })
   }
   return merged
+}
+
+/**
+ * The line to tell the user when a probed route is recommended (PLAN step
+ * 11b), from rankRoutes' order. Null when the top route is not a probed one,
+ * or there is no route from the provider to compare it with. The saving is
+ * against the best route the provider offered itself, in whole minutes
+ * (rounded); under a minute says so, and a probe that is no faster (it won on
+ * the signal tie-break, or on distance) is not called faster, and has fewer
+ * signals only when both counts are full and known.
+ */
+export function sideStreetNotice(ranked: readonly { readonly route: RouteCandidate }[]): string | null {
+  const top = ranked[0]?.route
+  if (top === undefined || top.source !== 'probe') return null
+  const known = ranked.find((r) => r.route.source !== 'probe')?.route
+  if (known === undefined) return null
+  const savedSec = known.durationSec - top.durationSec
+  if (!Number.isFinite(savedSec)) return null
+  if (savedSec <= 0) {
+    // Fewer signals is said only when both counts are whole and known (unknown is never zero).
+    const full = (r: RouteCandidate) => (r.signalCoverage === 'full' && r.signalCount !== null && Number.isFinite(r.signalCount) ? r.signalCount : null)
+    const topSignals = full(top)
+    const knownSignals = full(known)
+    return topSignals !== null && knownSignals !== null && topSignals < knownSignals
+      ? 'Route via side streets recommended: about the same time, fewer signals.'
+      : 'Route via side streets recommended: about the same time.'
+  }
+  const minutes = Math.round(savedSec / 60)
+  return minutes < 1
+    ? 'Faster route found via side streets, saves under a minute.'
+    : `Faster route found via side streets, saves ${minutes} min.`
 }

@@ -236,6 +236,9 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
             loading={routing.loading}
             error={routing.error}
             onSelect={driving ? ignore : routing.select}
+            onKeepSelection={driving ? ignore : routing.keepSelection}
+            sideStreetNotice={polled !== null ? null : routing.sideStreetNotice}
+            countingRouteIds={polled !== null ? undefined : routing.countingRouteIds}
             onRetry={routing.retry}
             signalsStatus={routing.signalsStatus}
             signalsError={routing.signalsError}

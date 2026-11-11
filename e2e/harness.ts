@@ -14,7 +14,7 @@
 // scenario attaches what was said out loud, in order.
 
 import { readFileSync } from 'node:fs'
-import { test as base, expect, type Page, type Route, type TestInfo } from '@playwright/test'
+import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, type E2EWindow } from './browserStubs.ts'
 import { along, alongOf, FREE_FLOW, sideStep, World, type LngLat, type Traffic } from './world/roads.ts'
 
@@ -47,6 +47,11 @@ export interface Outside {
   sideStreet?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
   mapboxStatus?: number
+  /**
+   * Side-street probes are not answered until `releaseProbes()`: each waits,
+   * the way a slow answer from Mapbox would. Default: answered at once.
+   */
+  holdProbes?: boolean
   /** Answers an Overpass tile query. Default: 504 (busy). */
   overpass?: (query: string) => { status: number; body?: unknown }
 }
@@ -80,7 +85,11 @@ export class App {
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
   /** Side-street probes (requests with a via point), in order: the road each one came back on, null for NoSegment. */
-  readonly probes: { forRequest: number; road: string | null; durationSec: number | null }[] = []
+  readonly probes: { forRequest: number; destination: LngLat; road: string | null; durationSec: number | null; radiuses: string | null }[] = []
+  /** Probe requests the page itself cancelled (aborted) before they were answered, by their index in `probes`. */
+  readonly abortedProbes: number[] = []
+  private held: (() => Promise<void>)[] = []
+  private readonly heldRequests = new Map<Request, number>()
   readonly unexpected: string[] = []
   outside: Outside = {}
   private shot = 0
@@ -103,6 +112,10 @@ export class App {
   async open(options: { fakeClock?: boolean; storage?: Record<string, string>; path?: string } = {}) {
     const { page } = this
     await page.context().route('**/*', (route) => this.answer(route))
+    page.on('requestfailed', (request) => {
+      const index = this.heldRequests.get(request)
+      if (index !== undefined) this.abortedProbes.push(index)
+    })
     await page.addInitScript(installBrowserStubs)
     if (options.storage !== undefined) {
       await page.addInitScript((items) => {
@@ -120,6 +133,29 @@ export class App {
     await expect(this.page.locator('.route-badge', { hasText: 'Recommended' })).toBeVisible({ timeout: 15_000 })
     await expect(this.page.getByText('Counting signals')).toHaveCount(0, { timeout: 15_000 })
     return panel
+  }
+
+  /**
+   * The destination of every side-street probe the page tried to make, in
+   * order: each fetch the app called with a via and no bearings, including
+   * one cancelled before it left the page (so never seen by `probes`).
+   */
+  async probeAttempts(): Promise<LngLat[]> {
+    const urls = await this.page.evaluate(() => (window as unknown as E2EWindow).__e2e.fetched)
+    return urls.flatMap((href) => {
+      const url = new URL(href, 'http://localhost/')
+      if (url.hostname !== 'api.mapbox.com' || !url.pathname.startsWith('/directions/v5/mapbox/driving-traffic/')) return []
+      if (url.searchParams.get('waypoints') !== '0;2' || url.searchParams.has('bearings')) return []
+      const points = decodeURIComponent(url.pathname.split('/').at(-1)!).split(';')
+      return points.length === 3 ? [points[2]!.split(',').map(Number) as LngLat] : []
+    })
+  }
+
+  /** Answers every held probe (see Outside.holdProbes), in the order they were asked. */
+  async releaseProbes() {
+    const held = this.held
+    this.held = []
+    for (const answer of held) await answer()
   }
 
   /** A screenshot in the report, named for what it shows. */
@@ -287,9 +323,16 @@ export class App {
         // (baselineProbe) also sends vias, but from a moving car, with the heading as `bearings`.
         if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && !url.searchParams.has('bearings')) {
           // Through the via, answered with the traffic of the request it belongs to.
-          const probe = world.through(from, points[1]!, traffic, this.directionsRequests)
-          this.probes.push({ forRequest: this.directionsRequests, road: probe.road, durationSec: probe.durationSec })
-          return route.fulfill({ json: probe.answer })
+          // The via's `radiuses` entry, as Mapbox reads it: no road that close is NoSegment.
+          const radiuses = url.searchParams.get('radiuses')
+          const viaRadius = Number(radiuses?.split(';')[1])
+          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, Number.isFinite(viaRadius) ? viaRadius : undefined)
+          const index = this.probes.push({ forRequest: this.directionsRequests, destination: to, road: probe.road, durationSec: probe.durationSec, radiuses }) - 1
+          if (this.outside.holdProbes !== true) return route.fulfill({ json: probe.answer })
+          this.heldRequests.set(request, index)
+          // Answering a request the page has cancelled fails; that is the point of some scenarios.
+          this.held.push(() => route.fulfill({ json: probe.answer }).catch(() => {}))
+          return
         }
         this.directionsRequests++
         const json = world.directions(from, traffic, this.directionsRequests)

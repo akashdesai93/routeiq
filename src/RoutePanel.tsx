@@ -24,6 +24,15 @@ interface RoutePanelProps {
   loading: boolean
   error: string | null
   onSelect: (id: string) => void
+  /**
+   * The user's pointer or focus is on the route list or Start drive: the
+   * selection should stay put from here on (see RoutesState.keepSelection).
+   */
+  onKeepSelection?: () => void
+  /** A polite announcement that a side street is now recommended; null or left out for none. */
+  sideStreetNotice?: string | null
+  /** Routes whose signal count is still loading while the others show theirs. */
+  countingRouteIds?: ReadonlySet<string>
   onRetry: () => void
   signalsStatus: SignalsStatus
   /** What signal data is missing; null when none is. */
@@ -119,6 +128,9 @@ export function RoutePanel({
   loading,
   error,
   onSelect,
+  onKeepSelection,
+  sideStreetNotice = null,
+  countingRouteIds,
   onRetry,
   signalsStatus,
   signalsError,
@@ -137,7 +149,14 @@ export function RoutePanel({
       <h2>Routes</h2>
       {onStartDrive !== undefined && (
         <div className="start-drive">
-          <button type="button" className="start-drive-button" onClick={onStartDrive} disabled={!canStartDrive}>
+          <button
+            type="button"
+            className="start-drive-button"
+            onClick={onStartDrive}
+            onPointerEnter={onKeepSelection}
+            onFocus={onKeepSelection}
+            disabled={!canStartDrive}
+          >
             Start drive
           </button>
           <p className="hint">
@@ -156,8 +175,14 @@ export function RoutePanel({
           </button>
         </div>
       )}
-      <ol className="routes">
-        {ranked.map(({ route, rank, reasons }) => (
+      {/* Always in the page, so a screen reader hears the line when it appears. */}
+      <p className="hint side-street-notice" role="status" aria-live="polite">
+        {sideStreetNotice}
+      </p>
+      <ol className="routes" onPointerEnter={onKeepSelection} onFocus={onKeepSelection}>
+        {ranked.map(({ route, rank, reasons }) => {
+          const counting = signalsStatus === 'loading' || countingRouteIds?.has(route.id) === true
+          return (
           <li key={route.id}>
             <button
               type="button"
@@ -168,6 +193,7 @@ export function RoutePanel({
               <span className="route-name">
                 {`Route ${rank}`}
                 {rank === 1 && <span className="route-badge"> Recommended</span>}
+                {route.source === 'probe' && ' '}
                 {route.source === 'probe' && (
                   <span className="route-source" title="Found by asking for the trip through a point beside the fastest route; Mapbox did not offer it among its own routes.">
                     via side streets
@@ -176,8 +202,8 @@ export function RoutePanel({
               </span>
               <span className="route-eta">{formatDuration(route.durationSec)}</span>
               <span className="route-distance">{formatDistance(route.distanceM)}</span>
-              <span className="route-signals" title={signalsStatus === 'loading' ? undefined : signalHoverText(route)}>
-                {signalsStatus === 'loading'
+              <span className="route-signals" title={counting ? undefined : signalHoverText(route)}>
+                {counting
                   ? 'Counting signals…'
                   : formatSignalCount(route.signalCount, route.signalCoverage)}
               </span>
@@ -186,7 +212,8 @@ export function RoutePanel({
             </button>
             {route.id === selectedId && <HandoffLinks route={route} alternatives={candidates} fromDevice={originIsDeviceLocation} />}
           </li>
-        ))}
+          )
+        })}
       </ol>
       {children}
       {!loading && !error && ranked.length > 0 && (
