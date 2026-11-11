@@ -48,5 +48,18 @@
       "Bash(git push -u origin main:*)",
       "Bash(gh pr merge --admin:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/cloud-setup.sh\" session",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
   }
 }

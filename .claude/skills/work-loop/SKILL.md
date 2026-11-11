@@ -34,12 +34,23 @@ Several Claude sessions may run at once, so follow the claim and worktree rules 
 
 Pick from open issues labelled `ready` and not labelled `in-progress`, `blocked`,
 `needs-human` or `review`. Order by p1, then p2, then p3, then the lowest number.
-Skip any issue whose files overlap with uncommitted work in the main checkout. If none
-qualifies, go to step 6 (Discover).
+`needs-human` always wins: an issue that carries it is waiting on the owner and is never
+picked, even if `ready` is still on it (remove the stray `ready`). Skip any issue whose
+files overlap with uncommitted work in the main checkout or with the files of an open PR
+(`gh pr view M --json files`). If none qualifies, go to step 6 (Discover).
 
-**Claim it:** `gh issue edit N --add-label in-progress`, then post the comment
-`claude-loop: claimed by session <your session id or name>, worktree claude/issue-N`.
-Re-read the comments. If another claim landed before yours, drop your label change and pick again.
+`gh issue edit` fails on a Projects-classic deprecation, so labels go through the REST API:
+
+```bash
+gh api -X POST   repos/akashdesai93/routeiq/issues/N/labels -f 'labels[]=in-progress'
+gh api -X DELETE repos/akashdesai93/routeiq/issues/N/labels/ready
+```
+
+**Claim it:** add the `in-progress` label, then post the comment
+`claude-loop: claimed by <session id or agent name>, worktree claude/issue-N`.
+The label plus that comment is the claim, and the only record of who is on what (the
+orchestrator builds #17 from it). Re-read the comments. If another claim landed before
+yours, drop your label change and pick again.
 
 ## 3. Build it in a worktree
 
@@ -50,8 +61,9 @@ Re-read the comments. If another claim landed before yours, drop your label chan
   then README and PLAN updates. Keep the scope to what the issue says. Anything else you
   notice becomes a new `triage` issue, not part of this change.
 - If the issue turns out to need an owner decision, add `needs-human`, remove
-  `in-progress`, comment the specific question, leave the worktree, and pick again
-  (at most once per iteration).
+  `in-progress` and `ready`, and post one comment that starts `Decision needed:` with the
+  question, your recommendation and the options. Leave the worktree and pick again (at
+  most once per iteration). The owner's answer (or the orchestrator) puts `ready` back.
 
 ## 4. Verify
 

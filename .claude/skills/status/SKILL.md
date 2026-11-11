@@ -4,10 +4,13 @@ description: Post this session's status to the RouteIQ fleet status board (pinne
 ---
 
 Post one comment on issue #17 with `gh issue comment 17 -R akashdesai93/routeiq --body-file <file>`
-(write the body to a scratch file first, because rtk can drop text piped on stdin):
+(write the body to a scratch file first, because rtk can drop text piped on stdin).
+In a cloud session `gh issue` fails (the GitHub proxy rejects GraphQL), so post with
+`gh api -X POST repos/akashdesai93/routeiq/issues/17/comments -F body=@<file>` instead, and
+put `cloud` in the first line so the orchestrator can tell it apart:
 
 ```
-status: <first 8 chars of your session id> · <branch or worktree>
+status: <first 8 chars of your session id, or cloud-<issue>> · <branch or worktree>
 working on: #N <title>   (or "idle")
 done: <what finished since your last status, with PR/commit links, or "nothing yet">
 next: <the next concrete step>
