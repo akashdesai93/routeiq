@@ -16,7 +16,7 @@ test('with a token Mapbox rejects, it says what to fix', async ({ app, page }) =
   app.outside.mapboxStatus = 401
   await app.open()
   await expect(page.getByText('Mapbox rejected the token (401)').first()).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('Recommended')).toHaveCount(0)
+  await expect(page.locator('.route-badge')).toHaveCount(0)
   // Every route request would be refused the same way, so no drive can be started.
   await expect(page.getByRole('button', { name: 'Start drive' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Start simulated drive' })).toBeDisabled()

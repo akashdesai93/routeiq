@@ -111,7 +111,7 @@ test('the map fills the drive view, and fits the trip screen again after End', a
   await app.snap('the drive view: the map fills the width')
 
   await page.getByRole('button', { name: 'End' }).click()
-  await expect(page.getByText('Recommended')).toBeVisible()
+  await expect(page.locator('.route-badge', { hasText: 'Recommended' })).toBeVisible()
   await expect.poll(widths).toEqual({ map: planWidth, canvas: planWidth })
   await app.snap('after End: the trip screen, map beside the panel')
 })
