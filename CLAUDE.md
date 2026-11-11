@@ -22,10 +22,15 @@ npx.cmd vitest run             # all tests, offline, ~5 s
 npx.cmd vitest run tests/reroute.test.ts   # one file
 npm.cmd run build              # typecheck + vite build
 npm.cmd run dev                # http://localhost:5173 (strictPort, localhost only)
+npm.cmd run e2e                # end-to-end scenarios, offline, ~1 min (ports 4317/4318)
+npx.cmd playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm.cmd run e2e:build)
 ```
 
 To save tokens, wrap the test run with rtk: `rtk test npx.cmd vitest run`.
-"Done" means typecheck, lint and tests are all green. The `/verify` skill runs all three.
+"Done" means typecheck, lint, unit tests and the e2e scenarios are all green, and a feature
+the user can see or hear has an e2e scenario that shows it working. The `/verify` skill runs
+typecheck, lint and unit tests; run `npm.cmd run e2e` as well. The report is
+`e2e-report/index.html`: one page with each scenario's screenshots and what was said out loud.
 
 ## Architecture rules (do not break these)
 
@@ -63,12 +68,21 @@ To save tokens, wrap the test run with rtk: `rtk test npx.cmd vitest run`.
 ## How to build a step
 
 1. Pick the next step in PLAN.md. If it's large, plan it first (plan mode) and agree on scope.
-2. Put the logic in `src/core` with tests first. Scripted or fake-clock tests are better
-   than mocks. No test hits the network.
-3. Wire it up through a provider, a hook and a component.
-4. Update the README (behaviour, thresholds table, privacy, data sources) and mark the
+2. Write the e2e scenario first, named as the behaviour in a sentence the owner would say
+   ("when nothing is faster, it never switches"), in `e2e/*.spec.ts` with the harness in
+   `e2e/harness.ts`. It runs the production build offline: Directions come from the made-up
+   road network (`e2e/world/roads.ts`, traffic scripts in `e2e/world/traffic.ts`), search
+   from `tests/fixtures`, GPS, voice and clock are stubbed. Take an `app.snap(...)` at each
+   moment worth seeing. A request nothing answers fails the scenario.
+3. Put the logic in `src/core`. Unit tests are for exact rules and thresholds (they are the
+   spec for the Swift port: reroute, rank, signals, tracking, guidance, live, places,
+   search, tiles, adapters). Don't add unit tests for wiring (hooks, components, "the panel
+   shows X"): the e2e scenario covers that. No test hits the network, and fixtures use
+   public landmarks only.
+4. Wire it up through a provider, a hook and a component.
+5. Update the README (behaviour, thresholds table, privacy, data sources) and mark the
    step done in PLAN.md, along with its "Open for later" notes.
-5. Run `/verify`, then commit one step per commit (message style: `Add <feature>`).
+6. Run `/verify` and `npm.cmd run e2e`, then commit one step per commit (message style: `Add <feature>`).
 
 Before a commit with logic changes, run the `route-logic-reviewer` agent to check for invariant breaks.
 
