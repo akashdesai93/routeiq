@@ -94,3 +94,24 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   expect(spoken.filter((line) => line === OFF_ROUTE)).toHaveLength(1)
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
 })
+
+test('the map fills the drive view, and fits the trip screen again after End', async ({ app, page }) => {
+  await app.open()
+  await app.routesReady()
+  const map = page.getByTestId('map')
+  const canvas = page.locator('canvas.mapboxgl-canvas')
+  const widths = async () => ({ map: Math.round((await map.boundingBox())!.width), canvas: Math.round((await canvas.boundingBox())!.width) })
+  const planWidth = (await widths()).map
+
+  await page.getByRole('button', { name: 'Start drive' }).click()
+  await page.evaluate(() => (window as unknown as { __e2e: { fix: (...a: number[]) => void } }).__e2e.fix(-80.8431, 35.2271, 180, 0))
+  // The drive view is wider than the trip screen's map, and the drawing grows with it.
+  await expect.poll(async () => (await widths()).map).toBeGreaterThan(planWidth)
+  await expect.poll(widths).toEqual({ map: (await widths()).map, canvas: (await widths()).map })
+  await app.snap('the drive view: the map fills the width')
+
+  await page.getByRole('button', { name: 'End' }).click()
+  await expect(page.getByText('Recommended')).toBeVisible()
+  await expect.poll(widths).toEqual({ map: planWidth, canvas: planWidth })
+  await app.snap('after End: the trip screen, map beside the panel')
+})

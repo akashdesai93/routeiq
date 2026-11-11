@@ -242,7 +242,13 @@ export function MapView({
       reportCenter()
     })
 
+    // Mapbox resizes the drawing only when the window resizes. The container also changes
+    // size on its own: the drive view hides the side panel and End brings it back.
+    const resizer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => map.resize())
+    resizer?.observe(container)
+
     return () => {
+      resizer?.disconnect()
       setReadyMap(null)
       markersRef.current = null
       Object.values(markers).forEach((m) => m.remove())
