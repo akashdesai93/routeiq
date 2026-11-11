@@ -76,8 +76,9 @@ start e2e-report\index.html                    # the one-page report
 ```
 
 - **What runs:** the production build (`vite build` with a dummy `pk.test` token, plus a
-  build with no token for the setup help), served by `vite preview` on ports 4317 and 4318,
-  in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
+  build with no token for the setup help), served by `vite preview` on a pair of ports picked from the checkout's
+  folder (`e2e/ports.ts`; set `E2E_PORT` to choose), so runs in several worktrees at once
+  don't collide, in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
   and `.env.local` is never used.
 - **Fully offline.** Every request that leaves localhost is answered by the test
   (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a

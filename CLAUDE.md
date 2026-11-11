@@ -22,7 +22,7 @@ npx.cmd vitest run             # all tests, offline, ~5 s
 npx.cmd vitest run tests/reroute.test.ts   # one file
 npm.cmd run build              # typecheck + vite build
 npm.cmd run dev                # http://localhost:5173 (strictPort, localhost only)
-npm.cmd run e2e                # end-to-end scenarios, offline, ~1 min (ports 4317/4318)
+npm.cmd run e2e                # end-to-end scenarios, offline, ~1 min (own ports per checkout)
 npx.cmd playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm.cmd run e2e:build)
 ```
 

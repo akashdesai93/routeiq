@@ -1,10 +1,11 @@
 import { expect, test } from './harness.ts'
+import { NO_TOKEN_PORT } from './ports.ts'
 
 // A token problem shows help with the fix, not a blank or broken map.
 
 test('with no token, it shows setup help instead of a map', async ({ app, page }) => {
-  // The build on port 4318 has no token at all.
-  await app.open({ path: 'http://localhost:4318/' })
+  // The second test build has no token at all.
+  await app.open({ path: `http://localhost:${NO_TOKEN_PORT}/` })
   await expect(page.getByText('.env.local').first()).toBeVisible()
   await expect(page.locator('[data-testid="map"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Start drive' })).toHaveCount(0)
