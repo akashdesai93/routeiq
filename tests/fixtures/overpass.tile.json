@@ -1,0 +1,20 @@
+{
+  "version": 0.6,
+  "generator": "hand-written fixture, not a real Overpass response",
+  "osm3s": {
+    "timestamp_osm_base": "2026-11-01T00:00:00Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    { "type": "node", "id": 9000001, "lat": 35.2501, "lon": -80.8502, "tags": { "highway": "traffic_signals" } },
+    { "type": "node", "id": 9000002, "lat": 35.2503, "lon": -80.8504, "tags": { "highway": "traffic_signals", "traffic_signals:direction": "forward" } },
+    { "type": "node", "id": 9000003, "lat": 35.2702, "lon": -80.8301 },
+    { "type": "node", "id": 9000001, "lat": 35.2501, "lon": -80.8502, "tags": { "highway": "traffic_signals" } },
+    { "type": "way", "id": 9000004, "nodes": [9000001, 9000002] },
+    { "type": "node", "id": "9000005", "lat": 35.26, "lon": -80.84 },
+    { "type": "node", "id": 9000006, "lat": 95.0, "lon": -80.84 },
+    { "type": "node", "id": 9000007, "lon": -80.84 },
+    null,
+    7
+  ]
+}

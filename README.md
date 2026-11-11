@@ -1,0 +1,380 @@
+# RouteIQ (Windows prototype)
+
+A Vite + React + TypeScript web app that shows a Mapbox map with two draggable pins,
+starting with a test trip down the US-521 corridor: Uptown Charlotte (origin, blue) to
+the intersection of US-521 and SC-160 in Indian Land, South Carolina (destination, red).
+It draws up to three traffic-aware driving routes between them and lists each
+one's ETA, distance, difference from typical time and number of signalized
+intersections (from OpenStreetMap, with City of Charlotte data filling gaps), with the
+signals on the selected route shown as dots. Counting works on any route, not only inside
+Charlotte. The signal data for North and South Carolina ships with the app, built from
+OpenStreetMap extracts, so a trip inside the two states asks no signal server at all; where
+signal data cannot be loaded the count is marked partial, never shown as zero. The routes are ranked: best ETA first, with the signal count breaking
+ties of 30 seconds or less, and the top one is marked "Recommended". Rerouting comes
+next, one piece at a time (see [PLAN.md](PLAN.md)).
+
+## Run it on Windows
+
+Open PowerShell (not cmd) and run, adjusting the zip path if yours differs:
+
+```powershell
+# 1. Unzip (Unblock-File clears the "downloaded from the internet" flag)
+cd $HOME\Downloads
+Unblock-File .\routeiq.zip
+Expand-Archive .\routeiq.zip -DestinationPath $HOME\dev -Force
+cd $HOME\dev\routeiq
+
+# 2. Add your Mapbox PUBLIC token (starts with pk.)
+Copy-Item .env.example .env.local
+notepad .env.local
+
+# 3. Check prerequisites (read-only, installs nothing)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\check-prereqs.ps1
+
+# 4. One time only: let PowerShell run npm. Windows 11 blocks scripts by default,
+#    and `npm` in PowerShell is npm.ps1, so without this step npm fails with
+#    "running scripts is disabled on this system". RemoteSigned for your user
+#    only is Microsoft's recommended setting. (Alternative: type npm.cmd instead of npm.)
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+# 5. Install exactly the tested versions, test, and start
+npm ci
+npm test
+npm run dev
+```
+
+Then open http://localhost:5173. Open the folder in VS Code with `code .`.
+
+Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`, `npm run preview`,
+`npm run build:signals` (rebuilds the OpenStreetMap signal tiles shipped with the app from
+extracts on disk) and `npm run seed:charlotte` (refreshes the City of Charlotte snapshot);
+see Data sources.
+
+## Mapbox token
+
+- Create a **new public token** at https://console.mapbox.com/account/access-tokens/
+  with the default public scopes. Do not use a secret `sk.` token; the app refuses one.
+- A browser token is public by nature: anything prefixed `VITE_` is bundled into the
+  page and anyone who opens it can read it. Protect it with a URL restriction instead:
+  add `http://localhost:5173` to the token's allowed URLs. Mapbox blocks restricted
+  tokens on localhost unless localhost is on the list, and it does not accept IP
+  addresses, so use `localhost`, not `127.0.0.1`.
+- `.env.local` is git-ignored. Only `.env.example` (a placeholder) is meant for git.
+
+## Layout
+
+```
+src/core/       Pure TypeScript: route data contracts, geo helpers, test points, route
+                facts (delay vs typical), formatting (minutes, miles, signals) and the
+                route selection. signals.ts counts the signalized intersections on a
+                route from three sources kept apart until that moment (primary data,
+                gap-fill data, the directions provider's own flags) and says how much
+                of the route the count covers (full, partial, none); the rule distances
+                live there, in DEFAULT_SIGNAL_MATCH. tiles.ts is the 0.1 degree tile
+                arithmetic: which tile a point is in and which tiles a route touches.
+                hash.ts gives each route an id from its geometry.
+                rank.ts orders the routes and words the reasons: best traffic-aware
+                ETA first, signal count only breaks ties within
+                DEFAULT_ETA_TIE_WINDOW_SEC (30 s), no per-signal time penalty; a count
+                that is not full is treated as unknown.
+                select.ts keeps a route you picked selected across refetches and
+                otherwise selects the top-ranked one.
+                No React, Mapbox, DOM or network. Reroute rules go here too, so they
+                can be ported to Swift or served.
+src/providers/mapbox/
+                adapter.ts: pure Directions API JSON -> RouteCandidate[] (typed failures),
+                including every step intersection with its signal flag (intersections),
+                Mapbox's own count of the flagged ones (providerSignalCount, a
+                cross-check only) and the stretches driven on freeway
+                (limitedAccessSpansM, from each step intersection's road class and
+                geometry_index).
+                client.ts: builds the driving-traffic URL and fetches it (abortable;
+                401/403/429/network become readable errors).
+src/providers/charlotte/
+                adapter.ts: pure ArcGIS GeoJSON page -> SignalPoint[] (operating traffic
+                signals only; typed failures).
+                client.ts: downloads the whole signal layer page by page (abortable,
+                never rejects), keeps it in memory for the session and in its own
+                IndexedDB database between visits (refreshed about monthly). When the
+                city's server cannot be reached and nothing is stored, it falls back
+                on the seed snapshot shipped with the app.
+src/providers/osm/
+                adapter.ts: pure Overpass API JSON -> signal nodes, the tile query, and
+                the tile shape used by the cache and by the bundled tile files.
+                client.ts: one abortable POST per tile (never rejects), and the polite
+                client around it: two requests at a time, one per tile, a pause after a
+                busy answer.
+                bundle.ts: the pure part of the bundled tiles, shared by the build
+                script and the app: which OpenStreetMap tags count as a signal, grouping
+                nodes into tile files, the compact "runs per row" tile sets, and the
+                index that says which tiles are covered and which have a file.
+                coverage.ts: pure geometry for the build: reads an extract's boundary
+                (.poly) and finds the tiles that lie entirely inside the boundaries.
+                bundleLayer.ts: reads index.json once and then only the tile files it
+                lists, from this site itself; a covered tile without signals is answered
+                from the index alone.
+                tileSource.ts: loads tiles through the chain bundled tiles -> device
+                cache -> network. A tile the bundle covers in full never reaches the
+                cache or the network; other tiles are cached, refreshed after 30 days,
+                and left alone for a while after a failure.
+src/storage/    kv.ts: the tiny key-value store everything on the device goes through:
+                IndexedDB, or memory where IndexedDB is not available.
+src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch, and
+                the city list) and wires up the sources the app uses, the bundled
+                tiles ahead of the device cache and the network.
+src/map/        Mapbox GL JS wrapper (draws only, decides nothing): draggable pins,
+                route lines, signal dots. pins.ts is the one source for pin roles and
+                colors; attribution.ts is the OpenStreetMap credit shown on the map.
+scripts/        Plain Node 24, no dependencies. Both import the app's own tile
+                arithmetic and adapters, so the files they write are the shapes the app
+                reads.
+                build-signal-tiles.mjs: builds the OpenStreetMap signal tiles from
+                regional extracts on disk (no network), with lib/osm-pbf.mjs, a minimal
+                streaming reader for .osm.pbf files.
+                seed-charlotte.mjs: saves the City of Charlotte snapshot.
+public/seed/    The signal data shipped with the app, served as static files and copied
+                into the build: osm-signals/ (one JSON file per tile with signals,
+                index.json, LICENSE.md: ODbL) and charlotte-signals/ (signals.json,
+                LICENSE.md: CC BY-NC-SA 4.0). Two folders because the two licenses differ.
+data/           Not in git: the downloaded extracts the tiles are built from.
+src/useRoutes.ts   Fetches routes when a pin moves (on drag end), aborts the old request,
+                adds signal counts when the signal data arrives, ranks the routes and
+                tracks the selected one. Routes never wait for signals.
+src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
+                typical time, the reason for its place, and a "Recommended" badge on
+                the top route. The highlight follows the selection, not the rank.
+src/config.ts   Reads and checks VITE_MAPBOX_TOKEN.
+src/App.tsx     Page shell; owns origin and destination (drag, swap, reset). Shows setup
+                help instead of a map when the token is wrong (missing, secret, or
+                rejected by Mapbox with 401/403).
+tests/          Vitest: core helpers, route facts and formatting, signal counting, tile
+                arithmetic, ranking, route ids and selection, Mapbox, Charlotte and
+                OpenStreetMap adapters and clients against hand-written fixtures, the
+                tile cache chain and the whole signal path end to end against a stand-in
+                Overpass server (no network anywhere), the bundle (tag rules, tile
+                files, index, coverage of boundaries, bundle layer offline, the wait
+                after a failed tile), the .osm.pbf reader against a hand-built extract,
+                the build script and the Charlotte seed script run whole in a temporary
+                folder, the City of Charlotte fallback, a US-521 style corridor trip
+                across the state line and a tile edge, the key-value store, token check,
+                core-purity guard, App and RoutePanel smoke tests.
+check-prereqs.ps1  Windows prerequisite check.
+```
+
+## Data sources
+
+- **Routes and map:** Mapbox Directions API (`driving-traffic`) and Mapbox GL JS, with
+  your token.
+- **Traffic signals, primary:** OpenStreetMap, nodes tagged `highway=traffic_signals`.
+  © OpenStreetMap contributors, licensed under the Open Database License (ODbL):
+  https://www.openstreetmap.org/copyright. The data reaches the app in tiles of a tenth
+  of a degree, only for the tiles a route touches, from two places:
+  1. **Bundled tiles (primary).** Tiles built from the Geofabrik regional extracts of
+     North Carolina and South Carolina (https://download.geofabrik.de/north-america/us/)
+     and shipped with the app in `public/seed/osm-signals/`: one file per tile that has a
+     signal, in the same shape as the device cache, an `index.json` and a `LICENSE.md`.
+     Built Nov 11, 2026 from the extracts of Nov 10, 2026: 22,613 signal nodes in 902
+     tile files, 1.2 MB. The index lists the 2,500 tiles that lie ENTIRELY inside the
+     two states' extract boundaries (as 51 runs along 44 rows, 5 KB). Inside that set
+     the bundle is the whole answer: a tile with a file is read from the app's own
+     server, a tile without one is known to have no signals (no file, no request), and
+     nothing is ever asked of Overpass or copied into the device cache. Freshness comes
+     from rebuilding, not from per-tile refreshes. The panel shows the data's date
+     ("Signal data: OpenStreetMap, Nov 2026").
+  2. **Overpass (backup).** A tile the bundle does not cover in full is loaded from the
+     public Overpass API (https://overpass-api.de/api/interpreter, run by FOSSGIS
+     volunteers; no key) with the query
+     `[out:json][timeout:25];node[highway=traffic_signals](south,west,north,east);out;`.
+     That is every tile outside the two states and the tiles on their outer edge: an
+     extract is clipped at its boundary, so a tile that pokes into Georgia, Tennessee
+     or Virginia would undercount if the bundle were trusted for it. Each such tile is
+     fetched once, kept on the device, and refreshed about monthly. The Overpass server
+     is shared and often busy, so RouteIQ sends at most two requests at a time, never
+     two for the same tile, and after a busy answer (HTTP 429, 502, 503, 504, or no
+     answer in 20 seconds) sends nothing for 30 seconds, doubling up to 8 minutes while
+     the server stays busy. The pause survives a page reload. On top of that, a tile
+     that could not be loaded is not asked for again for 30 seconds (doubling to 8
+     minutes), so recounting a route does not retry it each time; "Retry signals" skips
+     that wait. When Overpass fails the count is partial; for an edge tile the bundle's
+     clipped part still feeds the lower bound.
+
+  What counts as a signal: `highway=traffic_signals`, minus nodes whose
+  `traffic_signals=*` says they are not an intersection signal (`blinker`,
+  `emergency`, `ramp_meter`, `pedestrian_crossing`, `crossing`, `level_crossing`,
+  `bridge` and a few more: see `EXCLUDED_SIGNAL_SUBTYPES`), which matches how the City
+  of Charlotte list is filtered. In the two states that removed 288 of 22,939 nodes
+  (105 emergency, 94 blinker, 82 pedestrian_crossing, 7 others). Pedestrian signals
+  tagged `highway=crossing` + `crossing=traffic_signals` (10,067 of them) are not
+  `highway=traffic_signals` and were never included. Overpass tiles are not filtered by
+  subtype (the query has no room for it), a small difference that only shows outside
+  the bundle.
+
+  **Rebuilding the tiles** (do it when the date in the panel gets old; monthly is plenty):
+
+  ```powershell
+  # 1. Download the extracts, their checksums and their boundaries (about 600 MB) into
+  #    data/osm-extracts (git-ignored). Geofabrik asks for nothing but moderation.
+  New-Item -ItemType Directory -Force data\osm-extracts | Out-Null
+  $base = "https://download.geofabrik.de/north-america/us"
+  foreach ($f in "north-carolina-latest.osm.pbf", "north-carolina-latest.osm.pbf.md5", "north-carolina.poly",
+                 "south-carolina-latest.osm.pbf", "south-carolina-latest.osm.pbf.md5", "south-carolina.poly") {
+    curl.exe -L -o "data\osm-extracts\$f" "$base/$f"
+  }
+  # 2. Build (about 6 seconds; no network). Stop `npm run dev` first, or keep the app tab
+  #    closed: the script rewrites about 900 files under public/.
+  npm run build:signals
+  npm run build:signals -- --dry-run     # read and report, write nothing
+  ```
+
+  The script checks each extract against its `.md5`, streams it once with its own small
+  `.osm.pbf` reader (it stops at the end of the nodes, about two thirds of the file),
+  prints what it kept and left out by subtype, works out the covered tiles from the
+  `.poly` boundaries, and writes through temporary files, the index last. Any other
+  Geofabrik extract dropped into the folder with its `.poly` is picked up the same way.
+  Exit codes: 0 written, 1 bad arguments, 2 an input is missing, damaged or fails its
+  checksum (nothing is written then). Without the bundle the app still works: every
+  tile is then loaded from Overpass on demand.
+- **City of Charlotte snapshot:** `npm run seed:charlotte` saves the city list (below) to
+  `public/seed/charlotte-signals/`, which the app uses only when the city's server
+  cannot be reached. It identifies itself with a generic User-Agent, sends one request
+  at a time, waits a minute after a failure (then two, then four) and gives up after
+  three tries. Exit codes: 0 written, 1 bad arguments, 3 the download failed. The
+  snapshot in place is from Nov 11, 2026 (909 signals).
+- **Traffic signals, gap-fill:** City of Charlotte Department of Transportation, "Traffic
+  Signals" layer on the city's ArcGIS Online account (the service behind the Charlotte
+  Open Data Portal dataset):
+  https://services.arcgis.com/9Nl857LBlQVyzq54/arcgis/rest/services/Traffic_Signals/FeatureServer/0
+  It needs no key and allows browser requests from any origin. Checked Nov 11, 2026:
+  1,444 point records, one per location, up to 2,000 per request. RouteIQ keeps the 909
+  that are operating traffic signals (`UNITTYPE` TSL, TSV or TS with `SERVSTAT` OP) and
+  leaves out school and stop-sign flashers, pedestrian beacons, mid-block crossings,
+  fire-station signals, parking signs and planned signals. A city point is only ever
+  added, and only where OpenStreetMap has no signal within 60 m of it; it never removes
+  or replaces an OpenStreetMap signal. Measured against the bundle (Nov 2026): 891 of
+  the 909 city points have an OpenStreetMap signal within 60 m, so only 18 can ever be
+  added, and on eight ordinary trips across the city none was.
+- **Traffic signals, fallback:** the `traffic_signal` flags Mapbox puts on the
+  intersections of a route, used only on stretches whose OpenStreetMap tile could not be
+  loaded (outside the bundle, with Overpass failing).
+- **Licenses, kept apart:** the City of Charlotte dataset's ArcGIS item
+  (https://www.arcgis.com/home/item.html?id=3bf079185338440fbb7febe81dd5d9a9) lists
+  Creative Commons BY-NC-SA 4.0, credit "Charlotte Department of Transportation", and
+  the city gives no warranty of accuracy or completeness. Non-commercial and share-alike
+  terms matter if RouteIQ ever becomes more than a personal prototype: check with the
+  city first. OpenStreetMap data is ODbL. Because the two licenses differ, the two
+  datasets are never written into one file or store: each has its own module, its own
+  types, its own IndexedDB database and its own folder under `public/seed` with its own
+  LICENSE.md (the OpenStreetMap one also credits Geofabrik for the extract), and
+  they are combined only in memory, at the moment a route is counted. On screen, the map
+  carries "© OpenStreetMap contributors" (linked to the copyright page) in its
+  attribution next to Mapbox's own, and the note under the route list credits both
+  OpenStreetMap and the City of Charlotte (CDOT).
+
+How the count works, in this order:
+
+1. Signal points within 60 m of each other are one intersection (OpenStreetMap tags each
+   approach of a big junction as a signal of its own).
+2. An intersection counts when it lies within 30 m of the route line.
+3. It counts only if the route itself has an intersection within 40 m of it, taken from
+   the Mapbox steps. A street that passes over or under the route has no intersection
+   with it, so its signals are left out. A route without an intersection list skips this
+   rule rather than losing every signal.
+
+Counted intersections within 40 m of each other along the route count once. All of
+these distances are set in one place, `DEFAULT_SIGNAL_MATCH` in `src/core/signals.ts`.
+
+Each count comes with its coverage. **Full** means every tile the route touches was
+loaded: the number is the answer, and "0 signals" really means none. **Partial** means
+a tile was missing (a trip outside the bundled states with the Overpass server busy,
+or offline): the number is what
+OpenStreetMap, the city list and the Mapbox flags found between them, shown as
+"≥ 9 signals (partial)", a lower bound; hovering it says that data for part of the
+route is missing, and a line under the list offers a retry. When nothing is known the
+panel says "Signals: unknown". A count that is not full is never shown as a plain number or as
+zero, and is not used for ranking.
+
+Freeways: a signal on a ramp or on a street crossing over or under a freeway is not a
+stop for someone driving the freeway. Rule 3 removes most of these. One case is left to
+a second check: the city list marks some interchanges with a point on the freeway line
+itself, right where a ramp joins, and the route does have an "intersection" there. So
+Mapbox's road classes are still used: a signal whose position along the route is inside
+a stretch of freeway (class motorway or motorway_link), more than 30 m from either end,
+is left out. The 30 m keeps the light at the foot of an off-ramp, and the one where a
+freeway begins or turns into a street. Known limits: OpenStreetMap is only as complete
+as its mappers have made it; a group of signals is formed by chaining points up to 60 m
+apart, so two signalized intersections closer than that would count as one; and the
+Mapbox flags used on missing stretches are a rough stand-in.
+
+Checked against real data (Nov 2026, the bundle and live routes): at 60 m, Charlotte's
+OpenStreetMap signals form the same intersections as the city's own list in all but two
+places, where two signals 54 and 56 m apart become one (N Graham St at W 24th St and
+Woodward Ave; Westinghouse Blvd at the I-485 ramp and at I-77/Texland Blvd). At 50 m one
+of those remains and one intersection splits in two; at 40 m none is merged but 19 big
+intersections split. In Uptown's tight grid the closest distinct signals are 67 m apart
+(the 68 to 70 m blocks between 3rd and 6th Streets), so 60 m holds there with little to
+spare. Known over-counts that the distances do not fix: a turn on a slip lane beside a
+signalized intersection is counted (the route does meet the junction), and a signal at
+a ramp beside an expressway that Mapbox classes `trunk`, not `motorway`, can be counted
+where the route only passes a ramp fork (seen on E Independence Blvd near Albemarle Rd).
+
+How ranking works: the route with the best traffic-aware ETA comes first. Routes within
+30 seconds of it count as tied, and among those the one with fewer signals wins; a
+route whose signal count is unknown or partial keeps the place its ETA gives it. No time is added
+per signal, because a traffic-aware ETA already includes the usual wait at signals.
+
+## Pinned versions (checked Nov 11, 2026)
+
+| Package | Version | Note |
+| --- | --- | --- |
+| Node.js | 24 or 26 LTS recommended | Vitest 5 needs `^22.12.0 \|\| ^24 \|\| >=26` (Vite 8 alone allows 20.19+); Node 20 is end of life |
+| vite | 8.3.7 | `create-vite` 9.3.4 react-ts template |
+| react / react-dom | 19.3.1 | |
+| @vitejs/plugin-react | 6.3.0 | peer `vite ^8` |
+| typescript | 7.0.2 | as the Vite template ships it |
+| mapbox-gl | 3.34.2 | imported from `mapbox-gl/esm` per Mapbox's npm guide; ships its own types |
+| vitest | 5.1.0 | peer `vite ^6.4 \|\| ^7 \|\| ^8` |
+
+`package-lock.json` includes the Windows native builds (rolldown, lightningcss, oxlint,
+TypeScript), so `npm ci` installs the same tree that was tested.
+
+## Privacy
+
+Nothing records or stores location yet. When live location arrives it stays in memory
+only by default, with no history written to disk or sent anywhere unless you turn it on.
+
+Pin positions go to Mapbox, which is how routes are found. They go nowhere else.
+
+For signal counts, a trip that stays inside the bundled area (North and South Carolina,
+except tiles on the states' outer edge) sends nothing to any signal server: the tiles
+are static files of the app itself, fetched from the same server as the page, and what
+is fetched is a whole 0.1 degree tile (a square about 9 by 11 km), never a route or a
+position. The bundled files hold public map data only; nothing in them describes a user
+or a trip. The built-in test places are public intersections and landmarks, never a
+private address.
+
+Only for tiles outside that area, the Overpass server (OpenStreetMap data) is sent the
+bounding boxes of the tiles a route touches, one request per tile. Nothing else about
+the trip is sent: no route line, no pin position, no coordinate finer than a tenth of a
+degree, and no cookies. The server sees which tiles were asked for, the page's origin
+and, like any server, your IP address. A tile already on the device is not asked for
+again until it is a month old, and one that failed is left alone for at least 30
+seconds.
+
+The City of Charlotte's server is asked for its whole signal list, the same request
+whatever is on screen: no route, bounding box or pin position is sent to it, without
+cookies or a referrer. If it cannot be reached, the copy shipped with the app is used.
+
+The two data scripts are run by hand by a developer, not by the app.
+`npm run build:signals` makes no network request at all (the extracts are downloaded
+separately, as whole states). `npm run seed:charlotte` asks the city's server for its
+whole list with a User-Agent that names the script and nothing else.
+
+Signal data is kept on the device, in the browser's IndexedDB, so it does not have to be
+downloaded again: the OpenStreetMap signal tiles of the areas outside the bundle that
+you have routed through (database `routeiq-osm-signals`; bundled tiles are never copied
+into it), the city list (`routeiq-charlotte-signals`), and a
+note of when Overpass may next be asked (`routeiq-overpass-pause`). The stored tiles do
+show roughly where routes have been looked up on this device, to the nearest tile.
+Clearing the site's data in the browser removes all of it. Routes, pins and counts
+themselves are never stored. Where IndexedDB is not available (some private windows)
+the same data is held in memory only, for as long as the page is open.

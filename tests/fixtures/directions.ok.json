@@ -1,0 +1,221 @@
+{
+  "code": "Ok",
+  "uuid": "hand-written-fixture-not-a-real-response",
+  "waypoints": [
+    { "name": "East Trade Street", "location": [-80.8431, 35.2271], "distance": 1.2 },
+    { "name": "Sharon Road", "location": [-80.8295, 35.1527], "distance": 3.4 }
+  ],
+  "routes": [
+    {
+      "weight_name": "auto",
+      "weight": 1010.5,
+      "weight_typical": 880.2,
+      "duration": 900.4,
+      "duration_typical": 780.1,
+      "distance": 9300.5,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8436, 35.2201],
+          [-80.8402, 35.1903],
+          [-80.8331, 35.1611],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "South Tryon Street, Sharon Road",
+          "weight": 1010.5,
+          "duration": 900.4,
+          "duration_typical": 780.1,
+          "distance": 9300.5,
+          "via_waypoints": [],
+          "admins": [{ "iso_3166_1": "US", "iso_3166_1_alpha3": "USA" }],
+          "steps": [
+            {
+              "name": "East Trade Street",
+              "mode": "driving",
+              "driving_side": "right",
+              "weight": 90.1,
+              "duration": 80.2,
+              "duration_typical": 70.0,
+              "distance": 800.5,
+              "geometry": { "type": "LineString", "coordinates": [[-80.8431, 35.2271], [-80.8436, 35.2201]] },
+              "maneuver": {
+                "type": "depart",
+                "instruction": "Drive southwest on East Trade Street.",
+                "bearing_before": 0,
+                "bearing_after": 225,
+                "location": [-80.8431, 35.2271]
+              },
+              "intersections": [
+                { "location": [-80.8431, 35.2271], "bearings": [225], "entry": [true], "out": 0 },
+                { "location": [-80.8434, 35.2240], "bearings": [45, 225], "entry": [false, true], "in": 0, "out": 1, "traffic_signal": true }
+              ]
+            },
+            {
+              "name": "South Tryon Street",
+              "mode": "driving",
+              "driving_side": "right",
+              "weight": 620.0,
+              "duration": 560.0,
+              "duration_typical": 470.0,
+              "distance": 6000,
+              "geometry": { "type": "LineString", "coordinates": [[-80.8436, 35.2201], [-80.8402, 35.1903], [-80.8331, 35.1611]] },
+              "maneuver": {
+                "type": "turn",
+                "modifier": "left",
+                "instruction": "Turn left onto South Tryon Street.",
+                "bearing_before": 225,
+                "bearing_after": 170,
+                "location": [-80.8436, 35.2201]
+              },
+              "intersections": [
+                { "location": [-80.8436, 35.2201], "bearings": [45, 170], "entry": [false, true], "in": 0, "out": 1, "traffic_signal": true }
+              ]
+            },
+            {
+              "name": "Sharon Road",
+              "mode": "driving",
+              "driving_side": "right",
+              "weight": 300.4,
+              "duration": 260.2,
+              "duration_typical": 240.1,
+              "distance": 2500,
+              "geometry": { "type": "LineString", "coordinates": [[-80.8331, 35.1611], [-80.8295, 35.1527]] },
+              "maneuver": {
+                "type": "fork",
+                "modifier": "slight right",
+                "instruction": "Keep right onto Sharon Road.",
+                "bearing_before": 170,
+                "bearing_after": 160,
+                "location": [-80.8331, 35.1611]
+              },
+              "intersections": [
+                { "location": [-80.8331, 35.1611], "bearings": [350, 160], "entry": [false, true], "in": 0, "out": 1 }
+              ]
+            },
+            {
+              "name": "Sharon Road",
+              "mode": "driving",
+              "driving_side": "right",
+              "weight": 0,
+              "duration": 0,
+              "duration_typical": 0,
+              "distance": 0,
+              "geometry": { "type": "LineString", "coordinates": [[-80.8295, 35.1527], [-80.8295, 35.1527]] },
+              "maneuver": {
+                "type": "arrive",
+                "modifier": "right",
+                "instruction": "Your destination is on the right.",
+                "bearing_before": 160,
+                "bearing_after": 0,
+                "location": [-80.8295, 35.1527]
+              },
+              "intersections": [
+                { "location": [-80.8295, 35.1527], "bearings": [340], "entry": [true], "in": 0 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "weight_name": "auto",
+      "weight": 950.0,
+      "weight_typical": 960.0,
+      "duration": 840,
+      "duration_typical": 860,
+      "distance": 10100,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8352, 35.2143],
+          [-80.8223, 35.1852],
+          [-80.8262, 35.1604],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "Providence Road, Fairview Road",
+          "weight": 950.0,
+          "duration": 840,
+          "duration_typical": 860,
+          "distance": 10100,
+          "steps": [
+            {
+              "name": "East Trade Street",
+              "mode": "driving",
+              "duration": 200,
+              "distance": 2100,
+              "maneuver": { "type": "depart", "location": [-80.8431, 35.2271] }
+            },
+            {
+              "name": "Providence Road",
+              "mode": "driving",
+              "duration": 640,
+              "distance": 8000,
+              "maneuver": { "type": "turn", "modifier": "right", "location": [-80.8352, 35.2143] }
+            },
+            {
+              "name": "Fairview Road",
+              "mode": "driving",
+              "duration": 0,
+              "distance": 0,
+              "maneuver": { "type": "arrive", "location": [-80.8295, 35.1527] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "weight_name": "auto",
+      "weight": 1100.0,
+      "duration": 1020,
+      "distance": 9000,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8514, 35.2052],
+          [-80.8493, 35.1741],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "Park Road",
+          "weight": 1100.0,
+          "duration": 1020,
+          "distance": 9000,
+          "steps": [
+            {
+              "name": "East Trade Street",
+              "mode": "driving",
+              "duration": 300,
+              "distance": 2500,
+              "maneuver": { "type": "depart", "location": [-80.8431, 35.2271] }
+            },
+            {
+              "name": "Park Road",
+              "mode": "driving",
+              "duration": 720,
+              "distance": 6500,
+              "maneuver": { "type": "merge", "modifier": "slight left", "location": [-80.8514, 35.2052] }
+            },
+            {
+              "name": "Park Road",
+              "mode": "driving",
+              "duration": 0,
+              "distance": 0,
+              "maneuver": { "type": "arrive", "location": [-80.8295, 35.1527] }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

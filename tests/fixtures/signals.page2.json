@@ -1,0 +1,24 @@
+{
+  "type": "FeatureCollection",
+  "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+  "features": [
+    {
+      "type": "Feature",
+      "id": 104,
+      "geometry": { "type": "Point", "coordinates": [-80.8436, 35.2201] },
+      "properties": { "OBJECTID": 104, "UNITTYPE": "TSV", "SERVSTAT": "OP", "UNITDESC": "FIXTURE 3RD ST_FIXTURE COLLEGE ST" }
+    },
+    {
+      "type": "Feature",
+      "id": 105,
+      "geometry": { "type": "Point", "coordinates": [-80.8295, 35.1527] },
+      "properties": { "OBJECTID": 105, "UNITTYPE": "TS", "SERVSTAT": "OP", "UNITDESC": null }
+    },
+    {
+      "type": "Feature",
+      "id": 106,
+      "geometry": { "type": "Point", "coordinates": [-80.8331, 35.1611] },
+      "properties": { "OBJECTID": 106, "UNITTYPE": "MPB", "SERVSTAT": "OP", "UNITDESC": "FIXTURE MID BLOCK PED BEACON" }
+    }
+  ]
+}

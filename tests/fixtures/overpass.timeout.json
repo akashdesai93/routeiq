@@ -1,0 +1,9 @@
+{
+  "version": 0.6,
+  "generator": "hand-written fixture, not a real Overpass response",
+  "osm3s": { "timestamp_osm_base": "2026-11-01T00:00:00Z" },
+  "elements": [
+    { "type": "node", "id": 9000001, "lat": 35.2501, "lon": -80.8502, "tags": { "highway": "traffic_signals" } }
+  ],
+  "remark": "runtime error: Query timed out in \"query\" at line 1 after 26 seconds."
+}

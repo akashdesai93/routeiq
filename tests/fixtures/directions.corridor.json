@@ -1,0 +1,92 @@
+{
+  "code": "Ok",
+  "uuid": "hand-written-fixture-not-a-real-response",
+  "waypoints": [
+    {
+      "name": "Corridor Highway",
+      "location": [-80.85, 35.03],
+      "distance": 0.4
+    },
+    {
+      "name": "Corridor Highway",
+      "location": [-80.85, 34.985],
+      "distance": 0.6
+    }
+  ],
+  "routes": [
+    {
+      "weight_name": "auto",
+      "duration": 428.5,
+      "duration_typical": 410,
+      "distance": 5003.8,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.85, 35.03],
+          [-80.85, 35.0275],
+          [-80.85, 35.025],
+          [-80.85, 35.0225],
+          [-80.85, 35.02],
+          [-80.85, 35.0175],
+          [-80.85, 35.015],
+          [-80.85, 35.0125],
+          [-80.85, 35.01],
+          [-80.85, 35.0075],
+          [-80.85, 35.005],
+          [-80.85, 35.0025],
+          [-80.85, 35],
+          [-80.85, 34.9975],
+          [-80.85, 34.995],
+          [-80.85, 34.9925],
+          [-80.85, 34.99],
+          [-80.85, 34.9875],
+          [-80.85, 34.985]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "Corridor Highway",
+          "duration": 428.5,
+          "distance": 5003.8,
+          "steps": [
+            {
+              "name": "Corridor Highway",
+              "distance": 5003.8,
+              "maneuver": {
+                "type": "depart",
+                "location": [-80.85, 35.03]
+              },
+              "intersections": [
+                { "location": [-80.85, 35.03], "geometry_index": 0, "bearings": [180], "entry": [true], "out": 0, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 35.025], "geometry_index": 2, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "traffic_signal": true, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 35.0175], "geometry_index": 5, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "traffic_signal": true, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 35.0125], "geometry_index": 7, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 35.0075], "geometry_index": 9, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "traffic_signal": true, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 35], "geometry_index": 12, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "traffic_signal": true, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 34.995], "geometry_index": 14, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "mapbox_streets_v8": { "class": "trunk" } },
+                { "location": [-80.85, 34.99], "geometry_index": 16, "bearings": [0, 90, 180, 270], "entry": [false, true, true, true], "in": 0, "out": 2, "traffic_signal": true, "mapbox_streets_v8": { "class": "trunk" } }
+              ]
+            },
+            {
+              "name": "Corridor Highway",
+              "distance": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [-80.85, 34.985]
+              },
+              "intersections": [
+                {
+                  "location": [-80.85, 34.985],
+                  "geometry_index": 18,
+                  "bearings": [0],
+                  "entry": [true],
+                  "in": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

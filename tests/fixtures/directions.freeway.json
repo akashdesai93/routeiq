@@ -1,0 +1,128 @@
+{
+  "code": "Ok",
+  "uuid": "hand-written-fixture-not-a-real-response",
+  "waypoints": [
+    { "name": "Surface Street", "location": [-80.84, 35.2], "distance": 0.5 },
+    { "name": "Cross Road", "location": [-80.84, 35.208], "distance": 0.7 }
+  ],
+  "routes": [
+    {
+      "weight_name": "auto",
+      "duration": 95.5,
+      "duration_typical": 90.0,
+      "distance": 889.6,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.84, 35.2],
+          [-80.84, 35.201],
+          [-80.84, 35.202],
+          [-80.84, 35.203],
+          [-80.84, 35.204],
+          [-80.84, 35.205],
+          [-80.84, 35.206],
+          [-80.84, 35.207],
+          [-80.84, 35.208]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "I-00 North",
+          "duration": 95.5,
+          "distance": 889.6,
+          "steps": [
+            {
+              "name": "Surface Street",
+              "distance": 222.4,
+              "maneuver": { "type": "depart", "location": [-80.84, 35.2] },
+              "intersections": [
+                { "location": [-80.84, 35.2], "geometry_index": 0, "bearings": [0], "entry": [true], "out": 0, "mapbox_streets_v8": { "class": "primary" } },
+                { "location": [-80.84, 35.201], "geometry_index": 1, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "traffic_signal": true, "mapbox_streets_v8": { "class": "primary" } }
+              ]
+            },
+            {
+              "name": "",
+              "distance": 111.2,
+              "maneuver": { "type": "on ramp", "modifier": "slight right", "location": [-80.84, 35.202] },
+              "intersections": [
+                { "location": [-80.84, 35.202], "geometry_index": 2, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "classes": ["motorway"], "mapbox_streets_v8": { "class": "motorway_link" } }
+              ]
+            },
+            {
+              "name": "I-00 North",
+              "distance": 333.6,
+              "maneuver": { "type": "merge", "modifier": "slight left", "location": [-80.84, 35.203] },
+              "intersections": [
+                { "location": [-80.84, 35.203], "geometry_index": 3, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "classes": ["motorway"], "mapbox_streets_v8": { "class": "motorway" } },
+                { "location": [-80.84, 35.205], "geometry_index": 5, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "classes": ["motorway"] }
+              ]
+            },
+            {
+              "name": "",
+              "distance": 111.2,
+              "maneuver": { "type": "off ramp", "modifier": "slight right", "location": [-80.84, 35.206] },
+              "intersections": [
+                { "location": [-80.84, 35.206], "geometry_index": 6, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "mapbox_streets_v8": { "class": "tertiary_link" } }
+              ]
+            },
+            {
+              "name": "Cross Road",
+              "distance": 111.2,
+              "maneuver": { "type": "turn", "modifier": "left", "location": [-80.84, 35.207] },
+              "intersections": [
+                { "location": [-80.84, 35.207], "geometry_index": 7, "bearings": [0, 180], "entry": [true, false], "in": 1, "out": 0, "traffic_signal": true, "mapbox_streets_v8": { "class": "tertiary" } }
+              ]
+            },
+            {
+              "name": "Cross Road",
+              "distance": 0,
+              "maneuver": { "type": "arrive", "location": [-80.84, 35.208] },
+              "intersections": [
+                { "location": [-80.84, 35.208], "geometry_index": 8, "bearings": [180], "entry": [true], "in": 0 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "weight_name": "auto",
+      "duration": 140.0,
+      "distance": 900.0,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.84, 35.2],
+          [-80.841, 35.204],
+          [-80.84, 35.208]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "Side Street",
+          "duration": 140.0,
+          "distance": 900.0,
+          "steps": [
+            {
+              "name": "Side Street",
+              "distance": 900.0,
+              "maneuver": { "type": "depart", "location": [-80.84, 35.2] },
+              "intersections": [
+                { "location": [-80.84, 35.2], "geometry_index": 0, "bearings": [350], "entry": [true], "out": 0, "mapbox_streets_v8": { "class": "street" } },
+                { "location": [-80.841, 35.204], "geometry_index": 1, "bearings": [10, 170], "entry": [true, false], "in": 1, "out": 0, "classes": ["tunnel"], "mapbox_streets_v8": { "class": "trunk" } }
+              ]
+            },
+            {
+              "name": "Side Street",
+              "distance": 0,
+              "maneuver": { "type": "arrive", "location": [-80.84, 35.208] },
+              "intersections": [
+                { "location": [-80.84, 35.208], "geometry_index": 2, "bearings": [190], "entry": [true], "in": 0 }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

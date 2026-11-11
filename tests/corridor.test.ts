@@ -1,0 +1,181 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import {
+  DEFAULT_TRIP,
+  distanceM,
+  formatSignalCount,
+  INDIAN_LAND,
+  signalTilesForRoute,
+  tileIdAt,
+  UPTOWN_CHARLOTTE,
+  withSignalCounts,
+  type RouteCandidate,
+  type SignalPoint,
+} from '../src/core/index.ts'
+import type { SignalsResult } from '../src/providers/charlotte/client.ts'
+import { parseDirections } from '../src/providers/mapbox/adapter.ts'
+import { createOverpassClient } from '../src/providers/osm/client.ts'
+import { createTileSource, memoryTileStore, overpassLayer } from '../src/providers/osm/tileSource.ts'
+import { loadSignalData, type SignalSources } from '../src/signalData.ts'
+import { fakeOverpass, type NodeSpec, type TileAnswer } from './helpers/overpass.ts'
+
+// A trip down a highway corridor shaped like US-521 south of Charlotte: it starts in the city,
+// crosses the state line into South Carolina and ends past a tile edge. Hand-written, with
+// made-up positions: the road runs due south along longitude -80.85, a point every 278 m.
+//
+//   latitude 35.0300  start (in Charlotte)
+//            35.0250  signal: OpenStreetMap and the city list both have it
+//            35.0175  signal: only the city list has it (gap-fill)
+//            35.0130  the state line: the city list ends here
+//            35.0075  signal: OpenStreetMap only
+//            35.0000  signal, exactly on the edge between tiles -809_350 and -809_349
+//            34.9900  signal: OpenStreetMap only, in the southern tile
+//            34.9850  end
+
+const STATE_LINE_LAT = 35.013
+const NORTH = '-809_350'
+const SOUTH = '-809_349'
+const LNG = -80.85
+
+function corridor(): RouteCandidate {
+  const body: unknown = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'directions.corridor.json'), 'utf8'))
+  const parsed = parseDirections(body)
+  if (!parsed.ok) throw new Error(parsed.message)
+  return parsed.routes[0]!
+}
+
+/** What Overpass would answer for each tile. A node on the shared edge is in both answers. */
+const ON_EDGE = [40, LNG - 0.0001, 35.0] as const
+const OSM_NORTH: NodeSpec[] = [
+  // Two approaches of one junction, 22 m apart.
+  [10, LNG, 35.0251],
+  [11, LNG, 35.0249],
+  [30, LNG + 0.0001, 35.0075],
+  // The junction on the tile edge: its northern approach.
+  [41, LNG, 35.0001],
+  ON_EDGE,
+]
+const OSM: Record<string, TileAnswer> = {
+  [NORTH]: OSM_NORTH,
+  [SOUTH]: [
+    // Its southern approach, in the other tile.
+    [42, LNG, 34.9999],
+    ON_EDGE,
+    [50, LNG, 34.99],
+  ],
+}
+
+/** The city list, as it really is: nothing south of the state line. */
+const CITY: SignalPoint[] = [
+  // The same junction OpenStreetMap has at 35.025, placed 15 m away.
+  { id: 'clt-1', position: [LNG + 0.0001, 35.0251], name: 'CORRIDOR HY_FIRST ST' },
+  // One OpenStreetMap lacks.
+  { id: 'clt-2', position: [LNG, 35.0175], name: 'CORRIDOR HY_SECOND ST' },
+  // Elsewhere in the city, nowhere near the road.
+  { id: 'clt-3', position: [-80.8431, 35.2271], name: 'TRADE ST_TRYON ST' },
+]
+
+function sources(answers: Record<string, TileAnswer>, city: readonly SignalPoint[] | null): SignalSources {
+  const server = fakeOverpass(answers)
+  const cityResult: SignalsResult =
+    city === null ? { ok: false, kind: 'network', message: 'offline' } : { ok: true, signals: city }
+  return {
+    tiles: createTileSource({
+      cache: memoryTileStore(),
+      network: overpassLayer(createOverpassClient({ fetchImpl: server.fetchImpl })),
+    }),
+    gapFill: { load: () => Promise.resolve(cityResult) },
+  }
+}
+
+async function count(answers: Record<string, TileAnswer>, city: readonly SignalPoint[] | null) {
+  const route = corridor()
+  const loaded = await loadSignalData([route], sources(answers, city))
+  const counted = withSignalCounts([route], loaded.data)
+  const result = counted.routes[0]!
+  return {
+    loaded,
+    result,
+    signals: counted.signalsByRouteId.get(route.id) ?? [],
+    label: formatSignalCount(result.signalCount, result.signalCoverage),
+  }
+}
+
+describe('the default trip', () => {
+  it('runs from Uptown Charlotte to US-521 and SC-160 in Indian Land, South Carolina', () => {
+    expect(DEFAULT_TRIP).toEqual({ origin: UPTOWN_CHARLOTTE, destination: INDIAN_LAND })
+    // About 25 km apart as the crow flies, the destination due south and across the state line.
+    const d = distanceM(DEFAULT_TRIP.origin.position, DEFAULT_TRIP.destination.position)
+    expect(d).toBeGreaterThan(24_000)
+    expect(d).toBeLessThan(26_500)
+    expect(INDIAN_LAND.position[1]).toBeLessThan(STATE_LINE_LAT)
+    expect(INDIAN_LAND.label).toContain('US-521')
+    // The two ends are in different tiles, three tiles apart.
+    expect(tileIdAt(UPTOWN_CHARLOTTE.position)).toBe('-809_352')
+    expect(tileIdAt(INDIAN_LAND.position)).toBe('-809_350')
+  })
+})
+
+describe('a corridor trip across the state line', () => {
+  it('is a route with tiles on both sides of a tile edge and a stretch south of the city data', () => {
+    const route = corridor()
+    expect(signalTilesForRoute(route.geometry)).toEqual([SOUTH, NORTH])
+    expect(route.geometry[0]![1]).toBeGreaterThan(STATE_LINE_LAT)
+    expect(route.geometry.at(-1)![1]).toBeLessThan(STATE_LINE_LAT)
+    expect(CITY.every((s) => s.position[1] > STATE_LINE_LAT)).toBe(true)
+    // A highway with signals, not a freeway: nothing is filtered as limited-access.
+    expect(route.limitedAccessSpansM).toEqual([])
+    expect(route.providerSignalCount).toBe(5)
+  })
+
+  it('counts every signal once, from OpenStreetMap first and the city list where it adds one', async () => {
+    const { result, signals, label, loaded } = await count(OSM, CITY)
+    expect([result.signalCount, result.signalCoverage]).toEqual([5, 'full'])
+    expect(label).toBe('5 signals')
+    expect(loaded.missingTileIds).toEqual([])
+    expect(signals.map((s) => [s.id, s.source])).toEqual([
+      ['osm-10', 'primary'],
+      ['clt-2', 'gapFill'],
+      ['osm-30', 'primary'],
+      ['osm-40', 'primary'],
+      ['osm-50', 'primary'],
+    ])
+  })
+
+  it('gets nothing from the city list south of the state line: OpenStreetMap counts there', async () => {
+    const withCity = await count(OSM, CITY)
+    const south = withCity.signals.filter((s) => s.position[1] < STATE_LINE_LAT)
+    expect(south).toHaveLength(3)
+    expect(south.every((s) => s.source === 'primary')).toBe(true)
+    expect(withCity.signals.filter((s) => s.source === 'gapFill').every((s) => s.position[1] > STATE_LINE_LAT)).toBe(true)
+
+    // Without the city list the count south of the line is the same; only the gap-fill north of it goes.
+    const withoutCity = await count(OSM, null)
+    expect([withoutCity.result.signalCount, withoutCity.result.signalCoverage]).toEqual([4, 'full'])
+    expect(withoutCity.signals.filter((s) => s.position[1] < STATE_LINE_LAT).map((s) => s.id)).toEqual(south.map((s) => s.id))
+
+    // Without OpenStreetMap's nodes south of the line there would be nothing there at all.
+    const northOnly = await count({ [NORTH]: OSM_NORTH.slice(0, 2), [SOUTH]: [] }, CITY)
+    expect([northOnly.result.signalCount, northOnly.result.signalCoverage]).toEqual([2, 'full'])
+    expect(northOnly.signals.every((s) => s.position[1] > STATE_LINE_LAT)).toBe(true)
+  })
+
+  it('counts the intersection on the tile edge once', async () => {
+    const { signals, loaded } = await count(OSM, CITY)
+    const onEdge = signals.filter((s) => Math.abs(s.position[1] - 35.0) < 0.001)
+    expect(onEdge).toHaveLength(1)
+    // Its three nodes came from two tiles, one of them from both.
+    expect(onEdge[0]!.mergedIds).toEqual(['osm-40', 'osm-41', 'osm-42'])
+    expect(loaded.data.primary.filter((p) => p.id === 'osm-40')).toHaveLength(1)
+  })
+
+  it('says partial, with the Mapbox flags standing in, when the tile south of the edge is missing', async () => {
+    const { result, signals, label, loaded } = await count({ ...OSM, [SOUTH]: 504 }, CITY)
+    expect(loaded.missingTileIds).toEqual([SOUTH])
+    expect([result.signalCount, result.signalCoverage]).toEqual([5, 'partial'])
+    expect(label).toBe('≥ 5 signals (partial)')
+    // The edge junction is still one signal (its northern nodes loaded), and the last one is a Mapbox flag.
+    expect(signals.map((s) => s.source)).toEqual(['primary', 'gapFill', 'primary', 'primary', 'fallback'])
+  })
+})
