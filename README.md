@@ -59,7 +59,47 @@ extracts on disk) and `npm run seed:charlotte` (refreshes the City of Charlotte 
 see Data sources.
 
 CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, lint and tests on Node 24
-(Ubuntu) on every push to `main` and every pull request.
+(Ubuntu) on every push to `main` and every pull request. `.github/workflows/e2e.yml` runs
+the end-to-end scenarios alongside and uploads their report as the `e2e-report` artifact.
+
+## End-to-end scenarios
+
+Each feature the user sees or hears has a scenario that shows it working, named as a
+sentence: "I start a drive and it speaks the turns in order, then says I have arrived",
+"when a faster route holds up, it switches by itself and tells me once", "when nothing is
+faster, it never switches", "a wrong turn: it says I am off the route, finds a new one and
+gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
+and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix".
+
+```powershell
+npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
+npm run e2e                                    # builds, runs every scenario, about 1 minute
+start e2e-report\index.html                    # the one-page report
+```
+
+- **What runs:** the production build (`vite build` with a dummy `pk.test` token, plus a
+  build with no token for the setup help), served by `vite preview` on ports 4317 and 4318,
+  in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
+  and `.env.local` is never used.
+- **Fully offline.** Every request that leaves localhost is answered by the test
+  (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a
+  made-up road network between the trip's two points (`e2e/world/roads.ts`): three routes
+  that share their start and end, answered from wherever the car is, as Mapbox does.
+  Traffic is a script (`e2e/world/traffic.ts`: "a jam on A from the second check on").
+  Search answers from the hand-written fixtures in `tests/fixtures`, the map style is a
+  blank one, City of Charlotte and Overpass answer as each scenario says.
+  `tests/e2eWorld.test.ts` puts the made-up answers through the real adapter, so they
+  stay shaped like Mapbox's. Only public landmarks are used; no real responses are
+  recorded (Mapbox's terms limit storing their data, and the repository is public).
+- **Simulated GPS, voice and clock.** A drive runs on Playwright's fake clock: the made-up
+  driver sends a fix every 2 simulated seconds along the route the app chose, follows it
+  onto a new route when the app announces one, and can take a wrong turn or wander with
+  GPS noise. The voice records every line in order instead of speaking. A 17-minute drive
+  takes about 40 seconds.
+- **Evidence:** `e2e-report/index.html` shows each scenario with its screenshots, the
+  spoken lines with their drive time, what the made-up traffic server answered to each
+  route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
+  trace of any failure.
 
 ## Planning a trip
 
@@ -316,6 +356,12 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 device.test.ts (the wrappers and the voice's queue) and
                 liveReplay.test.ts (whole replayed drives through the runner: a
                 traffic change gives exactly one switch and the spoken lines in order).
+                e2eWorld.test.ts checks the e2e road network against the real adapter.
+e2e/            Playwright end-to-end scenarios (see End-to-end scenarios): *.spec.ts,
+                harness.ts (offline router, fake clock, the made-up driver),
+                browserStubs.ts (GPS, voice, request counting in the page),
+                world/ (the made-up road network and traffic scripts),
+                summaryReporter.ts (the one-page report), build.mjs (the test builds).
 check-prereqs.ps1  Windows prerequisite check.
 ```
 
@@ -846,6 +892,7 @@ CarPlay or Bluetooth, and battery use have not been tried.
 | typescript | 7.0.2 | as the Vite template ships it |
 | mapbox-gl | 3.34.2 | imported from `mapbox-gl/esm` per Mapbox's npm guide; ships its own types |
 | vitest | 5.1.0 | peer `vite ^6.4 \|\| ^7 \|\| ^8` |
+| @playwright/test | 1.65.0 | e2e only; about 19 MB in node_modules, plus Chromium headless shell (about 290 MB, once per machine) |
 
 `package-lock.json` includes the Windows native builds (rolldown, lightningcss, oxlint,
 TypeScript), so `npm ci` installs the same tree that was tested.

@@ -35,3 +35,8 @@ dist-ssr
 .claude/settings.local.json
 .claude/worktrees/
 .claude/fleet/
+
+# End-to-end scenarios (npm run e2e): test builds and the report
+dist-e2e/
+dist-e2e-notoken/
+e2e-report/

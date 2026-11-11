@@ -14,7 +14,10 @@
     "lint": "oxlint",
     "build:signals": "node scripts/build-signal-tiles.mjs",
     "seed:charlotte": "node scripts/seed-charlotte.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e:build": "node e2e/build.mjs",
+    "e2e": "npm run e2e:build && playwright test",
+    "e2e:report": "playwright show-report e2e-report/playwright"
   },
   "dependencies": {
     "mapbox-gl": "3.34.2",
@@ -22,6 +25,7 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
