@@ -42,7 +42,7 @@ const BUILT = `<!doctype html>
   <body><div id="root"></div></body>
 </html>`;
 
-test('the bridge script is added once, ahead of nothing it depends on', () => {
+test('the bridge script is added once, in the head', () => {
   const once = injectBridge(BUILT);
   assert.match(once, /<script src="\/routeiq-native\.js"><\/script>\s*<\/head>/);
   assert.equal(injectBridge(once), once);

@@ -17,6 +17,10 @@ import UIKit
 /// Everything here runs on the main thread.
 final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesizerDelegate {
     private static let askedAlwaysKey = "routeiq.askedAlwaysLocation"
+    /// A fix older than this on arrival is a cached one and is not passed on.
+    private static let maxFixAgeSec: TimeInterval = 10
+    /// Giving the audio back can fail while a line is still stopping; it is tried again this often.
+    private static let deactivateRetries = 3
 
     private let manager = CLLocationManager()
     private let synth = AVSpeechSynthesizer()
@@ -79,6 +83,10 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         manager.stopUpdatingLocation()
         heartbeat?.invalidate()
         heartbeat = nil
+        // Someone was waiting for the stream's next fix: ask for one instead.
+        if !pendingOnce.isEmpty {
+            requestOnce()
+        }
     }
 
     var authorization: String {
@@ -93,6 +101,12 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     }
 
     private func begin() {
+        // A one-shot request ("Use my location") still out would end the stream
+        // after its single fix. Drop it; the stream's first fix answers it.
+        if onceRequested {
+            manager.stopUpdatingLocation()
+            onceRequested = false
+        }
         updating = true
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = kCLDistanceFilterNone
@@ -205,7 +219,9 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         if !pendingOnce.isEmpty {
             answerOnce(fix: fix, error: nil)
         }
-        if updating {
+        // Core Location may first hand over a fix it kept from earlier. The
+        // web app stamps fixes on arrival, so an old one must not look new.
+        if updating && location.timestamp.timeIntervalSinceNow > -Self.maxFixAgeSec {
             onFix?(fix)
         }
     }
@@ -261,7 +277,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
             guard let self = self, self.speechNumber == number, self.currentDone != nil else { return }
             self.endCurrent(finished: false)
             self.synth.stopSpeaking(at: .immediate)
-            self.deactivateAudio()
+            self.deactivateAudioSoon()
         }
     }
 
@@ -270,7 +286,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         if synth.isSpeaking {
             synth.stopSpeaking(at: .immediate)
         }
-        deactivateAudio()
+        deactivateAudioSoon()
     }
 
     /// Tells whoever asked for the current line that it is over (once).
@@ -298,7 +314,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
             // Also after cancelSpeech, which has already forgotten the line:
             // only now has the synthesizer really stopped. This does nothing
             // when another line has started meanwhile.
-            self.deactivateAudio()
+            self.deactivateAudioSoon()
         }
     }
 
@@ -310,10 +326,25 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         }
     }
 
-    private func deactivateAudio() {
+    private func deactivateAudio(attempt: Int = 0) {
         // Another line has started meanwhile: it needs the session.
-        if synth.isSpeaking || currentDone != nil { return }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if currentDone != nil { return }
+        var released = false
+        if !synth.isSpeaking {
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                released = true
+            } catch {
+                // Still busy stopping; tried again below.
+            }
+        }
+        // Otherwise music would stay quiet until the next line, which after
+        // a mute never comes.
+        if !released && attempt < Self.deactivateRetries {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.deactivateAudio(attempt: attempt + 1)
+            }
+        }
     }
 
     // MARK: - Screen
