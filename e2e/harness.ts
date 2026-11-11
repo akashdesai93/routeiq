@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, type E2EWindow } from './browserStubs.ts'
-import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type Traffic } from './world/roads.ts'
+import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
 
 export { expect }
 
@@ -57,6 +57,12 @@ export interface Outside {
 }
 
 export interface DriveOptions {
+  /**
+   * The road the driver sets off on: the route picked on the plan screen,
+   * which the app drives. Default: the fastest of Mapbox's own routes for the
+   * trip (the recommended one when no side street beats it).
+   */
+  road?: RoadName
   /** Car speed on the road, meters per second. */
   speedMps?: number
   /** Give up after this many simulated seconds. */
@@ -84,6 +90,8 @@ export class App {
   directionsRequests = 0
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
+  /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on. */
+  readonly pathChecks: { n: number; road: string | null; vias: number }[] = []
   /** Side-street probes (requests with a via point), in order: the road each one came back on, null for NoSegment. */
   readonly probes: {
     forRequest: number
@@ -208,20 +216,22 @@ export class App {
   /**
    * Taps Start drive and drives the trip on the fake clock, one simulated
    * second at a time, the way a driver who follows the app would: on the
-   * recommended route, and onto the new one whenever the app announces a switch.
+   * route picked on the plan screen (`road`), and onto the new one whenever
+   * the app announces a switch.
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0 } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
-    const before = this.directionsRequests
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
 
-    let route: readonly LngLat[] | null = null
+    // The car sets off on the route picked on the plan screen, from its start.
+    const world: World | undefined = [...this.worlds.values()].at(-1)
+    const first = road ?? world?.lastOffered[0]?.name
+    let route: readonly LngLat[] | null = world !== undefined && first !== undefined && first !== 'off-route' ? world.cornersOf(first) : null
     let alongM = 0
-    let world: World | undefined
     let astray: { at: LngLat; headingDeg: number; sec: number } | null = null
     let position: LngLat = UPTOWN
     let heading = 180
@@ -230,15 +240,6 @@ export class App {
     let lastBanner = ''
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
-      // The first route of the drive: the car sets off on what the app recommended.
-      if (route === null && this.directionsRequests > before) {
-        world = [...this.worlds.values()].at(-1)
-        const first = world?.lastOffered[0]
-        if (first !== undefined) {
-          route = first.corners
-          alongM = 0
-        }
-      }
       if (route !== null && astray === null && wrongTurnAtSec !== undefined && sec === wrongTurnAtSec) {
         const here = along(route, alongM)
         // Turn right, square to the road.
@@ -352,6 +353,17 @@ export class App {
           // Answering a request the page has cancelled fails; that is the point of some scenarios.
           this.held.push(() => route.fulfill({ json: probe.answer }).catch(() => {}))
           return
+        }
+        // The drive's own check of the route being driven: through vias, with the car's heading.
+        if (points.length > 2) {
+          const path = world.pathThrough(from, points.slice(1, -1), traffic, this.directionsRequests + 1)
+          if (path !== null) {
+            this.directionsRequests++
+            this.pathChecks.push({ n: this.directionsRequests, road: path.road, vias: points.length - 2 })
+            this.answers.push({ n: this.directionsRequests, routes: [{ name: path.road, durationSec: path.durationSec }] })
+            return route.fulfill({ json: path.answer })
+          }
+          this.pathChecks.push({ n: this.directionsRequests + 1, road: null, vias: points.length - 2 })
         }
         this.directionsRequests++
         const json = world.directions(from, traffic, this.directionsRequests)

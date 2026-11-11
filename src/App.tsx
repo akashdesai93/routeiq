@@ -86,6 +86,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
   const live = useLiveDrive({
     token,
     destination: pins.destination.position,
+    route: selectedRoute,
     rerouteOptions: sim.rerouteOptions,
     settings: sim.settings,
     whatIfDelaySec: sim.whatIfDelaySec,

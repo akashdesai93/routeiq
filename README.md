@@ -16,7 +16,7 @@ signal data cannot be loaded the count is marked partial, never shown as zero. T
 ties of 30 seconds or less, and the top one is marked "Recommended". A simulated drive
 moves a car along the selected route, asks Mapbox for fresh routes as it goes and changes
 route by itself when a faster one holds up (see Rerouting). "Start drive" does the same
-for real: it follows the device's position to the destination, checks for faster routes
+for real: it drives the route you picked (a side-street route too), follows the device's position to the destination, checks for faster routes
 as you go, switches by itself and says so out loud, with turn prompts (see Live drive).
 What comes next is in [PLAN.md](PLAN.md).
 
@@ -880,10 +880,24 @@ durations are carried but not used for the choice yet.
 ## Live drive
 
 "Start drive" at the top of the route list is the one tap. After it nothing needs
-touching: RouteIQ asks for the location permission, plans a route from the first good
-position fix to the destination, follows the car, checks Mapbox for faster routes,
+touching: RouteIQ asks for the location permission, starts on the route you picked,
+follows the car, checks Mapbox for faster routes,
 changes route by itself and announces it, speaks the turn prompts, and at the
 destination stops and shows a short summary (trip time, the switches and why).
+
+**It drives the route you picked** (#66). The route selected on the plan screen goes
+with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
+route the plan's probes found (`source: 'probe'`). When the first good fix is on that
+route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
+request of its own, and the plan's answer counts as the first one: the first check goes
+out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+from somewhere else) plans a route from there, as before. From then on the engine judges
+the picked route like any other. Mapbox does not offer a side street by itself, so a
+check from the car usually lacks it; the existing path check (`baselineProbe`, one more
+request through via points along the route being driven) gives its like-for-like ETA,
+and when that cannot be had (no budget, a failed request, another road back) the route
+is unconfirmed, not lost: the drive stays on it, and only "no route along the road
+ahead" `routeLostPolls` times in a row counts against it. No threshold changed.
 
 **The limit of the web version.** A browser only runs a page while it is in front with
 the screen on. Lock the phone or switch to another app and the position, the checks and

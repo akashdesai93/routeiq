@@ -5,8 +5,9 @@ import { JAM_ON_A_FROM_SECOND_CHECK, NOISY_BUT_NOTHING_FASTER } from './world/tr
 // code: the app asks for routes, decides, speaks, and the made-up driver does
 // what it says. The trip is the app's test trip, Uptown Charlotte to
 // US-521 & SC-160; the roads in between are made up (e2e/world/roads.ts).
-// Directions request 1 is the plan screen, 2 the start of the drive, 3 and
-// on the checks for a faster route, about once a minute.
+// Directions request 1 is the plan screen; the drive sets off on the route
+// picked there with no request of its own (#66), and 2 and on are the checks
+// for a faster route, about once a minute.
 
 const STARTED = 'RouteIQ started'
 const OFF_ROUTE = 'You are off the route. Finding a new one.'
@@ -42,7 +43,7 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   await app.snap('arrived: the summary lists the switch')
 
   expect(log.arrived).toBe(true)
-  // One switch, after the jam held up for two checks in a row (requests 4 and 5), shown with a way to undo it.
+  // One switch, after the jam held up for two checks in a row (requests 3 and 4), shown with a way to undo it.
   expect(log.banners).toHaveLength(1)
   expect(log.banners[0]!.text).toContain('Switched to a faster route')
   expect(log.banners[0]!.text).toContain('Keep previous route')
@@ -66,7 +67,7 @@ test('when nothing is faster, it never switches', async ({ app }) => {
   await app.snap('arrived: no route changes')
 
   // The wobble did make another route look a little quicker at some checks: this is not a quiet drive.
-  const tempting = app.answers.filter(({ n, routes }) => n >= 3 && routes.length > 1 && routes[0]!.name !== 'A')
+  const tempting = app.answers.filter(({ n, routes }) => n >= 2 && routes.length > 1 && routes[0]!.name !== 'A')
   expect(tempting.length).toBeGreaterThan(0)
 
   expect(log.arrived).toBe(true)
