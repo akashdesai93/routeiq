@@ -23,8 +23,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Is the site set up yet? Until the owner adds the secret, a push to main skips the build
+  # and the deployment and the workflow still succeeds; a run started by hand fails loudly.
+  # Only whether the secret is empty is looked at; its value is never printed.
+  check:
+    name: check setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.token.outputs.configured }}
+    steps:
+      - id: token
+        env:
+          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN_PAGES }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ -n "$VITE_MAPBOX_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error title=Missing Mapbox token::Set the VITE_MAPBOX_TOKEN_PAGES secret (Settings > Secrets and variables > Actions) to a pk. token restricted to https://akashdesai93.github.io, and enable Pages (Settings > Pages > Source: GitHub Actions). See docs/phone-testing.md."
+            exit 1
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Pages deploy skipped::Pages deploy skipped: set VITE_MAPBOX_TOKEN_PAGES and enable Pages"
+          fi
+
   build:
     name: build
+    needs: check
+    if: needs.check.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -66,7 +93,8 @@ jobs:
 
   deploy:
     name: deploy
-    needs: build
+    needs: [check, build]
+    if: needs.check.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

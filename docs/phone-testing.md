@@ -19,8 +19,10 @@ the phone needs before it hands the page a GPS position.
 4. **Deploy.** Either push to `main`, or run the workflow by hand:
    `gh workflow run pages.yml` (or Actions → Pages → *Run workflow*). Watch it with
    `gh run watch`. The *deploy* job prints the site URL when it is done.
-   If the secret is missing the build stops with "Set the VITE_MAPBOX_TOKEN_PAGES
-   secret"; if Pages is off, the *configure-pages* step fails.
+   Until the secret is set, a push to `main` skips the deployment (the run succeeds with
+   the notice "Pages deploy skipped") and a run started by hand fails with "Set the
+   VITE_MAPBOX_TOKEN_PAGES secret". With the secret set but Pages off, the
+   *configure-pages* step fails, so do steps 2 and 3 together.
 
 ## On the phone
 
