@@ -16,6 +16,20 @@ function coordinate([lng, lat]: LngLat): string {
  */
 export const HEADING_RANGE_DEG = 45
 
+/** A point a route has to pass through, with the direction of travel there when it is known. */
+export interface ViaPoint {
+  readonly point: LngLat
+  /** Degrees clockwise from true north. Sent as that coordinate's `bearings` entry. */
+  readonly bearingDeg?: number
+}
+
+/**
+ * The most via points one request carries. The Directions API takes 25
+ * coordinates per request on every profile, driving-traffic included (docs
+ * checked Nov 2026); two of them are the origin and the destination.
+ */
+export const MAX_VIA_POINTS = 23
+
 export interface DirectionsUrlOptions {
   /**
    * The vehicle's heading at the origin, in degrees clockwise from true
@@ -25,6 +39,17 @@ export interface DirectionsUrlOptions {
    * divided road. Left out, or not a number, the request has no bearings.
    */
   originHeadingDeg?: number
+  /**
+   * Points the route must pass through, in order, between the origin and
+   * the destination: the way to ask for the travel time of one particular
+   * path (the route being driven, when a poll did not return it). They are
+   * sent as coordinates that are NOT waypoints (`waypoints=0;N` names only
+   * the origin and the destination), so the answer is still one leg with no
+   * "arrive" maneuvers on the way. With via points no alternatives are asked
+   * for: the question is about this path only. Points past MAX_VIA_POINTS
+   * and points that are not coordinates are left out.
+   */
+  via?: readonly ViaPoint[]
 }
 
 /**
@@ -42,8 +67,9 @@ export function buildDirectionsUrl(
   options: DirectionsUrlOptions = {},
 ): string | null {
   if (!isValidLngLat(origin) || !isValidLngLat(destination)) return null
+  const via = (options.via ?? []).filter((v) => isValidLngLat(v.point)).slice(0, MAX_VIA_POINTS)
   const query = new URLSearchParams({
-    alternatives: 'true',
+    alternatives: via.length === 0 ? 'true' : 'false',
     geometries: 'geojson',
     overview: 'full',
     steps: 'true',
@@ -54,15 +80,17 @@ export function buildDirectionsUrl(
     voice_instructions: 'true',
     voice_units: 'imperial',
   })
-  const heading = options.originHeadingDeg
-  if (heading !== undefined && Number.isFinite(heading)) {
-    // One "angle,range" per coordinate, semicolon-separated; the empty entry
-    // after the semicolon leaves the destination free (Mapbox docs: bearings).
-    const angle = ((Math.round(heading) % 360) + 360) % 360
-    query.set('bearings', `${angle},${HEADING_RANGE_DEG};`)
-  }
+  // One "angle,range" per coordinate, semicolon-separated; an empty entry leaves
+  // that coordinate free, as the destination always is (Mapbox docs: bearings).
+  const bearing = (deg: number | undefined) =>
+    deg !== undefined && Number.isFinite(deg) ? `${((Math.round(deg) % 360) + 360) % 360},${HEADING_RANGE_DEG}` : ''
+  const bearings = [bearing(options.originHeadingDeg), ...via.map((v) => bearing(v.bearingDeg)), '']
+  if (bearings.some((b) => b !== '')) query.set('bearings', bearings.join(';'))
+  // Only the first and the last coordinate are waypoints; the ones between guide the path.
+  if (via.length > 0) query.set('waypoints', `0;${via.length + 1}`)
   query.set('access_token', token)
-  return `${DIRECTIONS_BASE}/${coordinate(origin)}%3B${coordinate(destination)}?${query.toString()}`
+  const coordinates = [origin, ...via.map((v) => v.point), destination].map(coordinate).join('%3B')
+  return `${DIRECTIONS_BASE}/${coordinates}?${query.toString()}`
 }
 
 export interface FetchDirectionsOptions {
@@ -71,6 +99,8 @@ export interface FetchDirectionsOptions {
   token: string
   /** See DirectionsUrlOptions: the heading of a moving vehicle at the origin. */
   originHeadingDeg?: number
+  /** See DirectionsUrlOptions: points the route must pass through. */
+  via?: readonly ViaPoint[]
   /** Aborting resolves with kind 'aborted'; the caller should ignore that result. */
   signal?: AbortSignal
   /** Swapped out in tests so they never touch the network. */
@@ -82,8 +112,8 @@ export interface FetchDirectionsOptions {
  * come back as a typed result with a message fit to show the user.
  */
 export async function fetchDirections(options: FetchDirectionsOptions): Promise<DirectionsResult> {
-  const { origin, destination, token, originHeadingDeg, signal, fetchImpl = fetch } = options
-  const url = buildDirectionsUrl(origin, destination, token, { originHeadingDeg })
+  const { origin, destination, token, originHeadingDeg, via, signal, fetchImpl = fetch } = options
+  const url = buildDirectionsUrl(origin, destination, token, { originHeadingDeg, via })
   if (url === null)
     return { ok: false, kind: 'malformed', message: 'A pin is not at a valid map coordinate.' }
 

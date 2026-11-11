@@ -1,4 +1,4 @@
-import { alongRouteM, isValidLngLat, lineFrom, localProjector, pointToSegment, type XY } from './geo.ts'
+import { alongRouteM, isValidLngLat, lineFrom, localProjector, pointAtDistance, pointToSegment, type XY } from './geo.ts'
 import { DEFAULT_ETA_TIE_WINDOW_SEC, rankRoutes } from './rank.ts'
 import { SAME_ROUTE_TOLERANCE_M } from './select.ts'
 import type { DistanceSpanM, LngLat, Maneuver, RouteCandidate } from './types.ts'
@@ -39,15 +39,61 @@ export interface RerouteOptions {
   /** On a freeway the turn-off is an exit that needs lane changes: it must be at least this far ahead, in meters. */
   readonly freewayLeadDistanceM: number
   /**
-   * When no fresh route is the rest of the current one, the current route's
-   * ETA is unknown. That is not acted on until it has been so for this many
-   * polls in a row; then the best fresh route is taken.
+   * When no fresh route is the rest of the current one, the current route is
+   * kept: a route that is merely not among the provider's best three is still
+   * a good road. It is only given up after the provider, asked for the
+   * current path itself (RerouteObservation.baseline), has answered "no
+   * route that way" this many polls in a row: then the road ahead cannot be
+   * routed at all (a closure), and the best fresh route is taken.
    */
   readonly routeLostPolls: number
   /** The driver is off the current route when the fresh routes start farther than this from its line, in meters. */
   readonly offRouteM: number
-  /** How far apart two lines may run and still be the same road, in meters (see SAME_ROUTE_TOLERANCE_M). */
+  /**
+   * How close a point must be to the current route's line to be on it, in
+   * meters (see SAME_ROUTE_TOLERANCE_M). Used to find where an alternative
+   * turns off and which maneuvers it shares. Whether a whole fresh route IS
+   * the current one is decided by the match* thresholds below.
+   */
   readonly sameRouteToleranceM: number
+  /**
+   * Matching a fresh route to the rest of the current one (findCurrentRoute):
+   * how far apart the two lines may run and still be together, in meters.
+   * Wider than sameRouteToleranceM because the same road comes back drawn a
+   * little differently: a corner cut 14 m inside the old one, the other lane
+   * group of a freeway (both measured on real answers, see the README).
+   */
+  readonly matchToleranceM: number
+  /**
+   * ...and the share of each line's length that must run within that distance
+   * of the other (0.95 is 95%), measured on the shorter of the two.
+   */
+  readonly matchMinOverlap: number
+  /**
+   * ...and no single stretch apart may be longer than this, in meters; nor
+   * may the two lengths differ by more. This is what keeps a different road
+   * for a kilometer from hiding inside a long route's allowance.
+   */
+  readonly matchMaxGapM: number
+  /**
+   * The first meters after the query point are not compared: the provider
+   * snaps the start to a road its own way (the other side of a divided road,
+   * a parallel street), and the two lines join a moment later.
+   */
+  readonly matchIgnoreStartM: number
+  /**
+   * Asking for the current path's own travel time (baselineProbe): a via
+   * point at least every this many meters along each stretch of it that the
+   * fresh routes do not share.
+   */
+  readonly baselineViaSpacingM: number
+  /**
+   * ...and no more than this many via points in one request. Six is as far
+   * as Mapbox goes with traffic: measured Nov 2026, a driving-traffic answer
+   * for more than 8 coordinates comes back with `duration_typical` null, and
+   * a time without it is not compared (requireTypicalDuration).
+   */
+  readonly baselineMaxViaPoints: number
   /**
    * An alternative is "going back" to a route left recently when at least
    * this share of its own part (the part not shared with the current route)
@@ -78,6 +124,12 @@ export const DEFAULT_REROUTE_OPTIONS: RerouteOptions = {
   routeLostPolls: 3,
   offRouteM: 50,
   sameRouteToleranceM: SAME_ROUTE_TOLERANCE_M,
+  matchToleranceM: 20,
+  matchMinOverlap: 0.95,
+  matchMaxGapM: 400,
+  matchIgnoreStartM: 150,
+  baselineViaSpacingM: 3000,
+  baselineMaxViaPoints: 6,
   returnOverlapFraction: 0.5,
   requireTypicalDuration: true,
   etaTieWindowSec: DEFAULT_ETA_TIE_WINDOW_SEC,
@@ -97,7 +149,12 @@ export interface RerouteState {
   readonly abandoned: readonly { readonly geometry: readonly LngLat[]; readonly atSec: number }[]
   /** Polls in a row that failed (no answer). A failed poll changes nothing else. */
   readonly failedPolls: number
-  /** Polls in a row in which no fresh route was the rest of the current one. */
+  /**
+   * Polls in a row in which the provider was asked for the current path
+   * itself and found no route that way (see RerouteOptions.routeLostPolls).
+   * A poll that could not ask leaves it as it is; one that finds the current
+   * route, or is answered with any route at all, sets it back to 0.
+   */
   readonly lostPolls: number
   /**
    * Routes the driver turned down ("Keep previous route"), each as the path
@@ -125,9 +182,10 @@ export interface RerouteObservation {
   /**
    * How far along `route` the driver was when the directions query was sent,
    * in meters from its start (see alongRouteM). It has to be the place the
-   * candidates start from. A position taken a moment later is forgiven up to
-   * `offRouteM` along the route; beyond that the start of every candidate
-   * lies behind the driver and none of them matches the current route.
+   * candidates start from. A position taken a moment later is forgiven: the
+   * candidates then start a little behind the driver, which the matching
+   * allows for (up to `offRouteM` exactly, and beyond that within what
+   * `matchMaxGapM` lets two lengths differ).
    */
   readonly positionAlongM: number
   /** The driver's speed, in meters per second. */
@@ -144,6 +202,24 @@ export interface RerouteObservation {
    * routes start, which is the driver's position snapped to a road.
    */
   readonly offRouteM?: number
+  /**
+   * What the provider answered when asked for the CURRENT path itself (a
+   * request through the via points of baselineProbe), for a poll in which
+   * none of `candidates` is the rest of the current route. It gives the
+   * current route a fresh travel time to compare against, when the answer
+   * is the current path (it is matched like any fresh route) and carries a
+   * typical duration. Left out or null: not asked, or the request failed
+   * (nothing is known). An empty list: asked, and the provider found no
+   * route that way at all, which is the one thing that counts against the
+   * road ahead (routeLostPolls).
+   *
+   * Not quite like for like, and on the safe side: measured on real answers
+   * (Nov 2026), Mapbox's time for a path asked through via points ran 3 to
+   * 13% BELOW its time for the same path as an ordinary route. So the
+   * current route looks a little better than it is, and a switch measured
+   * against this baseline saves at least what is said.
+   */
+  readonly baseline?: readonly RouteCandidate[] | null
 }
 
 /** Why a decision came out as it did, for logs and tests. The `reason` text says the same in words. */
@@ -151,7 +227,7 @@ export type RerouteCode =
   | 'poll-failed'
   | 'no-routes'
   | 'off-route'
-  | 'route-lost-waiting'
+  | 'route-unconfirmed'
   | 'route-lost'
   | 'no-eta'
   | 'no-traffic-data'
@@ -191,6 +267,14 @@ export interface RerouteDecision {
   readonly code: RerouteCode
   /** Null when the decision was not about one particular alternative. */
   readonly considered: RerouteAlternative | null
+  /**
+   * The fresh travel time of the route being driven, from the driver to the
+   * destination, when this poll gave one: the like-for-like baseline. `asked`
+   * is true when it came from the request for the current path itself
+   * (RerouteObservation.baseline) and not from the fresh routes. Null when
+   * it is unknown, and on a switch (the route is another one from now on).
+   */
+  readonly current: { readonly durationSec: number; readonly distanceM: number; readonly asked: boolean } | null
   /** Pass this back with the next observation. */
   readonly nextState: RerouteState
 }
@@ -215,6 +299,12 @@ function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
     routeLostPolls: Math.max(1, Math.round(numberOr(options.routeLostPolls, d.routeLostPolls))),
     offRouteM: numberOr(options.offRouteM, d.offRouteM),
     sameRouteToleranceM: numberOr(options.sameRouteToleranceM, d.sameRouteToleranceM),
+    matchToleranceM: numberOr(options.matchToleranceM, d.matchToleranceM),
+    matchMinOverlap: Math.min(1, numberOr(options.matchMinOverlap, d.matchMinOverlap)),
+    matchMaxGapM: numberOr(options.matchMaxGapM, d.matchMaxGapM),
+    matchIgnoreStartM: numberOr(options.matchIgnoreStartM, d.matchIgnoreStartM),
+    baselineViaSpacingM: Math.max(1, numberOr(options.baselineViaSpacingM, d.baselineViaSpacingM)),
+    baselineMaxViaPoints: Math.max(1, Math.round(numberOr(options.baselineMaxViaPoints, d.baselineMaxViaPoints))),
     returnOverlapFraction: numberOr(options.returnOverlapFraction, d.returnOverlapFraction),
     requireTypicalDuration: options.requireTypicalDuration ?? d.requireTypicalDuration,
     etaTieWindowSec: numberOr(options.etaTieWindowSec, d.etaTieWindowSec),
@@ -267,27 +357,166 @@ function isNear(p: XY, line: readonly XY[], toleranceM: number): boolean {
 
 const apart = (p: XY, q: XY) => Math.hypot(p[0] - q[0], p[1] - q[1])
 
+function lengthOf(line: readonly XY[]): number {
+  let total = 0
+  for (let i = 1; i < line.length; i++) total += apart(line[i - 1]!, line[i]!)
+  return total
+}
+
 /**
- * True when `fresh` is the rest of `path`: it starts on `path` (within the
- * tolerance of its line, anywhere along it), and from there to the end the two
- * follow the same roads, every vertex of each within the tolerance of the
- * other and the ends together. This is sameRouteGeometry (select.ts) for a
- * route that has been partly driven: the fresh route starts where the driver
- * is, not where the old one started.
+ * Answers "is this point within the tolerance of `line`" for points that
+ * come in driving order: the search starts at the segment the last point was
+ * near, so walking two lines that run together costs a few segments a point,
+ * and only a point that is apart looks at the whole line.
  */
-function continuesPath(path: readonly XY[], fresh: readonly XY[], toleranceM: number): boolean {
+function nearWalker(line: readonly XY[], toleranceM: number): (p: XY) => boolean {
+  const segments = line.length - 1
+  let hint = 0
+  return (p) => {
+    for (let k = 0; k < segments; k++) {
+      const i = (hint + k) % segments
+      const a = line[i]!
+      const b = line[i + 1]!
+      // Outside the segment's box by more than the tolerance: not worth measuring.
+      if (
+        p[0] < Math.min(a[0], b[0]) - toleranceM ||
+        p[0] > Math.max(a[0], b[0]) + toleranceM ||
+        p[1] < Math.min(a[1], b[1]) - toleranceM ||
+        p[1] > Math.max(a[1], b[1]) + toleranceM
+      ) {
+        continue
+      }
+      if (pointToSegment(p, a, b).distanceM <= toleranceM) {
+        hint = i
+        return true
+      }
+    }
+    return false
+  }
+}
+
+/** A stretch of a line, in meters from its start. */
+type Stretch = readonly [fromM: number, toM: number]
+
+/**
+ * Walks `line` from `fromM` meters after its start to its end in steps of
+ * half the tolerance, and reports the stretches that are farther than the
+ * tolerance from `other`. Works on length, not on vertices, so two drawings
+ * of one road with different numbers of points measure the same.
+ */
+function stretchesApart(line: readonly XY[], other: readonly XY[], fromM: number, toleranceM: number): Stretch[] {
+  const stepM = Math.max(1, toleranceM / 2)
+  const near = nearWalker(other, toleranceM)
+  const stretches: Stretch[] = []
+  let open: [number, number] | null = null
+  const visit = (p: XY, atM: number, weighsM: number) => {
+    if (near(p)) {
+      if (open !== null) stretches.push(open)
+      open = null
+    } else if (open === null) open = [atM, atM + weighsM]
+    else open[1] = atM + weighsM
+  }
+  let doneM = 0
+  let nextM = fromM
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1]!
+    const b = line[i]!
+    const lengthM = apart(a, b)
+    while (lengthM > 0 && doneM + lengthM >= nextM) {
+      const t = (nextM - doneM) / lengthM
+      visit([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], nextM, stepM)
+      nextM += stepM
+    }
+    doneM += lengthM
+  }
+  if (open !== null) stretches.push(open)
+  return stretches
+}
+
+/** The thresholds of compareRest: the match* part of RerouteOptions. */
+type MatchOptions = Pick<RerouteOptions, 'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchIgnoreStartM'>
+
+/** How a fresh route compares with the rest of a path. */
+interface RestComparison {
+  /** True when the fresh route IS the rest of the path (see compareRest). */
+  readonly same: boolean
+  /** Meters of either line that run apart from the other, plus the difference of their lengths: the smaller, the closer. */
+  readonly differenceM: number
+  /** The stretches of `rest` that the fresh route does not run along, in meters from the start of `rest`. */
+  readonly restApart: readonly Stretch[]
+  /** The rest of the path, from the point of it nearest to where the fresh route starts. */
+  readonly rest: readonly XY[]
+}
+
+/**
+ * Compares `fresh` (a route from the driver's position to the destination)
+ * with the rest of `path` (the route being driven, from about where the
+ * driver is). `fresh` IS the rest of `path` when, from where it starts:
+ *
+ * - both lines end at the same place (within `matchToleranceM`);
+ * - leaving out the first `matchIgnoreStartM` meters, at least
+ *   `matchMinOverlap` of each line's length runs within `matchToleranceM` of
+ *   the other line (the allowance is that share of the SHORTER line);
+ * - no single stretch apart is longer than `matchMaxGapM`, and the two
+ *   lengths differ by no more than that (a route that overshoots and comes
+ *   back along the same road is longer, though never apart).
+ *
+ * Measured by length along the lines, not vertex by vertex: the same road
+ * drawn with more or fewer points is the same road. Null when either line
+ * cannot be driven (fewer than two points, no length).
+ */
+function compareRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions): RestComparison | null {
   const start = fresh[0]
-  const end = fresh.at(-1)
-  const pathEnd = path.at(-1)
-  if (start === undefined || end === undefined || pathEnd === undefined || fresh.length < 2 || path.length < 2) return false
-  if (apart(end, pathEnd) > toleranceM) return false
+  if (start === undefined || fresh.length < 2 || path.length < 2) return null
   const at = nearestOnLine(start, path)
-  if (at.distanceM > toleranceM) return false
   const a = path[at.index]!
   const b = path[at.index + 1]!
   const joined: XY = [a[0] + (b[0] - a[0]) * at.t, a[1] + (b[1] - a[1]) * at.t]
   const rest = [joined, ...path.slice(at.index + 1)]
-  return fresh.every((p) => isNear(p, rest, toleranceM)) && rest.every((p) => isNear(p, fresh, toleranceM))
+  const freshM = lengthOf(fresh)
+  const restM = lengthOf(rest)
+  const shorterM = Math.min(freshM, restM)
+  if (!(shorterM > 0)) return null
+  // A line shorter than twice the ignored start is still compared over its second half.
+  const ignoreM = Math.min(options.matchIgnoreStartM, shorterM / 2)
+  const freshApart = stretchesApart(fresh, rest, ignoreM, options.matchToleranceM)
+  const restApart = stretchesApart(rest, fresh, ignoreM, options.matchToleranceM)
+  const total = (stretches: readonly Stretch[]) => stretches.reduce((sum, [from, to]) => sum + (to - from), 0)
+  const longest = (stretches: readonly Stretch[]) => stretches.reduce((max, [from, to]) => Math.max(max, to - from), 0)
+  const allowanceM = (1 - options.matchMinOverlap) * (shorterM - ignoreM)
+  const lengthsApartM = Math.abs(freshM - restM)
+  const same =
+    apart(fresh.at(-1)!, rest.at(-1)!) <= options.matchToleranceM &&
+    total(freshApart) <= allowanceM &&
+    total(restApart) <= allowanceM &&
+    Math.max(longest(freshApart), longest(restApart)) <= options.matchMaxGapM &&
+    lengthsApartM <= options.matchMaxGapM
+  return { same, differenceM: total(freshApart) + total(restApart) + lengthsApartM, restApart, rest }
+}
+
+/** True when `fresh` is the rest of `path` (see compareRest). */
+function continuesPath(path: readonly XY[], fresh: readonly XY[], options: MatchOptions): boolean {
+  return compareRest(path, fresh, options)?.same ?? false
+}
+
+/**
+ * Of `routes`, the one that is the rest of `path`: when more than one is
+ * (the same road twice, with a small variation), the closest; of equals, the
+ * first in the given order. Null when none is.
+ */
+function closestToPath(
+  path: readonly XY[],
+  routes: readonly RouteCandidate[],
+  project: (p: LngLat) => XY,
+  options: MatchOptions,
+): RouteCandidate | null {
+  let best: { route: RouteCandidate; differenceM: number } | null = null
+  for (const route of routes) {
+    const compared = compareRest(path, route.geometry.filter(isValidLngLat).map(project), options)
+    if (compared === null || !compared.same) continue
+    if (best === null || compared.differenceM < best.differenceM) best = { route, differenceM: compared.differenceM }
+  }
+  return best?.route ?? null
 }
 
 /** Everything the rules need to know about the lines of one poll, on one flat plane. */
@@ -318,21 +547,93 @@ function planeOf(observation: RerouteObservation, toleranceM: number, slackM: nu
 /**
  * Which fresh candidate IS the rest of the route being driven: the like-for-
  * like baseline. Matched by path only (ids differ between polls and are never
- * compared). When more than one matches, the first in the given order. Null
- * when none does: the provider no longer offers the current route.
+ * compared), by the rule of compareRest: the same roads to the same place,
+ * give or take how the line is drawn, where it starts, and a variation too
+ * small to be another route. When more than one matches, the closest. Null
+ * when none does: the current route is not among the fresh routes (which
+ * does not make it a bad route: see decideReroute, rule 5).
  */
 export function findCurrentRoute(
   route: Pick<RouteCandidate, 'geometry'>,
   positionAlongM: number,
   candidates: readonly RouteCandidate[],
-  toleranceM: number = SAME_ROUTE_TOLERANCE_M,
+  options: Partial<RerouteOptions> = {},
 ): RouteCandidate | null {
-  const ahead = aheadOf(route.geometry, positionAlongM, DEFAULT_REROUTE_OPTIONS.offRouteM)
+  const opts = resolveOptions(options)
+  const ahead = aheadOf(route.geometry, positionAlongM, opts.offRouteM)
   const origin = ahead[0]
   if (origin === undefined) return null
   const project = localProjector(origin)
-  const path = ahead.map(project)
-  return candidates.find((c) => continuesPath(path, c.geometry.filter(isValidLngLat).map(project), toleranceM)) ?? null
+  return closestToPath(ahead.map(project), candidates, project, opts)
+}
+
+/** A point for the provider to route through, with the direction of travel there. */
+export interface BaselineViaPoint {
+  readonly point: LngLat
+  /** Degrees clockwise from true north. */
+  readonly bearingDeg: number
+}
+
+/**
+ * When a poll's fresh routes do not include the rest of the route being
+ * driven, the current route has no fresh travel time, and nothing can be
+ * compared like for like. This answers how to ask for one: the points along
+ * the current path to send as via points of one more directions request,
+ * whose answer goes into RerouteObservation.baseline.
+ *
+ * The points are put where they are needed: on the stretches of the current
+ * path that a fresh route does not run along (where it does, the provider is
+ * on this path already), one in the middle of a short stretch and one every
+ * `baselineViaSpacingM` of a long one. A stretch that two fresh routes both
+ * leave is pinned once. At most `baselineMaxViaPoints` in all, thinned evenly
+ * when there are more.
+ *
+ * Null when no request is needed or none can be made: no usable fresh route,
+ * one of them already is the current route, or there is no stretch to pin.
+ * Pure: it only says what to ask; the caller sends the request.
+ */
+export function baselineProbe(
+  route: Pick<RouteCandidate, 'geometry'>,
+  positionAlongM: number,
+  candidates: readonly RouteCandidate[],
+  options: Partial<RerouteOptions> = {},
+): { readonly via: readonly BaselineViaPoint[] } | null {
+  const opts = resolveOptions(options)
+  const usable = candidates.filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
+  if (usable.length === 0) return null
+  const aheadLine = aheadOf(route.geometry, positionAlongM, opts.offRouteM)
+  const origin = aheadLine[0]
+  if (origin === undefined) return null
+  const project = localProjector(origin)
+  const ahead = aheadLine.map(project)
+  if (closestToPath(ahead, usable, project, opts) !== null) return null
+
+  // Where along the current path (in meters before its end) a via point is wanted.
+  const wanted: number[] = []
+  for (const { route: fresh } of rankRoutes(usable, { etaTieWindowSec: opts.etaTieWindowSec })) {
+    const compared = compareRest(ahead, fresh.geometry.filter(isValidLngLat).map(project), opts)
+    if (compared === null) continue
+    const restM = lengthOf(compared.rest)
+    for (const [fromM, toM] of compared.restApart) {
+      const count = Math.max(1, Math.ceil((toM - fromM) / opts.baselineViaSpacingM))
+      for (let k = 0; k < count; k++) {
+        const beforeEndM = restM - (fromM + ((toM - fromM) * (k + 0.5)) / count)
+        // One point pins a place, however many fresh routes leave the path there.
+        if (!wanted.some((w) => Math.abs(w - beforeEndM) < opts.baselineViaSpacingM / 2)) wanted.push(beforeEndM)
+      }
+    }
+  }
+  if (wanted.length === 0) return null
+  // In driving order; too many: every n-th, so that they stay spread over the whole way.
+  wanted.sort((x, y) => y - x)
+  const keep = Math.min(wanted.length, opts.baselineMaxViaPoints)
+  const aheadM = alongRouteM(aheadLine).at(-1) ?? 0
+  const via: BaselineViaPoint[] = []
+  for (let k = 0; k < keep; k++) {
+    const on = pointAtDistance(aheadLine, aheadM - wanted[Math.floor(((k + 0.5) * wanted.length) / keep)]!)
+    if (on !== null) via.push({ point: on.point, bearingDeg: on.bearingDeg })
+  }
+  return via.length === 0 ? null : { via }
 }
 
 /**
@@ -480,19 +781,32 @@ function usableEta(route: RouteCandidate): boolean {
  *    The current route is not being driven any more, so the top-ranked fresh
  *    route is taken at once: no saving, confirmation, cooldown or lead test.
  * 4. **Like-for-like baseline.** The fresh candidate that IS the rest of the
- *    current route (findCurrentRoute: same path within `sameRouteToleranceM`
- *    from the driver to the destination) gives the current route's fresh ETA.
- *    Route ids are never compared across polls.
- * 5. **Current route no longer offered** (no candidate matches): its ETA is
- *    unknown, and one such poll proves nothing (the provider returns three
- *    routes at most, and a small change can push the current one out). Stay
- *    until that has happened `routeLostPolls` polls in a row; then take the
- *    best-ranked fresh route that still passes the too-late guard, once the
- *    cooldown is over. The no-return rule cannot be applied here (there is
- *    no saving to double without a baseline) and is not: a current route the
- *    provider has dropped from its best three is no longer the route to
- *    defend, even against the one left a few minutes ago. The wait of
- *    `routeLostPolls` polls and the cooldown are what prevent flip-flopping.
+ *    current route (findCurrentRoute: the same roads from the driver to the
+ *    destination, by overlap: `matchMinOverlap` of the length within
+ *    `matchToleranceM`, no stretch apart longer than `matchMaxGapM`, the
+ *    first `matchIgnoreStartM` not compared) gives the current route's fresh
+ *    ETA. A fresh route that is the same road with a small variation (the
+ *    other lane group at an exit, a corner drawn differently) is the current
+ *    route for this purpose, and is never an alternative. Route ids are
+ *    never compared across polls.
+ * 5. **Current route not among the fresh routes.** That alone says little:
+ *    the provider returns three routes at most, and the driver is still on a
+ *    perfectly good road. So the current route and its guidance are KEPT,
+ *    and its ETA is asked for by other means: the caller requests the current
+ *    path itself (baselineProbe) and passes the answer as
+ *    `observation.baseline`.
+ *    - The answer is the current path: that is the baseline, and rules 6 to
+ *      12 apply as always. A switch then is an ordinary 'faster-route' one,
+ *      with a real saving of at least the minimum.
+ *    - No answer (not asked, or the request failed), or the answer is some
+ *      other path (the via points did not pin it): nothing is known; stay.
+ *    - The provider found NO route through the points on the road ahead.
+ *      Once that has happened `routeLostPolls` polls in a row the road ahead
+ *      is taken to be closed, and the best-ranked fresh route that still
+ *      passes the too-late guard is taken, once the cooldown is over. Until
+ *      then: stay. (The no-return rule cannot be applied here, there being
+ *      no saving to double, and is not.) This is the only switch without a
+ *      saving besides off route, and it says so.
  * 6. **Missing data.** No travel time on the current route, or (with
  *    `requireTypicalDuration`) no typical duration on it, so its ETA is not
  *    known to include traffic: stay. An alternative lacking either is passed
@@ -536,7 +850,8 @@ export function decideReroute(
     reason: string,
     nextState: RerouteState,
     considered: RerouteAlternative | null = null,
-  ): RerouteDecision => ({ action: 'stay', reason: `Staying: ${reason}`, code, considered, nextState })
+    current: RerouteDecision['current'] = null,
+  ): RerouteDecision => ({ action: 'stay', reason: `Staying: ${reason}`, code, considered, current, nextState })
 
   // Rule 1.
   if (observation.candidates === null) {
@@ -575,6 +890,7 @@ export function decideReroute(
     reason: `Switching: ${reason}`,
     code,
     considered,
+    current: null,
     nextState: {
       pending: null,
       lastSwitchAtSec: nowSec,
@@ -618,23 +934,37 @@ export function decideReroute(
   const turnPhrase = (a: RerouteAlternative) => `turn in ${spokenDistance(a.turnInM)}`
 
   // Rule 4.
-  const isCurrent = (c: RouteCandidate) =>
-    continuesPath(plane.ahead, c.geometry.filter(isValidLngLat).map(plane.project), opts.sameRouteToleranceM)
-  const current = ranked.find(isCurrent) ?? null
+  const isCurrent = (c: RouteCandidate) => continuesPath(plane.ahead, c.geometry.filter(isValidLngLat).map(plane.project), opts)
+  const offered = closestToPath(plane.ahead, ranked, plane.project, opts)
+  // Rule 5: not offered, so the answer to the request for the current path itself, if there is one.
+  const baseline = Array.isArray(observation.baseline)
+    ? (observation.baseline as readonly RouteCandidate[]).filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
+    : null
+  const current = offered ?? (baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts))
 
-  // Rule 5.
   if (current === null) {
-    const lostPolls = base.lostPolls + 1
+    // Only "no route that way" is evidence against the road ahead. Not asked: nothing new.
+    // Answered with another path: the points can be reached, so the count starts again.
+    const lostPolls = baseline === null ? base.lostPolls : baseline.length === 0 ? base.lostPolls + 1 : 0
     const lost: RerouteState = { ...noWinner, lostPolls }
+    if (baseline === null || baseline.length > 0) {
+      return stay(
+        'route-unconfirmed',
+        baseline === null
+          ? 'current route is not among the fresh routes, and its travel time could not be checked'
+          : 'current route is not among the fresh routes, and asking for it brought back another road',
+        lost,
+      )
+    }
     if (lostPolls < opts.routeLostPolls) {
       return stay(
-        'route-lost-waiting',
-        `current route is missing from the fresh routes, check ${lostPolls} of ${opts.routeLostPolls}`,
+        'route-unconfirmed',
+        `the road ahead could not be routed, check ${lostPolls} of ${opts.routeLostPolls}`,
         lost,
       )
     }
     if (coolingDown) {
-      return stay('cooldown', `switched routes ${spokenDuration(sinceSwitchSec)} ago, and the current route is no longer offered`, lost)
+      return stay('cooldown', `switched routes ${spokenDuration(sinceSwitchSec)} ago, and the road ahead can no longer be routed`, lost)
     }
     const spans = spansAhead(observation.route.limitedAccessSpansM, observation.positionAlongM)
     let closest: RerouteAlternative | null = null
@@ -645,30 +975,35 @@ export function decideReroute(
       if (tooLate(m.alternative)) continue
       return switchTo(
         'route-lost',
-        `current route is no longer offered, ${turnPhrase(m.alternative)}`,
+        `the road ahead can no longer be routed, ${turnPhrase(m.alternative)}`,
         candidate,
         m.alternative,
       )
     }
     return closest === null
-      ? stay('route-lost', 'current route is no longer offered, and there is no other route to take', lost)
-      : stay('too-late', tooLateReason(closest, 'current route is no longer offered, but the other route'), lost, closest)
+      ? stay('route-lost', 'the road ahead can no longer be routed, and there is no other route to take', lost)
+      : stay('too-late', tooLateReason(closest, 'the road ahead can no longer be routed, but the other route'), lost, closest)
   }
   const found: RerouteState = { ...base, lostPolls: 0 }
   const foundNoWinner: RerouteState = { ...found, pending: null }
+  // Only a time that may be compared (rule 6) is passed on as the current route's ETA.
+  const known: RerouteDecision['current'] =
+    usableEta(current) && (!opts.requireTypicalDuration || current.typicalDurationSec !== null)
+      ? { durationSec: current.durationSec, distanceM: current.distanceM, asked: current !== offered }
+      : null
 
   // Rule 6.
   const baselineSec = current.durationSec
-  if (!usableEta(current)) return stay('no-eta', 'no travel time for the current route', foundNoWinner)
+  if (!usableEta(current)) return stay('no-eta', 'no travel time for the current route', foundNoWinner, null, known)
   if (opts.requireTypicalDuration && current.typicalDurationSec === null) {
-    return stay('no-traffic-data', 'no traffic data for the current route', foundNoWinner)
+    return stay('no-traffic-data', 'no traffic data for the current route', foundNoWinner, null, known)
   }
   const others = ranked.filter((c) => c !== current && !isCurrent(c))
-  if (others.length === 0) return stay('no-alternative', 'no other route available right now', foundNoWinner)
+  if (others.length === 0) return stay('no-alternative', 'no other route available right now', foundNoWinner, null, known)
   const comparable = others.filter(
     (c) => usableEta(c) && (!opts.requireTypicalDuration || c.typicalDurationSec !== null),
   )
-  if (comparable.length === 0) return stay('no-traffic-data', 'no comparable travel time for the other routes', foundNoWinner)
+  if (comparable.length === 0) return stay('no-traffic-data', 'no comparable travel time for the other routes', foundNoWinner, null, known)
 
   // Rules 7 to 10: the first alternative, in rank order, that passes them all.
   let winner: Measured | null = null
@@ -721,8 +1056,8 @@ export function decideReroute(
     // TypeScript cannot see the assignments made inside the loop's closure.
     const refused = refusal as { code: RerouteCode; reason: string; considered: RerouteAlternative } | null
     return refused === null
-      ? stay('current-best', 'current route is still the fastest', foundNoWinner)
-      : stay(refused.code, refused.reason, foundNoWinner, refused.considered)
+      ? stay('current-best', 'current route is still the fastest', foundNoWinner, null, known)
+      : stay(refused.code, refused.reason, foundNoWinner, refused.considered, known)
   }
 
   // Rule 11.
@@ -730,15 +1065,15 @@ export function decideReroute(
   const saves = `saves ${spokenDuration(a.savingSec ?? 0)}`
   const sameAsPending =
     found.pending !== null &&
-    continuesPath(found.pending.geometry.filter(isValidLngLat).map(plane.project), winner.xy, opts.sameRouteToleranceM)
+    continuesPath(found.pending.geometry.filter(isValidLngLat).map(plane.project), winner.xy, opts)
   const polls = sameAsPending ? found.pending!.polls + 1 : 1
   const confirmed: RerouteState = { ...found, pending: { geometry: winner.candidate.geometry, polls } }
   if (polls < opts.confirmPolls) {
-    return stay('confirming', `faster route ${saves}, confirming, check ${polls} of ${opts.confirmPolls}`, confirmed, a)
+    return stay('confirming', `faster route ${saves}, confirming, check ${polls} of ${opts.confirmPolls}`, confirmed, a, known)
   }
   // Rule 12.
   if (coolingDown) {
-    return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a)
+    return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a, known)
   }
   return switchTo('faster-route', `${saves}, ${turnPhrase(a)}`, winner.candidate, a)
 }

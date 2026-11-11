@@ -138,7 +138,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         setNowMs(now())
       },
       routes: async (query) => {
-        const { token, whatIfDelaySec } = latest.current
+        const { token, whatIfDelaySec, rerouteOptions } = latest.current
         if (token === null) return { routes: null, message: 'No Mapbox token.' }
         const result = await fetchFreshRoutes({
           token,
@@ -147,10 +147,11 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           headingDeg: query.headingDeg,
           signal: query.signal,
           whatIf: query.driving !== null && whatIfDelaySec > 0 ? { ...query.driving, delaySec: whatIfDelaySec } : null,
+          baseline: query.driving !== null && query.baseline ? { ...query.driving, rerouteOptions } : null,
         })
         if (!result.ok) return { routes: null, message: result.message }
         whatIfInPlay.current = result.simulated
-        return { routes: result.candidates }
+        return { routes: result.candidates, baseline: result.baseline, requests: result.requests }
       },
     })
     runnerRef.current = { runner, now }

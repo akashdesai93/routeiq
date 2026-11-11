@@ -158,12 +158,14 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
   })
 
   const poll = useCallback(async (run: Run) => {
-    const { token, destination, whatIfDelaySec: delaySec } = latest.current
+    const { token, destination, whatIfDelaySec: delaySec, settings, rerouteOptions } = latest.current
     const here = pointAtDistance(run.route.geometry, run.clock.alongM)
     if (token === null || here === null) return
     const controller = new AbortController()
     run.inFlight = controller
     run.clock = afterRequest(run.clock, performance.now())
+    // One more request, for the current path's own travel time, only with room for it in the budget.
+    const roomForBaseline = run.clock.requestsUsed < settings.maxRequests
     const result = await fetchFreshRoutes({
       token,
       origin: here.point,
@@ -171,6 +173,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       headingDeg: here.bearingDeg,
       signal: controller.signal,
       whatIf: { route: run.route, alongM: run.clock.alongM, delaySec },
+      baseline: roomForBaseline ? { route: run.route, alongM: run.clock.alongM, rerouteOptions } : null,
     })
     // Stopped, or replaced by a new drive, while the request was out. (The clock waits
     // for the signal counts too: the engine must be asked about the place the routes
@@ -184,6 +187,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
     const candidates = result.ok ? result.candidates : null
     const signalsById: ReadonlyMap<string, readonly RouteSignal[]> = result.ok ? result.signalsByRouteId : new Map()
     run.inFlight = null
+    if (result.ok && result.requests > 1) run.clock = { ...run.clock, requestsUsed: run.clock.requestsUsed + result.requests - 1 }
     const simulated = result.ok && result.simulated
     const decision = decideReroute(
       run.engine,
@@ -193,6 +197,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
         positionAlongM: run.clock.alongM,
         speedMps: run.speedMps,
         candidates,
+        baseline: result.ok ? result.baseline : null,
       },
       latest.current.rerouteOptions,
     )
@@ -215,7 +220,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
           addLog(run, 'note', 'What-if delay cleared: it applied to the route just left.')
         }
       } else {
-        const current = findCurrentRoute(run.route, run.clock.alongM, fresh)
+        const current = findCurrentRoute(run.route, run.clock.alongM, fresh, latest.current.rerouteOptions)
         run.currentCandidateId = current?.id ?? null
         if (current !== null) run.speedMps = cruiseSpeedMps(current)
       }

@@ -23,6 +23,7 @@ import {
   withWhatIfDelay,
   type DriveClock,
 } from '../src/drive/simulation.ts'
+import { fetchFreshRoutes } from '../src/drive/freshRoutes.ts'
 import { driveFeatures } from '../src/map/driveFeatures.ts'
 import type { SignalsResult } from '../src/providers/charlotte/client.ts'
 import { createOverpassClient } from '../src/providers/osm/client.ts'
@@ -317,6 +318,79 @@ describe('askOnce: signal sources for a drive that polls', () => {
       expect(loaded.data.primary).toHaveLength(2)
     }
     expect(server.requested()).toEqual([EAST])
+  })
+})
+
+describe('fetchFreshRoutes: one check, and the current path asked for when it is missing', () => {
+  const NO_CITY: SignalsResult = { ok: false, kind: 'network', message: 'offline' }
+  /** No signal data at all: this is about the Directions requests. */
+  const signalSources: SignalSources = {
+    tiles: { load: (ids) => Promise.resolve({ tiles: new Map(), missing: [...ids], partial: new Map() }) },
+    gapFill: { load: () => Promise.resolve(NO_CITY) },
+  }
+  /** A Directions body for routes of the made-up network. */
+  const body = (routes: readonly RouteCandidate[]) => ({
+    code: 'Ok',
+    routes: routes.map((r) => ({ duration: r.durationSec, duration_typical: r.durationSec, distance: r.distanceM, geometry: { type: 'LineString', coordinates: r.geometry } })),
+  })
+  /** Stands in for fetch: answers the calls in order with the given bodies (a number is an HTTP error). */
+  function server(...answers: (object | number)[]) {
+    const urls: URL[] = []
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      urls.push(new URL(String(input)))
+      const answer = answers[urls.length - 1] ?? 500
+      return Promise.resolve(typeof answer === 'number' ? new Response('', { status: answer }) : new Response(JSON.stringify(answer), { status: 200 }))
+    }) as typeof fetch
+    return { fetchImpl, urls }
+  }
+  const driven = candidate('A', at(0, 0), 2000)!
+  const here = at(3000, 0)
+  const ask = (fetchImpl: typeof fetch, extra: Partial<Parameters<typeof fetchFreshRoutes>[0]> = {}) =>
+    fetchFreshRoutes({ token: 'pk.test', origin: here, destination: at(20_000, 0), headingDeg: 90, fetchImpl, signalSources, baseline: { route: driven, alongM: 3000 }, ...extra })
+
+  it('one request when the current route is among the fresh routes', async () => {
+    const { fetchImpl, urls } = server(body([candidate('A', here, 1500)!, candidate('B', here, 1450)!]))
+    const result = await ask(fetchImpl)
+    expect(result).toMatchObject({ ok: true, baseline: null, requests: 1, simulated: false })
+    expect(urls).toHaveLength(1)
+    expect(urls[0]!.searchParams.has('waypoints')).toBe(false)
+  })
+
+  it('a second request, through via points on the current path, when it is not; its answer is the baseline', async () => {
+    const { fetchImpl, urls } = server(body([candidate('B', here, 1450)!]), body([candidate('A', here, 1500)!]))
+    const result = await ask(fetchImpl)
+    expect(urls).toHaveLength(2)
+    // Origin, four points along the main road where B leaves it, destination; one leg; no alternatives.
+    expect(urls[1]!.pathname.split('/').at(-1)!.split('%3B')).toHaveLength(6)
+    expect(urls[1]!.searchParams.get('waypoints')).toBe('0;5')
+    expect(urls[1]!.searchParams.get('alternatives')).toBe('false')
+    expect(urls[1]!.searchParams.get('bearings')).toBe('90,45;90,45;90,45;90,45;90,45;')
+    if (!result.ok) throw new Error('expected routes')
+    expect(result.requests).toBe(2)
+    expect(result.fresh).toHaveLength(1)
+    expect(result.baseline).toHaveLength(1)
+    expect(result.baseline![0]!.durationSec).toBe(1500)
+    // The engine then compares like for like: B saves 50 s on the main road's own fresh time.
+    const decision = decideReroute(INITIAL_REROUTE_STATE, { nowSec: 0, route: driven, positionAlongM: 3000, speedMps: 15, candidates: result.candidates, baseline: result.baseline })
+    expect(decision).toMatchObject({ action: 'stay', code: 'saving-too-small', current: { durationSec: 1500, asked: true } })
+  })
+
+  it('the what-if delay lands on the current path wherever its time came from', async () => {
+    const { fetchImpl } = server(body([candidate('B', here, 1450)!]), body([candidate('A', here, 1500)!]))
+    const result = await ask(fetchImpl, { whatIf: { route: driven, alongM: 3000, delaySec: 300 } })
+    if (!result.ok) throw new Error('expected routes')
+    expect(result.simulated).toBe(true)
+    expect(result.baseline![0]!.durationSec).toBe(1800)
+    expect(result.candidates[0]!.durationSec).toBe(1450)
+  })
+
+  it('without leave it never asks twice; a failed second request is no answer, and "no route" is an empty one', async () => {
+    const onlyB = body([candidate('B', here, 1450)!])
+    const notAllowed = server(onlyB)
+    expect(await ask(notAllowed.fetchImpl, { baseline: null })).toMatchObject({ ok: true, baseline: null, requests: 1 })
+    expect(notAllowed.urls).toHaveLength(1)
+    expect(await ask(server(onlyB, 503).fetchImpl)).toMatchObject({ ok: true, baseline: null, requests: 2 })
+    expect(await ask(server(onlyB, { code: 'NoRoute', routes: [] }).fetchImpl)).toMatchObject({ ok: true, baseline: [], requests: 2 })
   })
 })
 

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
 import { parseDirections, type DirectionsResult } from '../src/providers/mapbox/adapter.ts'
-import { buildDirectionsUrl, fetchDirections } from '../src/providers/mapbox/client.ts'
+import { buildDirectionsUrl, fetchDirections, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
 
 // Hand-written bodies shaped like Directions API v5 responses. No test here touches the network.
 function fixture(name: string): unknown {
@@ -402,6 +402,45 @@ describe('buildDirectionsUrl', () => {
     const withHeading = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { originHeadingDeg: 187 })!
     expect(withHeading).toContain('bearings=187%2C45%3B')
     expect(withHeading.replace('&bearings=187%2C45%3B', '')).toBe(url)
+  })
+})
+
+describe('buildDirectionsUrl with via points (the travel time of one particular path)', () => {
+  // Made-up points between the two landmarks.
+  const via = [
+    { point: [-80.84, 35.2] as [number, number], bearingDeg: 181.6 },
+    { point: [-80.835, 35.17] as [number, number] },
+  ]
+  const url = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { originHeadingDeg: 170, via })!
+  const query = new URL(url).searchParams
+
+  it('sends them as coordinates between the origin and the destination, in order', () => {
+    expect(url).toContain('/driving-traffic/-80.8431,35.2271%3B-80.84,35.2%3B-80.835,35.17%3B-80.8295,35.1527?')
+  })
+
+  it('names only the first and the last coordinate as waypoints, so the answer is one leg', () => {
+    expect(query.get('waypoints')).toBe('0;3')
+  })
+
+  it('asks for that path only, and gives each point its heading when it has one', () => {
+    expect(query.get('alternatives')).toBe('false')
+    expect(query.get('bearings')).toBe('170,45;182,45;;')
+    expect(query.get('steps')).toBe('true')
+  })
+
+  it('leaves out points that are not coordinates, and never sends more than 25 coordinates', () => {
+    const odd = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { via: [{ point: [NaN, 35] }, via[1]!] })!
+    expect(new URL(odd).searchParams.get('waypoints')).toBe('0;2')
+    expect(new URL(odd).searchParams.has('bearings')).toBe(false)
+    const many = Array.from({ length: 40 }, (_, i) => ({ point: [-80.84, 35.2 - i * 0.001] as [number, number] }))
+    const capped = buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { via: many })!
+    expect(MAX_VIA_POINTS).toBe(23)
+    expect(new URL(capped).searchParams.get('waypoints')).toBe('0;24')
+    expect(capped.split('?')[0]!.split('%3B')).toHaveLength(25)
+    // No via points: the request is the one it always was.
+    expect(buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { via: [] })).toBe(
+      buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN),
+    )
   })
 })
 

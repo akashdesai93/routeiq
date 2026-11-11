@@ -25,7 +25,7 @@ const THRESHOLDS: readonly { key: keyof RerouteOptions; label: string; scale?: n
   { key: 'minLeadDistanceM', label: 'Minimum distance to the turn (meters)' },
   { key: 'minLeadTimeSec', label: 'Minimum time to the turn (seconds)' },
   { key: 'freewayLeadDistanceM', label: 'Minimum distance to a freeway exit (meters)' },
-  { key: 'routeLostPolls', label: 'Checks before leaving a route no longer offered' },
+  { key: 'routeLostPolls', label: 'Checks before leaving a route whose road ahead cannot be routed' },
 ]
 
 /** The width under which the page is laid out for a phone (the same number as in index.css). */

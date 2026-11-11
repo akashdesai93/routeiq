@@ -81,9 +81,13 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    state machine, `decideReroute(state, observation, options)`, with the time passed
    in and every threshold in `DEFAULT_REROUTE_OPTIONS` (minimum saving 120 s and 5%,
    two confirming polls, 300 s cooldown, 600 s no-return at twice the saving, lead
-   400 m / 20 s / 1200 m on freeway, three polls before leaving a route no longer
-   offered, 50 m off route). The current route is matched to a fresh candidate by
-   path, never by id. Every decision has a sentence that can be spoken. In the web
+   400 m / 20 s / 1200 m on freeway, 50 m off route). The current route is matched
+   to a fresh candidate by path, never by id: by overlap (95% of the length within
+   20 m, no stretch apart over 400 m, the first 150 m not compared), since the same
+   road comes back drawn a little differently. A route missing from the answers is
+   kept, and its travel time asked for through via points; it is left without a
+   saving only when Mapbox finds no route along the road ahead three polls running.
+   Every decision has a sentence that can be spoken. In the web
    app "Simulate drive" moves a car along the selected route at 1x, 5x or 20x, polls
    Mapbox from its position with its heading (`bearings`) every 60 s of simulated
    time, at most one request per 5 real seconds and 60 per drive, switches by itself
@@ -121,13 +125,17 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    stop, a tunnel and a wrong turn.
    The limit: a web page only runs in front with the screen on. Open: none of it has
    been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
-   audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Seen in
-   testing with live traffic: near Uptown the route being driven was often missing
-   from the fresh routes, so the engine moved to the best fresh route after three
-   checks, in the simulated drive too; find out whether Mapbox drops it or the 10 m
-   path match is too strict there before trusting those switches. A switch said
-   aloud while a near turn prompt is speaking waits for it; an "off the route" line
-   can be replaced by the "new route" line that follows within a second. Which
+   audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Settled
+   (Nov 11, 2026): the switches "current route is no longer offered" near Uptown
+   were the 10 m point-by-point match rejecting the same road drawn a little
+   differently (measurements in the README); the match is by overlap now and that
+   switch is gone. Still open there: Mapbox's travel time for a path asked through
+   via points ran 3 to 13% below its time for the same path as an ordinary route,
+   so that baseline leans towards staying; and whether Mapbox answers "no route"
+   for a closed road pinned by via points (the one evidence the engine accepts for
+   leaving a route without a saving) has not been seen in the wild. A switch said
+   aloud while a near turn prompt is speaking waits for it; the "off the route"
+   line is now kept until spoken, with the new route said straight after it. Which
    carriageway the car is on is not known. The first route is the best-ranked one
    from the device's position, not the one picked in the list.
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)

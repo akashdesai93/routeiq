@@ -4,6 +4,8 @@
  * (src/device/speech.ts) and only does what these functions answer.
  *
  * At most two lines exist at any time: the one being spoken and one waiting.
+ * A line the driver must hear (`mustHear`) is never lost from the waiting
+ * place: what comes after it is said after it, as part of the same line.
  */
 
 /**
@@ -20,6 +22,14 @@ export interface SpokenLine {
   readonly priority: SpeechPriority
   /** For a turn prompt: meters from the car to the maneuver when the line was made. */
   readonly distanceToManeuverM?: number
+  /**
+   * True for a line that explains what happens next and so must not be
+   * replaced before it has been said ("You are off the route. Finding a new
+   * one."): without it the driver hears a new route announced and never why.
+   */
+  readonly mustHear?: boolean
+  /** Set by the queue on a line it has joined to a follow-up: the must-hear words at its start. */
+  readonly mustHearText?: string
 }
 
 export interface SpeechQueue {
@@ -51,6 +61,12 @@ export type SpeechAction = 'speak' | 'interrupt' | 'wait' | 'drop'
  * - Otherwise it waits. Only one line waits: against one already waiting,
  *   the more important stays, and of two equals the newer (it is the
  *   fresher information). So nothing ever piles up behind the voice.
+ * - A waiting line that must be heard (`mustHear`) is not replaced. A line
+ *   that would have replaced it is said straight after it instead: the two
+ *   become one waiting line, the must-hear words first ("You are off the
+ *   route. Finding a new one. New route. 12 minutes to your destination.").
+ *   Only the latest follow-up is kept, so it is still one line waiting, and
+ *   a less important line is dropped as before.
  */
 export function enqueueSpeech(queue: SpeechQueue, line: SpokenLine): { readonly queue: SpeechQueue; readonly action: SpeechAction } {
   if (line.text.trim() === '') return { queue, action: 'drop' }
@@ -60,10 +76,17 @@ export function enqueueSpeech(queue: SpeechQueue, line: SpokenLine): { readonly 
   if (line.priority === 'urgent' && speaking.priority !== 'urgent' && !nearTurn) {
     return { queue: { speaking: line, waiting }, action: 'interrupt' }
   }
-  if (waiting === null || RANK[line.priority] >= RANK[waiting.priority]) {
-    return { queue: { speaking, waiting: line }, action: 'wait' }
+  if (waiting === null) return { queue: { speaking, waiting: line }, action: 'wait' }
+  if (RANK[line.priority] < RANK[waiting.priority]) return { queue, action: 'drop' }
+  if (waiting.mustHear === true && line.mustHear !== true) {
+    // `mustHearText` is the part that has to stay; a newer follow-up takes the place of an older one.
+    const first = waiting.mustHearText ?? waiting.text
+    return {
+      queue: { speaking, waiting: { text: `${first} ${line.text}`, priority: line.priority, mustHear: true, mustHearText: first } },
+      action: 'wait',
+    }
   }
-  return { queue, action: 'drop' }
+  return { queue: { speaking, waiting: line }, action: 'wait' }
 }
 
 /** The line being spoken has ended (or failed): the waiting one, if any, is next. */

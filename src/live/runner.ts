@@ -28,6 +28,10 @@ import type { ScreenWakeLock } from '../device/wakeLock.ts'
 export interface RoutesAnswer {
   readonly routes: readonly RouteCandidate[] | null
   readonly message?: string
+  /** What came back when the current path itself was asked for; left out or null when it was not, or failed. */
+  readonly baseline?: readonly RouteCandidate[] | null
+  /** How many requests the answer took, when not one. */
+  readonly requests?: number
 }
 
 export interface RoutesQuery {
@@ -37,6 +41,8 @@ export interface RoutesQuery {
   readonly headingDeg: number | null
   /** The route being driven and where the car is on it (null for the first route): for the what-if delay. */
   readonly driving: { readonly route: RouteCandidate; readonly alongM: number } | null
+  /** True when one more request may be spent on the current path's own travel time (see LiveEffect 'request-routes'). */
+  readonly baseline: boolean
   readonly signal: AbortSignal
 }
 
@@ -130,17 +136,25 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
         const controller = new AbortController()
         inFlight = controller
         deps.onBusy?.(true)
-        const { requestId, purpose, origin, headingDeg } = effect
+        const { requestId, purpose, origin, headingDeg, baseline } = effect
         const driving =
           state.route !== null && state.request !== null ? { route: state.route, alongM: state.request.alongM } : null
         void deps
-          .routes({ purpose, origin, destination, headingDeg, driving, signal: controller.signal })
+          .routes({ purpose, origin, destination, headingDeg, driving, baseline, signal: controller.signal })
           .catch((): RoutesAnswer => ({ routes: null, message: 'The route request failed.' }))
           .then((answer) => {
             if (inFlight !== controller || controller.signal.aborted) return
             inFlight = null
             deps.onBusy?.(false)
-            dispatch({ type: 'routes', nowMs: deps.now(), requestId, routes: answer.routes, message: answer.message })
+            dispatch({
+              type: 'routes',
+              nowMs: deps.now(),
+              requestId,
+              routes: answer.routes,
+              message: answer.message,
+              baseline: answer.baseline,
+              requests: answer.requests,
+            })
           })
         return
       }
