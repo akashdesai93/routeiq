@@ -1,0 +1,42 @@
+name: native-core
+
+# Builds and tests the pure Swift package native/RouteIQCore on Linux. It has
+# no Apple frameworks, so a Linux runner (about a tenth of the price of a
+# macOS one for a private repository) is enough. The GitHub-hosted
+# ubuntu-24.04 image ships a Swift toolchain, so nothing is downloaded.
+
+on:
+  push:
+    paths:
+      - 'native/RouteIQCore/**'
+      - 'tests/fixtures/**'
+      - '.github/workflows/native-core.yml'
+  pull_request:
+    paths:
+      - 'native/RouteIQCore/**'
+      - 'tests/fixtures/**'
+      - '.github/workflows/native-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: native/RouteIQCore
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test
