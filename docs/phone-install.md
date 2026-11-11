@@ -5,7 +5,9 @@ locked or another app is in front: GPS, the checks for a faster route, and the v
 page cannot do that.
 
 It is the same web app inside a small native shell (`native/shell`). The shell's Swift code owns
-the GPS, the voice and the screen lock; everything else is the web code you already know.
+the GPS, the voice, the screen lock and the route requests to Mapbox (native networking, so a
+route check goes out while the phone is locked); everything else is the web code you already know.
+After a drive, **Drive diagnostics** in the top bar tells us what iOS did: see step 6.
 
 > **Nobody has run this on a phone yet.** The build compiles and its checks pass on GitHub's Mac,
 > and the web side is tested against a stand-in for the native code. What iOS really does with the
@@ -108,6 +110,8 @@ Do this on foot or parked. It is the only real test of the thing this app exists
 6. Open RouteIQ. The map should be where you are, not where you were when you locked it, and the
    drive view should say "checked N s ago" with N under about a minute.
 7. Tap **End**.
+8. Tap **Drive diagnostics** in the top bar, then **Copy**, and send what it copied (step 6 below).
+   Do this even if everything worked.
 
 **If the voice stops when you lock the phone, do not rely on the app for the drive.** Note what
 happened (which step, how long until silence, whether the blue indicator was showing) and use
@@ -124,25 +128,52 @@ drive, and with the app in front it behaves like the browser version.
   - "Switching to a faster route. Saves N minutes." if traffic changes;
   - after a phone call, the next prompt should come by itself.
 - Glance only when stopped: "checked N s ago" in the drive view should never be many minutes old.
-  If it is, route requests are not getting through in the background (see the first unverified item).
+  If it is, route checks are not happening in the background (see the first two unverified items).
 - Things worth writing down afterwards: any silence longer than expected, any prompt that came
   late (after the turn), whether audio came from the car, whether a switch was announced.
 - **Do not touch the phone while moving.**
+
+## 6. After the drive: send the diagnostics
+
+The app keeps a small log of what iOS let it do. It is the only way to tell from here what
+happened while the phone was locked, so please send it after every test drive, good or bad.
+
+1. **Do not close the app** (do not swipe it away): the log is in memory only and is gone when
+   the app is closed. Locking the phone is fine.
+2. When parked, end the drive (**End**, or **Done** after arriving). The top bar comes back.
+3. Tap **Drive diagnostics** in the top bar, then **Copy**. It says "Copied."
+   If it says it could not copy: press and hold the text, **Select All**, **Copy**.
+4. Paste it into a message or an email and send it, with a line about what you heard and saw.
+
+What it holds: how many GPS fixes and clock ticks arrived (and how many of them while the app was
+not in front), the longest wait between them, each route request with how long it took, how many
+spoken lines started and finished, and the times the app went to the background and came back.
+It holds **no positions, no addresses and no token**: counts, times of day and milliseconds only,
+so it is safe to paste anywhere.
+
+How to read it yourself:
+
+- `ticks: 3200 (2900 while not active), longest gap 1 s`: the web code kept running while locked.
+  A line like `no tick for 45 s [background]` means iOS paused it.
+- `requests: 14 sent (12 while not active), 14 answered, 0 failed`: route checks got through
+  while locked. `timeout` or `network` lines are requests that did not.
+- `speech: 22 lines started, 22 finished`: every line was spoken to the end.
 
 ## What is unverified
 
 Nobody has run this build on a device. In order of how much the drive depends on it:
 
-1. **Route requests in the background.** Reroute checks are `fetch` calls made by the web page
-   inside the app. The page is woken about once a second by native events while locked, which is
-   the design; whether iOS always lets its network requests finish in the background is not
-   measured. If they stall, the turn prompts for the current route still work, but no faster
-   route is found and a wrong turn is not recovered until you open the app; a native request
-   path is the fix.
-2. **Web code running while locked at all.** The turn prompts are decided by the web code from each
-   native GPS fix. The native side delivers fixes and a one-second tick to the page; iOS is
-   expected to run the page for each. The probe app was built to measure exactly this and its
-   results are not in the repository.
+1. **Web code running while locked at all.** The turn prompts and the decision to check for a
+   faster route are made by the web code from each native GPS fix. The native side delivers fixes
+   and a one-second tick to the page; iOS is expected to run the page for each. The probe app was
+   built to measure exactly this and its results are not in the repository. Drive diagnostics shows
+   it directly: "ticks ... while not active" should keep counting, and a line "no tick for N s
+   [background]" is iOS not running the web code.
+2. **Route requests in the background.** These no longer depend on the web view: route checks go
+   out through native networking (iOS's own `URLSession`), as the GPS and the voice already do.
+   That removes the known risk of a web page's requests being held back while locked. It is still
+   not measured on a phone; Drive diagnostics lists every request with its time and whether it was
+   sent in the background. A request needs the web code to ask for it, so item 1 comes first.
 3. **Speech while locked**, over music, over CarPlay or Bluetooth, and resuming after a phone
    call. The audio session is the probe's (`.playback`, `.voicePrompt`, ducking), which compiled
    but whose drive results are also not recorded.
@@ -157,5 +188,8 @@ Nobody has run this build on a device. In order of how much the drive depends on
 
 Same rules as the browser version. Your position goes from the phone's GPS to the app's memory
 and to Mapbox as the start of a route request, nowhere else. The native code does not log or store
-positions (a test in `native/shell/tests` checks the Swift for logging and file calls). The token
-stays on the phone. The spoken text is made on the phone by iOS.
+positions (a test in `native/shell/tests` checks the Swift for logging and file calls). Route
+requests are sent by the app's native code, to `api.mapbox.com` only; the address of a request
+(which holds the token and the position) is never logged. The token stays on the phone. The spoken
+text is made on the phone by iOS. Drive diagnostics holds counts and timings only, stays in memory,
+and leaves the phone only when you copy and send it.

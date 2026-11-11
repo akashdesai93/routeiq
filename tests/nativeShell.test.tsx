@@ -58,6 +58,9 @@ function fakePlugin(options: { startFails?: string; position?: NativeFix | { cod
       calls.push(`keepAwake:${on}`)
       return Promise.resolve()
     },
+    // Route requests through the plugin have their own tests (shellHttp.test.ts).
+    httpGet: () => Promise.reject({ code: 'network' }),
+    httpCancel: () => Promise.resolve(),
     addListener: ((event: string, listener: Listener) => {
       const set = listeners.get(event) ?? new Set()
       listeners.set(event, set)

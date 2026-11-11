@@ -966,8 +966,19 @@ plugin `RouteIQNative` is present, `src/device/native`):
   session's once-a-second tick is driven by each native position fix and by a native
   one-second timer event, as well as by `setInterval`; whichever comes first counts, at
   most one tick per second (`src/device/native/pulse.ts`).
-- **Route requests** are still `fetch` from the web view. Whether iOS always lets them
-  finish in the background is unverified; a native request path is the fallback.
+- **Route requests** (Mapbox Directions: the plan, the checks during a drive, the
+  side-street probes) are made by iOS (`URLSession`, the plugin's `httpGet`) instead of
+  the web view's `fetch`, which iOS may hold back while the phone is locked. The
+  Directions client has one injectable transport (`setDirectionsTransport` in
+  `src/providers/mapbox/client.ts`, `fetch` by default); the shell sets the native one
+  at startup (`src/main.tsx`, `src/device/native/http.ts`). Same URL, same error
+  messages, an abort cancels the native request. The native side takes
+  `https://api.mapbox.com/` addresses only, follows no redirect, gives up after 20 s
+  and never logs an address. Search and map tiles stay on the web view.
+- **Drive diagnostics** (top bar, shell only): an in-memory log with a Copy button of
+  what iOS let the app do: fixes and ticks received and the longest wait between them,
+  route requests with their times, spoken lines started and finished, and when the app
+  went to the background. Counts and timings only (`src/device/native/diagnostics.ts`).
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
@@ -1111,9 +1122,15 @@ that starts at the origin pin, not the device's.
 for the whole drive, also while the phone is locked or another app is in front (that is
 what the app is for; iOS shows its blue location indicator meanwhile). The native code
 hands each position to the app's memory and keeps none: it writes no log and no file.
-The shell makes no network call of its own; routes, search and map tiles are the web
+The shell adds no network call: route requests are the same requests to Mapbox as in a
+browser, only sent by the app's native code (so they go out with the phone locked),
+which accepts `https://api.mapbox.com/` addresses and nothing else, follows no redirect
+and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
-Mapbox token you paste is stored on the phone only.
+Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
+and timings in memory (fixes, ticks, route requests, spoken lines, app in front or
+not): no position, no address, no token. It leaves the phone only if you copy it and
+send it yourself.
 
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for

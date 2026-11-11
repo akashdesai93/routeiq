@@ -136,7 +136,9 @@ export interface ShellWindow {
  * - window.__e2e.fix(...) now arrives as the plugin's 'fix' event, and the
  *   browser's own watchPosition only records that it was (wrongly) used;
  * - the plugin's speak() writes into window.__e2e.spoken and resolves 1.5 s
- *   later on the page's clock, as the native voice does when a line ends.
+ *   later on the page's clock, as the native voice does when a line ends;
+ * - the plugin's httpGet() (native networking on a phone) is the page's fetch,
+ *   and a hidden page is reported as the plugin's 'appState' event.
  *
  * Self-contained, like installBrowserStubs.
  */
@@ -147,6 +149,16 @@ export function installShellStubs(): void {
   const listeners = new Map<string, Set<(data?: unknown) => void>>()
   const emit = (event: string, data?: unknown) => [...(listeners.get(event) ?? [])].forEach((l) => l(data))
   let line = 0
+  const requests = new Map<string, AbortController>()
+  // In the shell a route request must go through the plugin: one made by the page itself is recorded as wrong.
+  const pageFetch = window.fetch.bind(window)
+  window.fetch = (...args: Parameters<typeof fetch>) => {
+    const [input] = args
+    if ((input instanceof Request ? input.url : String(input)).includes('/directions/v5/')) calls.push('BROWSER fetch of a route')
+    return pageFetch(...args)
+  }
+  // Locking the phone: the native side says the app went to the background.
+  document.addEventListener('visibilitychange', () => emit('appState', { state: document.visibilityState === 'hidden' ? 'background' : 'active' }))
 
   w.RouteIQNative = {
     async startLocation() {
@@ -174,6 +186,26 @@ export function installShellStubs(): void {
     },
     async keepAwake({ on }: { on: boolean }) {
       calls.push(`keepAwake:${on}`)
+    },
+    // The plugin's native GET: here the page's fetch, so the made-up world answers it and it is counted as usual.
+    async httpGet({ id, url }: { id: string; url: string }) {
+      calls.push('httpGet')
+      if (!url.startsWith('https://api.mapbox.com/')) throw Object.assign(new Error('not allowed'), { code: 'not-allowed' })
+      const controller = new AbortController()
+      requests.set(id, controller)
+      const startedAt = Date.now()
+      try {
+        const response = await pageFetch(url, { signal: controller.signal })
+        return { status: response.status, body: await response.text(), ms: Date.now() - startedAt }
+      } catch {
+        throw Object.assign(new Error('failed'), { code: controller.signal.aborted ? 'cancelled' : 'network' })
+      } finally {
+        requests.delete(id)
+      }
+    },
+    async httpCancel({ id }: { id: string }) {
+      calls.push('httpCancel')
+      requests.get(id)?.abort()
     },
     addListener(event: string, listener: (data?: unknown) => void) {
       const set = listeners.get(event) ?? new Set()

@@ -59,6 +59,24 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   // Arrived: the GPS is let go and the screen may sleep again.
   expect(calls).toContain('stopLocation')
   expect(calls).toContain('keepAwake:false')
+  // The route requests went out through the plugin's native networking; none straight from the page
+  // (that would be among the BROWSER calls above).
+  expect(calls.filter((c) => c === 'httpGet').length).toBeGreaterThanOrEqual(3)
+
+  // After the drive: Drive diagnostics says what the phone let the app do, in counts and timings only.
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+  const diagnostics = await page.getByLabel('Diagnostics text').inputValue()
+  await app.snap('drive diagnostics after the drive')
+  expect(diagnostics).toMatch(/requests: [1-9]\d* sent \([1-9]\d* while not active\), [1-9]\d* answered, 0 failed/)
+  expect(diagnostics).toMatch(/fixes: \d+ \([1-9]\d* while not active\)/)
+  expect(diagnostics).toMatch(/request \d+ answered, HTTP 200, \d+ ms, native \d+ ms \[background\]/)
+  expect(diagnostics).toContain('app background')
+  expect(diagnostics).not.toMatch(/\d\.\d|pk\.|https?:/)
+  await page.getByRole('button', { name: 'Copy' }).click()
+  await expect(page.getByText('Copied. Paste it into a message.')).toBeVisible()
+  await page.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByLabel('Diagnostics text')).toHaveCount(0)
 })
 
 test('in a browser the same lock pauses the checks for a faster route: that rule is unchanged', async ({ app }) => {

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import App from './App.tsx'
 import { tokenStatus, type TokenStatus } from './config.ts'
 import { isNativeShell } from './device/native/index.ts'
+import { DriveDiagnosticsPanel } from './DriveDiagnosticsPanel.tsx'
 import { readShellToken, saveShellToken, SHELL_TOKEN_PROBLEM } from './shellToken.ts'
 import { localTextStore, type TextStore } from './storage/local.ts'
 
@@ -64,6 +65,7 @@ export function ShellTokenScreen({ replacing, onSave, onCancel }: TokenScreenPro
 export function ShellApp({ store }: { store: TextStore }) {
   const [status, setStatus] = useState<TokenStatus>(() => readShellToken(store))
   const [changing, setChanging] = useState(false)
+  const [diagnostics, setDiagnostics] = useState(false)
   if (status.kind !== 'ok' || changing) {
     return (
       <ShellTokenScreen
@@ -81,15 +83,24 @@ export function ShellApp({ store }: { store: TextStore }) {
   }
   // A new token is a new app: nothing made with the old one is kept on screen.
   return (
-    <App
-      key={status.token}
-      status={status}
-      barExtra={
-        <button type="button" className="change-token" onClick={() => setChanging(true)}>
-          Change token
-        </button>
-      }
-    />
+    <>
+      <App
+        key={status.token}
+        status={status}
+        barExtra={
+          <span className="shell-actions">
+            <button type="button" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
+              Drive diagnostics
+            </button>
+            <button type="button" className="change-token" onClick={() => setChanging(true)}>
+              Change token
+            </button>
+          </span>
+        }
+      />
+      {/* Beside the app, not in place of it: opening it must not end a drive. */}
+      {diagnostics && <DriveDiagnosticsPanel onClose={() => setDiagnostics(false)} />}
+    </>
   )
 }
 
