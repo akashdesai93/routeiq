@@ -1,6 +1,6 @@
 import type { KeyValueStore } from '../../storage/kv.ts'
 import { isOsmSignalTile, type OsmSignalTile } from './adapter.ts'
-import type { BundleCoverage, BundleLayer } from './bundleLayer.ts'
+import { DEFAULT_BUNDLE_RETRY, type BundleCoverage, type BundleLayer, type BundleRetryOptions } from './bundleLayer.ts'
 import { OVERPASS_COOLDOWN_MS, OVERPASS_MAX_COOLDOWN_MS, type OverpassClient } from './client.ts'
 
 /**
@@ -41,6 +41,12 @@ export interface TileSourceOptions {
   retryMs?: number
   /** The longest a failed tile is left alone (8 minutes). */
   maxRetryMs?: number
+  /**
+   * The same two waits for a tile that is waiting on the bundle (see
+   * LoadedTiles.awaitingBundle): shorter, because trying again is a read of
+   * the app's own files. Default: DEFAULT_BUNDLE_RETRY (5 s, doubling to a minute).
+   */
+  bundleRetry?: Partial<BundleRetryOptions>
 }
 
 export interface LoadedTiles {
@@ -54,6 +60,14 @@ export interface LoadedTiles {
    * the whole tile: good for a lower bound, never for a full count.
    */
   readonly partial: ReadonlyMap<string, OsmSignalTile>
+  /**
+   * The missing tiles that only the app's own bundled files can supply: the
+   * bundle covers the tile and its file could not be read, or the bundle's
+   * index could not be read, so nobody knows yet whether the tile is covered.
+   * The network was not asked for any of them and must not be. Nothing is
+   * wrong with such a tile; it is worth loading again later.
+   */
+  readonly awaitingBundle: readonly string[]
 }
 
 export interface LoadOptions {
@@ -76,6 +90,10 @@ export interface TileSource {
  *   must not shadow it. Such a tile is never written to the cache (it is
  *   already on the device, in the app's own files), never refreshed tile by
  *   tile, and never asked of the network, even when its file cannot be read.
+ * - A tile the bundle cannot place, because its index could not be read
+ *   ('unknown'), is treated as possibly covered: it is not looked up in the
+ *   cache, not asked of the network and not written anywhere. It is missing
+ *   until the index can be read (#72).
  * - Any other tile is taken from the cache, or else asked of the network
  *   once and written to the cache. A cached tile older than `ttlMs` is
  *   returned as it is and refreshed from the network in the background, once
@@ -83,7 +101,9 @@ export interface TileSource {
  * - A tile no layer has is missing. That is remembered for the session: the
  *   tile is not tried again for `retryMs`, then twice that, up to
  *   `maxRetryMs`, so a route that is recounted every few seconds (rerouting)
- *   does not ask for it on every tick. `retryFailed` skips the wait (the
+ *   does not ask for it on every tick. A tile that is waiting on the bundle
+ *   (see LoadedTiles.awaitingBundle) has shorter waits, `bundleRetry`.
+ *   `retryFailed` skips the wait (the
  *   network client's own pause after a busy answer still holds). A tile on
  *   the edge of the bundled area that the network cannot supply is still
  *   missing, but the bundle's clipped part of it is handed back as `partial`.
@@ -101,11 +121,15 @@ export function createTileSource(options: TileSourceOptions): TileSource {
     retryMs = OVERPASS_COOLDOWN_MS,
     maxRetryMs = OVERPASS_MAX_COOLDOWN_MS,
   } = options
+  const bundleRetry = { ...DEFAULT_BUNDLE_RETRY, ...options.bundleRetry }
   const session = new Map<string, OsmSignalTile>()
   const clipped = new Map<string, OsmSignalTile>()
   const pending = new Map<string, Promise<OsmSignalTile | null>>()
   const refreshed = new Set<string>()
-  const failed = new Map<string, { until: number; nextMs: number }>()
+  /** `onBundle`: the failure was a read of the bundle, not of the network. Each kind has its own waits. */
+  const failed = new Map<string, { until: number; nextMs: number; onBundle: boolean }>()
+  /** Missing tiles that only the bundle can supply: see LoadedTiles.awaitingBundle. */
+  const awaitingBundle = new Set<string>()
 
   /** Guards against a layer handing back another tile's data, or something that is not a tile. */
   const from = async (layer: TileLayer, tileId: string): Promise<OsmSignalTile | null> => {
@@ -116,12 +140,13 @@ export function createTileSource(options: TileSourceOptions): TileSource {
       return null
     }
   }
-  const standing = async (tileId: string): Promise<BundleCoverage> => {
+  const standing = async (tileId: string, retryFailed: boolean): Promise<BundleCoverage> => {
     if (bundle === null) return 'none'
     try {
-      return await bundle.coverage(tileId)
+      return await bundle.coverage(tileId, { retryFailed })
     } catch {
-      return 'none'
+      // A bundle that cannot say what it covers has not said "not covered".
+      return 'unknown'
     }
   }
   const keep = async (tile: OsmSignalTile) => {
@@ -143,13 +168,18 @@ export function createTileSource(options: TileSourceOptions): TileSource {
     })
   }
 
-  const loadOne = async (tileId: string): Promise<OsmSignalTile | null> => {
-    const inBundle = await standing(tileId)
-    if (bundle !== null && inBundle === 'covered') {
-      const bundled = await from(bundle, tileId)
-      if (bundled !== null) session.set(tileId, bundled)
+  const loadOne = async (tileId: string, retryFailed: boolean): Promise<OsmSignalTile | null> => {
+    const inBundle = await standing(tileId, retryFailed)
+    if (bundle !== null && (inBundle === 'covered' || inBundle === 'unknown')) {
+      // Covered, or possibly covered: the bundle or nobody. Never the cache, never the network.
+      const bundled = inBundle === 'covered' ? await from(bundle, tileId) : null
+      if (bundled !== null) {
+        session.set(tileId, bundled)
+        awaitingBundle.delete(tileId)
+      } else awaitingBundle.add(tileId)
       return bundled
     }
+    awaitingBundle.delete(tileId)
     const stored = await from(cache, tileId)
     if (stored !== null) {
       session.set(tileId, stored)
@@ -175,12 +205,15 @@ export function createTileSource(options: TileSourceOptions): TileSource {
     if (loading !== undefined) return loading
     const failure = failed.get(tileId)
     if (failure !== undefined && !retryFailed && now() < failure.until) return Promise.resolve(null)
-    loading = loadOne(tileId)
+    loading = loadOne(tileId, retryFailed)
       .then((tile) => {
         if (tile !== null) failed.delete(tileId)
         else {
-          const waitMs = failure?.nextMs ?? retryMs
-          failed.set(tileId, { until: now() + waitMs, nextMs: Math.min(waitMs * 2, maxRetryMs) })
+          const onBundle = awaitingBundle.has(tileId)
+          const waits = onBundle ? bundleRetry : { retryMs, maxRetryMs }
+          // A tile that failed the other way before (the index has been read since) starts its wait over.
+          const waitMs = failure !== undefined && failure.onBundle === onBundle ? failure.nextMs : waits.retryMs
+          failed.set(tileId, { until: now() + waitMs, nextMs: Math.min(waitMs * 2, waits.maxRetryMs), onBundle })
         }
         return tile
       })
@@ -206,7 +239,7 @@ export function createTileSource(options: TileSourceOptions): TileSource {
         const part = clipped.get(id)
         if (part !== undefined) partial.set(id, part)
       })
-      return { tiles, missing, partial }
+      return { tiles, missing, partial, awaitingBundle: missing.filter((id) => awaitingBundle.has(id)) }
     },
   }
 }
