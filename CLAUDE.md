@@ -79,15 +79,29 @@ GitHub issues on `akashdesai93/routeiq` are the task list. The labels are `ready
 `/loop /work-loop` runs autonomously. Each iteration syncs the board, claims the top
 `ready` issue, builds it in its own worktree on `claude/issue-N-*`, verifies it and opens
 a PR. When nothing is ready, it files new `triage` issues instead. Loops never push to
-`main` and never merge: the owner merges PRs. Rules: `.claude/skills/work-loop/SKILL.md`.
+`main` and never merge their own PRs: the orchestrator reviews and merges (`/pr-watch`). Rules: `.claude/skills/work-loop/SKILL.md`.
+
+## Coordination (several sessions at once)
+
+- **Orchestrator:** the CLI session started in `C:\Users\akash\dev` (`7ea8fc08`). It keeps
+  the board up to date, reviews and merges PRs (`/pr-watch`), sends out work, and reports
+  to the owner. Other sessions don't merge.
+- **Status board:** pinned issue #17. Every session posts with `/status` when it starts,
+  ships, gets blocked or stops, and at least once an hour while working.
+- **Before editing:** run `mcp__fleet__roster` (the fleet mod) or `ListAgents` to see who
+  else is in the repo, and `mcp__fleet__brief <id>` to read their context. Work in your
+  own worktree. Never edit another session's uncommitted files.
+- **Ship work through PRs**, one issue per PR, with `Closes #N` and how it was verified.
+  The orchestrator reviews the PR with an independent agent, checks CI, and squash-merges.
+  After a merge, rebase onto or restart from `origin/main`.
+- **Questions for the owner** go on the issue with the `needs-human` label and in your
+  status post. The orchestrator collects them for the owner.
 
 ## Where things stand (Nov 2026)
 
-- Steps 1–8 are done and committed on `main`.
-- **Uncommitted, in progress:** the live drive (real GPS). That is `core/live.ts`,
-  `core/tracking.ts`, `core/guidance.ts`, `core/speechQueue.ts`, `src/live/runner.ts`,
-  `src/device/{speech,visibility,wakeLock}.ts`, `useLiveDrive.ts`, `LiveDriveView.tsx`
-  and `drive/replay.ts`. Ask before discarding or reshaping it.
+- Steps 1–8 and the live drive (real GPS: `core/live.ts`, `core/tracking.ts`,
+  `core/guidance.ts`, `src/live/runner.ts`, `useLiveDrive.ts`) are on `main` (`fa7e300`).
+- The live board is pinned issue #17. This section is only a snapshot.
 - Other trees: `.claude/worktrees/native-app-3ae6fd` (branch `claude/native-app-3ae6fd`)
   and `../routeiq-probe` (branch `native-probe`, a Capacitor iOS background-location probe
   with a GitHub Actions macOS build). `../routeiq-design` is a separate design and slides kit.

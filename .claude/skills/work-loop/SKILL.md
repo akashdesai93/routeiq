@@ -65,7 +65,9 @@ Re-read the comments. If another claim landed before yours, drop your label chan
   then `git push -u origin <branch>`.
 - `gh pr create` with a body that says what changed, how it was verified (paste the
   one-line verify summary) and `Closes #N`, and ends with the Claude Code attribution line.
-- Label the issue `review` and remove `in-progress`. **Don't merge.** The owner merges.
+- Label the issue `review` and remove `in-progress`. **Don't merge your own PR.** The
+  orchestrator's `/pr-watch` reviews it independently and merges it.
+- Post `/status` to the board (#17) with the PR link.
 - Leave the worktree with `ExitWorktree` (keep it, since the PR may need changes).
 
 ## 6. Discover (only when nothing is ready)
@@ -97,7 +99,7 @@ owner (the `needs-human` list), and what comes next. Then pace yourself:
 
 ## Hard limits
 
-- Never push to `main`, never merge, never force-push, never close an issue without a merged PR.
+- Never push to `main`, never merge your own PR, never force-push, never close an issue without a merged PR.
 - Never touch `.env.local` or tokens, or another session's uncommitted files.
 - One issue per iteration. If a task would take more than about 400 changed lines, split
   it: file the parts as issues linked "Blocked by", and do only the first.
