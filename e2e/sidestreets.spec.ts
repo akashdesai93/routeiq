@@ -301,7 +301,9 @@ test('when I start on the side-street route, it drives the side street', async (
   expect(app.pathChecks.length).toBeGreaterThan(0)
   expect(app.pathChecks.every((c) => c.road === 'S')).toBe(true)
   // The drive's checks probed too (#5): whatever they found, nothing beat the side street it was on.
-  expect(app.probes.slice(probesBefore).every((p) => p.duringDrive)).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore)
+  expect(driveProbes.length).toBeGreaterThan(0)
+  expect(driveProbes.every((p) => p.duringDrive)).toBe(true)
   await expect(page.getByLabel('Drive summary')).toBeVisible()
 })
 

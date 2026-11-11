@@ -625,7 +625,8 @@ check interval to about 100 simulated seconds), and at most 60 per drive, after 
 the car drives on without checking. The side-street probes of the checks count against
 the same 60 (see Side-street probing, During a drive). The panel shows the count. The simulated clock
 stands still while a check is out, so the answer is always for the place the car is at.
-The default trip took 25 requests at 20x (Nov 2026); at 1x or 5x it takes about 40.
+The default trip took 25 requests at 20x (Nov 2026, before the checks' side-street
+probes, which add up to one a check and 20 a drive); at 1x or 5x it took about 40.
 
 **The request.** A check is the same `driving-traffic` request as the first one, from
 the car's position, plus `bearings=<heading>,45;`: the car's heading with 45 degrees
@@ -858,9 +859,11 @@ Planning a trip):
 also find a side street the plan did not, or one that only pays once a jam builds:
 after the check's fresh routes (and its path check, when one is made) are in,
 `checkProbes` (src/core/probe.ts, pure) picks the via points by the rules below, from the
-car: beside the route being driven as the check found it (or beside the fastest fresh
-route when it was not found), clear of every fresh route and of the path check's answer,
-none within 1 km of the car or the destination. `fetchFreshRoutes`
+car: beside the route being driven as the check found it, clear of every fresh route and
+of the path check's answer, none within 1 km of the car or the destination. A check that
+did not find the route being driven (not offered, and its path check failed or brought
+back another road) makes no probe: the engine compares nothing then (route-unconfirmed),
+and a probe could come back as the current path and stand in for it. `fetchFreshRoutes`
 (src/drive/freshRoutes.ts) asks for each one from the car, with its heading as `bearings`,
 the via with its 250 m radius, to the destination. A probed route that is a new path joins
 the fresh routes (`mergeCheckProbes`: the plan screen's repeat and dead-end-spur rules,
@@ -960,7 +963,9 @@ and when that cannot be had (no budget, a failed request, another road back) the
 is unconfirmed, not lost: the drive stays on it, and only "no route along the road
 ahead" `routeLostPolls` times in a row counts against it. No threshold changed.
 Each check may also probe one side street of its own (#5, see Side-street probing, During
-a drive), so a drive can still move onto a side street the plan did not recommend.
+a drive), so a drive can still move onto a side street the plan did not recommend. The
+probes come out of the same 60 requests, so on a long drive the checks run out up to a
+third sooner (20 probes at most).
 
 **The limit of the web version.** A browser only runs a page while it is in front with
 the screen on. Lock the phone or switch to another app and the position, the checks and

@@ -573,8 +573,10 @@ function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
  * most `allowed` of them. The points are selectViaPoints' (the same rules and
  * options as the plan screen's), from the car: beside the route being driven
  * as this check found it (among the fresh routes, or the answer for the
- * current path itself), or beside the fastest fresh route when it was not
- * found. Every fresh route, and that answer, is a known route to keep clear of.
+ * current path itself). None when it was not found: the engine then compares
+ * nothing (route-unconfirmed), and a probe might come back as the current
+ * path and stand in for it. Every fresh route, and that answer, is a known
+ * route to keep clear of.
  *
  * - The via of a probed route the engine is confirming (memory.keep) comes
  *   first, while it is still beside the road ahead (not within the endpoint
@@ -585,7 +587,7 @@ function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
  *   budget tries every side of every stretch in time. A point within
  *   clearOfRoutesM of the kept via is the same probe and is skipped.
  *
- * Empty when nothing may be asked, there is no usable route, or there is
+ * Empty when nothing may be asked, the current route was not found, or there is
  * nothing to probe (under minTripM left, or freeway only). Pure: the same
  * input gives the same points in the same order.
  */
@@ -594,8 +596,10 @@ export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFA
   if (allowed <= 0) return []
   const known = [...input.fresh, ...(input.baseline ?? [])].filter(usable)
   if (known.length === 0) return []
-  const current = findCurrentRoute(input.route, input.alongM, known, input.rerouteOptions)
-  const base = current ?? fastest(known)
+  // Without the current route's own fresh line (among the fresh routes, or the path check's
+  // answer) the engine compares nothing this check (route-unconfirmed), and a probe could snap
+  // back onto the current path and stand in for it. So no probe then.
+  const base = findCurrentRoute(input.route, input.alongM, known, input.rerouteOptions)
   if (base === null) return []
   const points = selectViaPoints(known, options, base).map((p) => p.position)
 

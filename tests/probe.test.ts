@@ -462,9 +462,9 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
       // Beside A (y = 0), not beside B (1 km north): 500 m to the south, where there is more room.
       const [, y] = localProjector(at(0, 0))(vias[0]!)
       expect(y).toBeCloseTo(-500, -1)
-      // With the current route not found, beside the fastest.
-      const other = checkProbes({ route: world('C', 1700), alongM: 9000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })
-      expect(other).toEqual([selectViaPoints(fresh)[0]!.position])
+      // With the current route not found (and no answer for it), nothing: the engine compares nothing this check,
+      // and a probe could come back as the current path and stand in for it.
+      expect(checkProbes({ route: world('C', 1700), alongM: 9000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })).toEqual([])
     })
 
     it('the points take turns, check by check', () => {
