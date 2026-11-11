@@ -11,6 +11,7 @@ function fixture(name: string): unknown {
 }
 const OK = fixture('directions.ok.json') as { code: string; routes: Record<string, unknown>[] }
 const FREEWAY = fixture('directions.freeway.json') as { code: string; routes: Record<string, unknown>[] }
+const CONGESTION = fixture('directions.congestion.json') as { code: string; routes: Record<string, unknown>[] }
 const NO_ROUTE = fixture('directions.noroute.json')
 const INVALID_INPUT = fixture('directions.invalidinput.json')
 
@@ -321,6 +322,63 @@ describe('parseDirections', () => {
     expect(spans[0]![1]).toBeCloseTo(4 * 111.19, 0)
   })
 
+  it('carries per-segment congestion and duration, one entry per segment of the line', () => {
+    const [first] = routesOf(parseDirections(CONGESTION))
+    expect(first!.geometry).toHaveLength(5)
+    expect(first!.segmentTraffic).toEqual({
+      congestion: ['low', 'heavy', 'severe', 'moderate'],
+      durationSec: [80.2, 310.5, 402.1, 107.6],
+    })
+  })
+
+  it('reads congestion it does not know as unknown, and drops a list of the wrong length', () => {
+    const routes = routesOf(parseDirections(CONGESTION))
+    // "jammed" and null are not Mapbox levels: unknown, never a guess. Two durations for three segments: none.
+    expect(routes[1]!.segmentTraffic).toEqual({ congestion: ['low', 'unknown', 'unknown'], durationSec: null })
+    // No annotation at all (an older response, or a test): null, not an empty list.
+    expect(routes[2]!.segmentTraffic).toBeNull()
+    expect(routesOf(parseDirections(OK)).map((r) => r.segmentTraffic)).toEqual([null, null, null])
+  })
+
+  it('drops annotations that cannot line up with the geometry', () => {
+    const route = CONGESTION.routes[0]! as { geometry: { coordinates: unknown[] }; legs: Record<string, unknown>[] }
+    const leg = route.legs[0]!
+    const annotation = leg.annotation as Record<string, unknown[]>
+    const parse = (r: unknown) => routesOf(parseDirections({ code: 'Ok', routes: [r] }))[0]!.segmentTraffic
+    // One entry short.
+    expect(parse({ ...route, legs: [{ ...leg, annotation: { ...annotation, congestion: annotation.congestion!.slice(1) } }] })).toEqual({
+      congestion: null,
+      durationSec: annotation.duration,
+    })
+    // A duration that is not a number of 0 or more spoils that list only.
+    expect(parse({ ...route, legs: [{ ...leg, annotation: { ...annotation, duration: [80.2, -1, 402.1, 107.6] } }] })).toEqual({
+      congestion: annotation.congestion,
+      durationSec: null,
+    })
+    // A bad point dropped from the line would shift every entry after it.
+    const coordinates = [...route.geometry.coordinates]
+    coordinates[2] = ['x', 'y']
+    expect(parse({ ...route, geometry: { type: 'LineString', coordinates } })).toBeNull()
+    // Not an object, not a list, a leg without one.
+    expect(parse({ ...route, legs: [{ ...leg, annotation: 'congestion' }] })).toBeNull()
+    expect(parse({ ...route, legs: [{ ...leg, annotation: { congestion: 'heavy', duration: 3 } }] })).toBeNull()
+    expect(parse({ ...route, legs: [leg, { steps: [] }] })).toBeNull()
+  })
+
+  it('joins the annotations of several legs into one list for the whole line', () => {
+    const route = CONGESTION.routes[0]! as { legs: Record<string, unknown>[] }
+    const leg = route.legs[0]!
+    const legs = [
+      { ...leg, annotation: { congestion: ['low', 'heavy'], duration: [80.2, 310.5] } },
+      { ...leg, annotation: { congestion: ['severe', 'moderate'], duration: [402.1, 107.6] } },
+    ]
+    const [only] = routesOf(parseDirections({ code: 'Ok', routes: [{ ...route, legs }] }))
+    expect(only!.segmentTraffic).toEqual({
+      congestion: ['low', 'heavy', 'severe', 'moderate'],
+      durationSec: [80.2, 310.5, 402.1, 107.6],
+    })
+  })
+
   it('treats a non-numeric typical duration as missing', () => {
     const routes = routesOf(
       parseDirections({ code: 'Ok', routes: [{ ...OK.routes[0], duration_typical: 'n/a' }] }),
@@ -367,6 +425,15 @@ describe('buildDirectionsUrl', () => {
     expect(query.get('overview')).toBe('full')
     expect(query.get('steps')).toBe('true')
     expect(query.get('access_token')).toBe(TOKEN)
+  })
+
+  it('asks for the congestion and travel time of every segment, which needs the full overview', () => {
+    const query = new URL(url).searchParams
+    expect(query.get('annotations')).toBe('congestion,duration')
+    expect(query.get('overview')).toBe('full')
+    // The same on a request through via points (a drive check or a side-street probe).
+    const via = new URL(buildDirectionsUrl(UPTOWN_CHARLOTTE.position, SOUTHPARK.position, TOKEN, { via: [{ point: [-80.84, 35.19] }], originHeadingDeg: 180 })!)
+    expect(via.searchParams.get('annotations')).toBe('congestion,duration')
   })
 
   it('encodes the token and trims long coordinates', () => {

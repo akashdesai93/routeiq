@@ -67,6 +67,42 @@ test('when a side street saves time, it is offered, wins and is announced', asyn
   expect(app.probes).toHaveLength(2)
 })
 
+test('when Mapbox reports a jam, the side-street probes aim beside the jam', async ({ app, page }) => {
+  // The jam is on the first stretch of Main Corridor's jog (a quarter to 40 % of the trip),
+  // and Mapbox's congestion data says so. Without it the probes would go beside the middle
+  // of the longest surface stretch (about half way), well past the jam.
+  app.outside.sideStreet = true
+  app.outside.traffic = JAM_WHERE_ALL_THREE_SHARE
+  await app.open()
+  await expect(page.locator('.route-source', { hasText: SIDE })).toBeVisible({ timeout: 15_000 })
+  await app.routesReady()
+  await app.snap('the probes went beside the reported jam and found the side street there')
+
+  // The plan asked for congestion, and both probes sat beside the jam, one each side.
+  expect(app.probes).toHaveLength(2)
+  for (const probe of app.probes) {
+    expect(probe.annotations).toBe('congestion,duration')
+    expect(probe.via.f).toBeGreaterThan(0.25)
+    expect(probe.via.f).toBeLessThan(0.4)
+  }
+  expect(app.probes.map((p) => Math.sign(p.via.side - 300)).sort()).toEqual([-1, 1])
+  // The one on the side street's side found it.
+  expect(app.probes.find((p) => p.via.side < 300)!.road).toBe('S')
+})
+
+test('with no jam reported, the probes go beside the middle of the longest stretch', async ({ app, page }) => {
+  // Free flow: every segment is "low", so there is no jam to aim at and the old rule holds.
+  app.outside.sideStreet = true
+  await app.open()
+  await expect(page.locator('.route-source', { hasText: SIDE })).toBeVisible({ timeout: 15_000 })
+  await app.routesReady()
+  expect(app.probes).toHaveLength(2)
+  for (const probe of app.probes) {
+    expect(probe.via.f).toBeGreaterThan(0.45)
+    expect(probe.via.f).toBeLessThan(0.55)
+  }
+})
+
 test('when a side street is slower, it is shown but not recommended', async ({ app, page }) => {
   // Free flow: Parallel Street is the slowest way.
   app.outside.sideStreet = true

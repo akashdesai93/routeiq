@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
+  type CongestionLevel,
   DEFAULT_PROBE_OPTIONS,
   distanceM,
   localProjector,
@@ -240,5 +241,158 @@ describe('selectViaPoints', () => {
     const points = selectViaPoints([dot, empty, nan, world('A', 1200)])
     expect(points).toHaveLength(2)
     expect(points.every((p) => p.baseRouteId.startsWith('A-'))).toBe(true)
+  })
+})
+
+/**
+ * A's geometry with per-segment congestion: a segment whose middle lies in one
+ * of `jams` (meters along A, which runs straight east) is at `level`, every
+ * other one is low.
+ */
+function jammedA(durationSec: number, jams: readonly (readonly [number, number])[], level: CongestionLevel = 'heavy') {
+  const route = world('A', durationSec)
+  const along = alongRouteM(route.geometry)
+  const congestion = along.slice(1).map((end, i): CongestionLevel => {
+    const mid = (along[i]! + end) / 2
+    return jams.some(([a, b]) => mid > a && mid < b) ? level : 'low'
+  })
+  return { ...route, segmentTraffic: { congestion, durationSec: null } }
+}
+
+/** The points without the base route's id: the test world numbers its routes as they are made. */
+const placed = (points: readonly ViaPoint[]) => points.map((p) => ({ ...p, baseRouteId: '' }))
+
+describe('selectViaPoints with live traffic (segmentTraffic)', () => {
+  it('aims at the middle of the jam, not the middle of the stretch', () => {
+    // Heavy traffic from 3 to 5 km on A's one surface stretch [1, 19] km.
+    const candidates = [jammedA(1200, [[3000, 5000]]), world('B', 1300), world('C', 1250)]
+    const points = selectViaPoints(candidates)
+    expect(points).toHaveLength(2)
+    for (const p of points) {
+      expect(p.congestedSpanM![0]).toBeCloseTo(3000, 0)
+      expect(p.congestedSpanM![1]).toBeCloseTo(5000, 0)
+      expect(p.atDistanceM).toBeCloseTo(4000, 0)
+      expect(p.targetSpanM[0]).toBeCloseTo(1000, 0)
+      expect(p.reason).toContain("2.0 km jam on surface street (3.0 km to 5.0 km from the start)")
+    }
+    expect(distanceM(points.find((p) => p.side === 'left')!.position, at(4000, 500))).toBeLessThan(2)
+    expect(distanceM(points.find((p) => p.side === 'right')!.position, at(4000, -500))).toBeLessThan(2)
+    expectWellPlaced(points, candidates)
+  })
+
+  it('takes the congested stretch first, even when another one is longer', () => {
+    // A freeway span from 6 to 10 km leaves two surface stretches: [1, 6] km and [10, 19] km.
+    const spans: Partial<RouteCandidate> = { limitedAccessSpansM: [[6000, 10000]] }
+    const plain = { ...world('A', 1200), ...spans }
+    // Without traffic data the longer one goes first.
+    expect(selectViaPoints([plain], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 1 })[0]!.atDistanceM).toBeCloseTo(14500, 0)
+    // A severe jam from 2 to 3 km puts the shorter one first.
+    const jammed = { ...jammedA(1200, [[2000, 3000]], 'severe'), ...spans }
+    const points = selectViaPoints([jammed], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 4 })
+    expect(points.map((p) => Math.round(p.atDistanceM))).toEqual([2500, 14500, 2500, 14500])
+    expect(points.map((p) => p.congestedSpanM === null)).toEqual([false, true, false, true])
+    expectWellPlaced(points, [jammed])
+  })
+
+  it('orders congested stretches by how much of each is congested', () => {
+    const spans: Partial<RouteCandidate> = { limitedAccessSpansM: [[6000, 10000]] }
+    // 0.5 km jammed on the short stretch, 1 km on the long one.
+    const jammed = { ...jammedA(1200, [[2000, 2500], [15000, 16000]]), ...spans }
+    const points = selectViaPoints([jammed], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 2 })
+    expect(points.map((p) => Math.round(p.atDistanceM))).toEqual([15500, 2250])
+  })
+
+  it('joins jams a short gap apart, and aims at the longest jam of a stretch', () => {
+    // Heavy at 3–4 km and 4.25–5.5 km, low for the 250 m between.
+    const jammed = jammedA(1200, [[3000, 4000], [4250, 5500]])
+    // Default gap (200 m): two jams, the longer one is aimed at.
+    const apart = selectViaPoints([jammed])
+    expect(apart[0]!.congestedSpanM![0]).toBeCloseTo(4250, 0)
+    expect(apart[0]!.atDistanceM).toBeCloseTo(4875, 0)
+    // A 300 m gap joins them into one jam from 3 to 5.5 km.
+    const joined = selectViaPoints([jammed], { ...DEFAULT_PROBE_OPTIONS, congestionGapM: 300 })
+    expect(joined[0]!.congestedSpanM![0]).toBeCloseTo(3000, 0)
+    expect(joined[0]!.atDistanceM).toBeCloseTo(4250, 0)
+  })
+
+  it('counts only the configured levels as congested; moderate and unknown are not jams', () => {
+    const fallback = placed(selectViaPoints(WORLD()))
+    for (const level of ['moderate', 'unknown', 'low'] as const) {
+      const points = selectViaPoints([jammedA(1200, [[3000, 5000]], level), world('B', 1300), world('C', 1250)])
+      expect(placed(points), level).toEqual(fallback)
+    }
+    // Unknown is never a jam, even when it is listed.
+    const unknown = selectViaPoints([jammedA(1200, [[3000, 5000]], 'unknown'), world('B', 1300), world('C', 1250)], {
+      ...DEFAULT_PROBE_OPTIONS,
+      congestedLevels: ['unknown', 'heavy', 'severe'],
+    })
+    expect(placed(unknown)).toEqual(fallback)
+    // With moderate counted, the same route is aimed at by the data.
+    const moderate = selectViaPoints([jammedA(1200, [[3000, 5000]], 'moderate')], {
+      ...DEFAULT_PROBE_OPTIONS,
+      congestedLevels: ['moderate', 'heavy', 'severe'],
+    })
+    expect(moderate[0]!.atDistanceM).toBeCloseTo(4000, 0)
+  })
+
+  it('ignores a jam shorter than minCongestedM, and one inside the endpoint clearance', () => {
+    const fallback = placed(selectViaPoints(WORLD()))
+    // One 250 m segment of heavy traffic.
+    expect(placed(selectViaPoints([jammedA(1200, [[4000, 4250]]), world('B', 1300), world('C', 1250)]))).toEqual(fallback)
+    // Heavy for the first and last kilometer only: cut off with the clearance.
+    expect(placed(selectViaPoints([jammedA(1200, [[0, 1000], [19000, 20000]]), world('B', 1300), world('C', 1250)]))).toEqual(fallback)
+  })
+
+  it('falls back to the longest stretch, unchanged, when the traffic data is missing or does not fit', () => {
+    const fallback = placed(selectViaPoints(WORLD()))
+    expect(fallback.every((p) => p.congestedSpanM === null)).toBe(true)
+    const jammed = jammedA(1200, [[3000, 5000]])
+    const variants: RouteCandidate[] = [
+      { ...jammed, segmentTraffic: null },
+      { ...jammed, segmentTraffic: undefined },
+      { ...jammed, segmentTraffic: { congestion: null, durationSec: null } },
+      // One entry short: it cannot be placed on the line.
+      { ...jammed, segmentTraffic: { congestion: jammed.segmentTraffic.congestion.slice(1), durationSec: null } },
+    ]
+    for (const a of variants) expect(placed(selectViaPoints([a, world('B', 1300), world('C', 1250)]))).toEqual(fallback)
+  })
+
+  it('counts only congested road toward minCongestedM, not the gaps a jam is joined across', () => {
+    // Two 250 m segments of heavy traffic 250 m apart: 500 m of jam with the gap, 500 m congested.
+    const two = jammedA(1200, [[4000, 4250], [4500, 4750]])
+    const joined = { ...DEFAULT_PROBE_OPTIONS, congestionGapM: 300 }
+    expect(selectViaPoints([two], joined)[0]!.congestedSpanM).not.toBeNull()
+    // Raise the bar to 600 m: the joined jam is 750 m long, but only 500 m of it is congested.
+    expect(selectViaPoints([two], { ...joined, minCongestedM: 600 })[0]!.congestedSpanM).toBeNull()
+  })
+
+  it('splits a jam across a freeway span into the two stretches it touches', () => {
+    // Heavy from 4 to 13 km; the freeway from 6 to 10 km leaves 2 km of it on [1, 6] and 3 km on [10, 19].
+    const jammed = { ...jammedA(1200, [[4000, 13000]]), limitedAccessSpansM: [[6000, 10000]] as const }
+    const points = selectViaPoints([jammed], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 2 })
+    expect(points.map((p) => [Math.round(p.congestedSpanM![0]), Math.round(p.congestedSpanM![1])])).toEqual([
+      [10000, 13000],
+      [4000, 6000],
+    ])
+  })
+
+  it('is deterministic with traffic data too', () => {
+    const candidates = [jammedA(1200, [[3000, 5000], [12000, 13000]]), world('B', 1300), world('C', 1250)]
+    expect(selectViaPoints(candidates)).toEqual(selectViaPoints([...candidates].reverse()))
+  })
+
+  it('aims at the congested stretch on the Mapbox fixture with annotations', () => {
+    const candidates = fixtureRoutes('directions.congestion.json')
+    const points = selectViaPoints(candidates)
+    expect(points.length).toBeGreaterThan(0)
+    // The fastest route's heavy and severe segments are its 2nd and 3rd.
+    const base = candidates[0]!
+    const along = alongRouteM(base.geometry)
+    for (const p of points) {
+      expect(p.baseRouteId).toBe(base.id)
+      expect(p.congestedSpanM![0]).toBeCloseTo(Math.max(along[1]!, DEFAULT_PROBE_OPTIONS.endpointClearanceM), 0)
+      expect(p.congestedSpanM![1]).toBeCloseTo(Math.min(along[3]!, along.at(-1)! - DEFAULT_PROBE_OPTIONS.endpointClearanceM), 0)
+    }
+    expectWellPlaced(points, candidates)
   })
 })

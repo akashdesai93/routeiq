@@ -1,6 +1,6 @@
 import { alongRouteM, distanceM, isValidLngLat, localProjector, pointAtDistance, pointToSegment } from './geo.ts'
 import { SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
-import type { DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
+import type { CongestionLevel, DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
 
 /**
  * Via-point selection for side-street probing (PLAN step 11a).
@@ -13,8 +13,10 @@ import type { DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
  * Pure and deterministic: the same candidates and options always give the same
  * points, in the same order. No time, no randomness, no I/O.
  *
- * Gap: RouteCandidate carries no per-segment congestion or duration, so the
- * "slowest stretch" is approximated by the longest surface-street stretch.
+ * Where the fastest route carries live traffic (RouteCandidate.segmentTraffic),
+ * the probes aim at its congested stretches: that is where a parallel street
+ * can save time. Without it, the longest surface-street stretch stands in for
+ * the slowest.
  */
 
 export interface ProbeOptions {
@@ -64,6 +66,24 @@ export interface ProbeOptions {
    * that leaves a long straight segment from being taken for one.
    */
   readonly coverSampleM: number
+  /**
+   * Congestion levels that count as a jam worth going round. A segment at any
+   * other level, 'unknown' included, is not congested: unknown is never taken
+   * for a jam.
+   */
+  readonly congestedLevels: readonly CongestionLevel[]
+  /**
+   * Congested runs of the route this close together or closer, in meters, are
+   * one jam: real annotations flicker between heavy and moderate inside a queue.
+   */
+  readonly congestionGapM: number
+  /**
+   * A surface-street stretch is aimed at by the data only when at least this
+   * much of it, in meters, is congested (congested segments only: the gaps
+   * joined by congestionGapM do not count). Below it, the stretch is ordered by
+   * length like a route with no traffic data.
+   */
+  readonly minCongestedM: number
 }
 
 export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
@@ -76,6 +96,9 @@ export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
   headingWindowM: 150,
   viaRadiusM: 250,
   coverSampleM: 10,
+  congestedLevels: ['heavy', 'severe'],
+  congestionGapM: 200,
+  minCongestedM: 300,
 }
 
 /** Which side of the base route, facing the direction of travel. */
@@ -95,6 +118,12 @@ export interface ViaPoint {
   readonly side: ProbeSide
   /** Perpendicular distance from the base route, in meters (one of options.offsetsM). */
   readonly offsetM: number
+  /**
+   * The jam the point is aimed at, inside targetSpanM, in meters from the
+   * route start: the longest congested run of the stretch. Null when the
+   * point was placed without traffic data (the middle of the stretch).
+   */
+  readonly congestedSpanM: DistanceSpanM | null
 }
 
 const usable = (c: RouteCandidate) =>
@@ -132,6 +161,42 @@ function surfaceStretches(spans: readonly DistanceSpanM[] | null, fromM: number,
   return out.filter(([a, b]) => b > a)
 }
 
+/**
+ * The congested runs of a route, as [startM, endM] along its geometry, in
+ * driving order: segments at one of `levels`, with runs `gapM` or less apart
+ * joined into one. Empty when the route has no congestion list, or one that
+ * does not have exactly one entry per segment (it would misplace the jams).
+ */
+function congestedRuns(
+  route: RouteCandidate,
+  along: readonly number[],
+  levels: readonly CongestionLevel[],
+  gapM: number,
+): DistanceSpanM[] {
+  const congestion = route.segmentTraffic?.congestion
+  if (congestion == null || congestion.length !== route.geometry.length - 1) return []
+  const gap = Number.isFinite(gapM) && gapM > 0 ? gapM : 0
+  const runs: DistanceSpanM[] = []
+  for (let i = 0; i < congestion.length; i++) {
+    // Unknown is never a jam, even when listed.
+    const level = congestion[i]!
+    if (level === 'unknown' || !levels.includes(level)) continue
+    const start = along[i]!
+    const end = along[i + 1]!
+    const last = runs.at(-1)
+    if (last !== undefined && start - last[1] <= gap) runs[runs.length - 1] = [last[0], end]
+    else runs.push([start, end])
+  }
+  return runs.filter(([a, b]) => b > a)
+}
+
+/** The parts of `runs` inside `span`, clipped to it. */
+function within(runs: readonly DistanceSpanM[], [from, to]: DistanceSpanM): DistanceSpanM[] {
+  return runs.map(([a, b]): DistanceSpanM => [Math.max(a, from), Math.min(b, to)]).filter(([a, b]) => b > a)
+}
+
+const spanLength = ([a, b]: DistanceSpanM) => b - a
+
 /** Shortest distance from a point to a polyline, in meters. A single-point line is that point. */
 function distanceToLineM(point: LngLat, line: readonly LngLat[]): number {
   if (line.length === 0) return Infinity
@@ -155,15 +220,19 @@ function offsetPoint(p: LngLat, headingDeg: number, side: ProbeSide, offsetM: nu
 const km = (m: number) => `${(m / 1000).toFixed(1)} km`
 
 /**
- * Up to `options.maxPoints` via points off the fastest candidate's longest
+ * Up to `options.maxPoints` via points off the fastest candidate's slowest
  * surface-street stretches, best first. Empty for no usable candidate, a trip
  * under `minTripM`, or a route with no surface stretch of `minStretchM` away
  * from its ends (freeway-only trips).
  *
- * Each stretch is probed at its middle, on both sides. Points are ordered by
- * stretch (longest first) and, within a stretch, by side (the side farther
- * from the other candidates first, then left); the first side of every
- * stretch comes before any second side, so a small budget spreads out.
+ * Stretches with at least `minCongestedM` of congestion (segments at one of
+ * `congestedLevels`, runs within `congestionGapM` joined) come first, the most
+ * congested first, and each is probed at the middle of its longest jam. The
+ * rest follow, longest first, each probed at its middle: with no traffic data
+ * at all that is the whole order, the longest stretch standing in for the
+ * slowest. Every stretch is probed on both sides. Within a stretch the side
+ * farther from the other candidates comes first, then left; the first side of
+ * every stretch comes before any second side, so a small budget spreads out.
  */
 export function selectViaPoints(
   candidates: readonly RouteCandidate[],
@@ -171,21 +240,36 @@ export function selectViaPoints(
 ): ViaPoint[] {
   const base = fastest(candidates)
   if (base === null || options.maxPoints <= 0) return []
-  const lengthM = alongRouteM(base.geometry).at(-1)!
+  const along = alongRouteM(base.geometry)
+  const lengthM = along.at(-1)!
   if (lengthM < options.minTripM) return []
   const origin = base.geometry[0]!
   const destination = base.geometry.at(-1)!
   const clear = options.endpointClearanceM
+  // Jams (runs joined across short gaps) are what is aimed at; only congested road itself is counted.
+  const runs = congestedRuns(base, along, options.congestedLevels, options.congestionGapM)
+  const congestedOnly = congestedRuns(base, along, options.congestedLevels, 0)
   const stretches = surfaceStretches(base.limitedAccessSpansM, clear, lengthM - clear)
     .filter(([a, b]) => b - a >= options.minStretchM)
-    .sort((x, y) => y[1] - y[0] - (x[1] - x[0]) || x[0] - y[0])
+    .map((span) => {
+      const jams = within(runs, span)
+      const congestedM = within(congestedOnly, span).reduce((sum, run) => sum + spanLength(run), 0)
+      // The longest jam; equal ones go to the earlier, so the choice is deterministic.
+      const jam =
+        jams.length > 0 && congestedM >= options.minCongestedM
+          ? jams.reduce((x, y) => (spanLength(y) > spanLength(x) ? y : x))
+          : null
+      return { span, jam, congestedM: jam === null ? 0 : congestedM }
+    })
+    .sort((x, y) => y.congestedM - x.congestedM || spanLength(y.span) - spanLength(x.span) || x.span[0] - y.span[0])
   // Only usable lines measure room: one NaN coordinate would make every room NaN and hide the side order.
   const others = candidates.filter((c) => c !== base && usable(c))
   const offsets = [...options.offsetsM].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
 
   const rounds: ViaPoint[][] = [[], []]
-  for (const span of stretches) {
-    const midM = (span[0] + span[1]) / 2
+  for (const { span, jam } of stretches) {
+    const aim = jam ?? span
+    const midM = (aim[0] + aim[1]) / 2
     const here = pointAtDistance(base.geometry, midM)!
     const mid = here.point
     const before = pointAtDistance(base.geometry, midM - options.headingWindowM)!.point
@@ -205,10 +289,22 @@ export function selectViaPoints(
         if (candidates.some((c) => distanceToLineM(position, c.geometry) < options.clearOfRoutesM)) continue
         const roomM = Math.min(...others.map((c) => distanceToLineM(position, c.geometry)))
         const reason =
-          `${offsetM} m ${side} of the fastest route's ${km(span[1] - span[0])} surface-street stretch ` +
-          `(${km(span[0])} to ${km(span[1])} from the start)`
+          jam === null
+            ? `${offsetM} m ${side} of the fastest route's ${km(span[1] - span[0])} surface-street stretch ` +
+              `(${km(span[0])} to ${km(span[1])} from the start)`
+            : `${offsetM} m ${side} of the fastest route's ${km(jam[1] - jam[0])} jam on surface street ` +
+              `(${km(jam[0])} to ${km(jam[1])} from the start)`
         found.push({
-          point: { position, reason, baseRouteId: base.id, targetSpanM: span, atDistanceM: midM, side, offsetM },
+          point: {
+            position,
+            reason,
+            baseRouteId: base.id,
+            targetSpanM: span,
+            atDistanceM: midM,
+            side,
+            offsetM,
+            congestedSpanM: jam,
+          },
           roomM,
         })
         break
