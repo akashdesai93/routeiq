@@ -15,6 +15,12 @@
     { "type": "node", "id": 9000006, "lat": 95.0, "lon": -80.84 },
     { "type": "node", "id": 9000007, "lon": -80.84 },
     null,
-    7
+    7,
+    { "type": "node", "id": 9000008, "lat": 35.2511, "lon": -80.8512, "tags": { "highway": "traffic_signals", "traffic_signals": "blinker" } },
+    { "type": "node", "id": 9000009, "lat": 35.2512, "lon": -80.8513, "tags": { "highway": "traffic_signals", "traffic_signals": "emergency" } },
+    { "type": "node", "id": 9000010, "lat": 35.2513, "lon": -80.8514, "tags": { "highway": "traffic_signals", "traffic_signals": "Pedestrian_Crossing " } },
+    { "type": "node", "id": 9000011, "lat": 35.2514, "lon": -80.8515, "tags": { "highway": "traffic_signals", "traffic_signals": "blinker;emergency" } },
+    { "type": "node", "id": 9000012, "lat": 35.2515, "lon": -80.8516, "tags": { "highway": "traffic_signals", "traffic_signals": "signal" } },
+    { "type": "node", "id": 9000013, "lat": 35.2516, "lon": -80.8517, "tags": { "highway": "traffic_signals", "traffic_signals": "signal;emergency" } }
   ]
 }
