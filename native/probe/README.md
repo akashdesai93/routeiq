@@ -97,8 +97,9 @@ From a terminal instead: `gh run list --workflow probe-ios.yml`, then
 
 Artifacts are deleted after 30 days. To rebuild: push any change under `native/probe/` to the
 `native-probe` branch. The **Run workflow** button only appears once the workflow file is on the
-default branch (a GitHub rule). macOS minutes on a private repository are billed at 10x, so a build of
-a few minutes uses tens of minutes of the monthly allowance.
+default branch (a GitHub rule). A build takes about one minute. macOS minutes on a private repository
+are billed at 10x and rounded up per job, so each build counts as roughly 10 minutes of the monthly
+allowance.
 
 ## Installing from Windows with a free Apple ID
 

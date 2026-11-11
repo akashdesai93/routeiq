@@ -94,6 +94,13 @@ jobs:
           test -f "$APP/public/app.js"
           grep -q ProbeNativePlugin "$APP/capacitor.config.json"
           ls "$APP/Frameworks" 2>/dev/null || echo "(no embedded frameworks)"
+          # The Swift plugin and the geolocation plugin must really be in the binary.
+          echo "ProbeEngine.swift mentioned in build log: $(grep -c 'ProbeEngine.swift' build/xcodebuild.log) times"
+          strings - "$APP/App" > build/app-strings.txt
+          grep -q "ProbeNativePlugin" build/app-strings.txt
+          grep -q "SPEECH_STARTED" build/app-strings.txt
+          grep -q "BackgroundGeolocation" build/app-strings.txt
+          echo "plugin code present in the app binary"
 
       - name: Package Payload/App.app as an ipa
         run: |
