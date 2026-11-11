@@ -127,10 +127,15 @@ jobs:
             *) echo "::error::MBXAccessToken holds something other than a public token"; exit 1 ;;
           esac
           lipo -info "$APP/RouteIQ"
+          # MapboxMaps is a source package linked into the app binary (its resources
+          # land as a bundle at the app root); MapboxCoreMaps and MapboxCommon are
+          # binary xcframeworks and must be embedded under Frameworks/.
           echo "Embedded frameworks:"
           ls "$APP/Frameworks"
-          ls "$APP/Frameworks" | grep -q MapboxMaps
+          echo "Resource bundles:"
+          ls "$APP" | grep '\.bundle$' || true
           ls "$APP/Frameworks" | grep -q MapboxCoreMaps
+          ls "$APP/Frameworks" | grep -q MapboxCommon
 
       - name: Package Payload/RouteIQ.app as an ipa
         run: |
