@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PROBE_BUDGET,
+  coversRoute,
   DEFAULT_PROBE_OPTIONS,
   mergeProbeRoutes,
   planProbes,
   rankRoutes,
   recommendedRouteId,
   selectViaPoints,
+  sideStreetNotice,
   type LngLat,
   type RouteCandidate,
 } from '../src/core/index.ts'
@@ -126,6 +128,40 @@ describe('mergeProbeRoutes', () => {
     expect(mergeProbeRoutes(provider, bad)).toEqual(provider)
   })
 
+  it('drops a dead-end spur: the known route with an out-and-back to the via', () => {
+    // A as far as 10 km, 500 m north up a dead end and back, then on along A.
+    const provider = PROVIDER()
+    const a = provider[0]!
+    const spur: RouteCandidate = {
+      ...a,
+      id: 'A-spur',
+      durationSec: 1320,
+      geometry: [at(0, 0), at(5000, 0), at(10_000, 0), at(10_000, 500), at(10_000, 0), at(15_000, 0), at(20_000, 0)],
+    }
+    expect(coversRoute(spur.geometry, a.geometry)).toBe(true)
+    expect(mergeProbeRoutes(provider, [spur])).toEqual(provider)
+  })
+
+  it('keeps a cut-through that leaves a known route along a segment with no vertices of its own', () => {
+    // The known route is one straight segment, start to end: its two vertices are both on E's line.
+    const straight: RouteCandidate = { ...route('A', 1200), geometry: [at(0, 0), at(20_000, 0)] }
+    const e = route('E', 1260)
+    // Sampled every 10 m, A's stretch under E's loop (18.5 to 19.5 km) is not on E.
+    expect(coversRoute(e.geometry, straight.geometry)).toBe(false)
+    // Its vertices alone would have taken E for "A plus a detour".
+    expect(coversRoute(e.geometry, straight.geometry, 10, 0)).toBe(true)
+    const merged = mergeProbeRoutes([straight], [e])
+    expect(merged).toHaveLength(2)
+    expect(merged[1]!.source).toBe('probe')
+  })
+
+  it('samples every 10 m (DEFAULT_PROBE_OPTIONS.coverSampleM) and snaps the via within 250 m (viaRadiusM)', () => {
+    expect(DEFAULT_PROBE_OPTIONS.coverSampleM).toBe(10)
+    expect(DEFAULT_PROBE_OPTIONS.viaRadiusM).toBe(250)
+    // No farther than clearOfRoutesM: a via can never snap back onto a known route.
+    expect(DEFAULT_PROBE_OPTIONS.viaRadiusM).toBeLessThanOrEqual(DEFAULT_PROBE_OPTIONS.clearOfRoutesM)
+  })
+
   it('with no probes is the provider routes', () => {
     const provider = PROVIDER()
     expect(mergeProbeRoutes(provider, [])).toEqual(provider)
@@ -157,5 +193,41 @@ describe('probed routes are ranked by the same ETA-first rules', () => {
     expect(rankRoutes(tied)[0]!.route.source).toBe('probe')
     const behind = mergeProbeRoutes(provider, [counted(route('D', 1231), 0)])
     expect(rankRoutes(behind)[0]!.route.source).toBeUndefined()
+  })
+})
+
+describe('sideStreetNotice (the polite announcement when a probe takes the top spot)', () => {
+  const notice = (probe: RouteCandidate, provider: RouteCandidate[] = PROVIDER()) =>
+    sideStreetNotice(rankRoutes(mergeProbeRoutes(provider, [probe])))
+
+  it('says how much a recommended side street saves against the best provider route, in whole minutes', () => {
+    // Against A at 1200 s: 120 s is 2 min, 100 s rounds to 2, 80 s to 1.
+    expect(notice(route('D', 1080))).toBe('Faster route found via side streets, saves 2 min.')
+    expect(notice(route('D', 1100))).toBe('Faster route found via side streets, saves 2 min.')
+    expect(notice(route('D', 1120))).toBe('Faster route found via side streets, saves 1 min.')
+  })
+
+  it('says under a minute for a small saving, and never calls a tie-break win faster', () => {
+    expect(notice(route('D', 1180))).toBe('Faster route found via side streets, saves under a minute.')
+    const counted = (r: RouteCandidate, n: number): RouteCandidate => ({ ...r, signalCount: n, signalCoverage: 'full' })
+    const tied = rankRoutes(mergeProbeRoutes(PROVIDER().map((r) => counted(r, 12)), [counted(route('D', 1220), 4)]))
+    expect(tied[0]!.route.source).toBe('probe')
+    expect(sideStreetNotice(tied)).toBe('Route via side streets recommended: about the same time, fewer signals.')
+  })
+
+  it('claims no fewer signals for a probe that leads on distance while its count is unknown', () => {
+    // Same ETA as A, shorter, signals not counted yet: first on distance, but nothing is known about its signals.
+    const a = PROVIDER()[0]!
+    const shorter = { ...route('D', 1200), distanceM: a.distanceM - 500 }
+    const ranked = rankRoutes(mergeProbeRoutes(PROVIDER(), [shorter]))
+    expect(ranked[0]!.route.source).toBe('probe')
+    expect(sideStreetNotice(ranked)).toBe('Route via side streets recommended: about the same time.')
+  })
+
+  it('says nothing when the top route is the provider’s own, or there is none to compare with', () => {
+    expect(notice(route('D', 1400))).toBeNull()
+    expect(sideStreetNotice(rankRoutes(PROVIDER()))).toBeNull()
+    expect(sideStreetNotice([])).toBeNull()
+    expect(notice(route('D', 1400), [])).toBeNull()
   })
 })

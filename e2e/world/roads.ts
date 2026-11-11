@@ -214,14 +214,21 @@ export class World {
    * no road is within VIA_SNAP_M. S is a road only in a world made with
    * `sideStreet`. Leaves lastOffered alone: a probe is not what the car drives.
    */
-  through(from: LngLat, via: LngLat, traffic: Traffic, n: number): { answer: DirectionsJson | NoSegmentJson; road: RouteName | null; durationSec: number | null } {
+  through(
+    from: LngLat,
+    via: LngLat,
+    traffic: Traffic,
+    n: number,
+    /** The via's `radiuses` entry, when the request sent one: no road this close is NoSegment, as at Mapbox. */
+    radiusM: number = VIA_SNAP_M,
+  ): { answer: DirectionsJson | NoSegmentJson; road: RouteName | null; durationSec: number | null } {
     let best: { road: Road; offM: number } | null = null
     for (const road of this.roads) {
       if (road.name === 'S' && !this.sideStreet) continue
       const offM = project(this.frame, road.corners, via).offM
       if (best === null || offM < best.offM - 0.01) best = { road, offM }
     }
-    if (best === null || best.offM > VIA_SNAP_M) {
+    if (best === null || best.offM > Math.min(VIA_SNAP_M, radiusM)) {
       return { answer: { code: 'NoSegment', message: 'Could not find a matching segment for input coordinates', routes: [] }, road: null, durationSec: null }
     }
     const rest = restOf(best.road, project(this.frame, best.road.corners, from))

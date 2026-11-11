@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
+import { DEFAULT_PROBE_OPTIONS, routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
 import { parseDirections, type DirectionsResult } from '../src/providers/mapbox/adapter.ts'
 import { buildDirectionsUrl, fetchDirections, fetchProbeRoute, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
 
@@ -574,6 +574,26 @@ describe('fetchProbeRoute (side-street probes)', () => {
     expect(url.searchParams.get('waypoints')).toBe('0;2')
     expect(url.searchParams.get('alternatives')).toBe('false')
     expect(url.searchParams.get('steps')).toBe('true')
+    // No radius asked for: no radiuses parameter, every coordinate snaps as far as it must.
+    expect(url.searchParams.has('radiuses')).toBe(false)
+  })
+
+  it('limits how far the via may snap with one radiuses entry per coordinate, the ends unlimited', async () => {
+    const { fetchImpl, urls } = answer(200, OK)
+    await fetchProbeRoute({ ...where, viaRadiusM: DEFAULT_PROBE_OPTIONS.viaRadiusM, fetchImpl })
+    const url = new URL(urls[0]!)
+    expect(url.searchParams.get('radiuses')).toBe('unlimited;250;unlimited')
+    expect(url.searchParams.get('radiuses')!.split(';')).toHaveLength(decodeURIComponent(url.pathname).split('/').at(-1)!.split(';').length)
+    // Mapbox needs a radius greater than 0: a tiny one is sent as 1 m, never "0".
+    const tiny = answer(200, OK)
+    await fetchProbeRoute({ ...where, viaRadiusM: 0.2, fetchImpl: tiny.fetchImpl })
+    expect(new URL(tiny.urls[0]!).searchParams.get('radiuses')).toBe('unlimited;1;unlimited')
+    // A radius that is not a positive number is no limit at all, so the parameter is left out.
+    for (const viaRadiusM of [0, -5, Number.NaN]) {
+      const bad = answer(200, OK)
+      await fetchProbeRoute({ ...where, viaRadiusM, fetchImpl: bad.fetchImpl })
+      expect(new URL(bad.urls[0]!).searchParams.has('radiuses')).toBe(false)
+    }
   })
 
   it('drops NoSegment, NoRoute, HTTP, network and abort failures as null, never throwing', async () => {

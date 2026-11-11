@@ -16,6 +16,8 @@ export interface E2EWindow {
   __e2e: {
     spoken: { atMs: number; text: string }[]
     inflight: number
+    /** Every URL the page handed to fetch, in order, including calls cancelled before they left. */
+    fetched: string[]
     fix: (lng: number, lat: number, headingDeg: number, speedMps: number) => void
     /** The position "Use my location" gets; null answers with a refusal. */
     here: [number, number] | null
@@ -36,6 +38,7 @@ export function installBrowserStubs(): void {
   w.__e2e = {
     spoken: [],
     inflight: 0,
+    fetched: [],
     here: [-80.8431, 35.2271],
     fix(lng, lat, headingDeg, speedMps) {
       for (const watcher of watchers.values()) watcher.ok(position(lng, lat, speedMps > 0.5 ? headingDeg : null, speedMps))
@@ -102,6 +105,8 @@ export function installBrowserStubs(): void {
   const realFetch = window.fetch.bind(window)
   window.fetch = async (...args: Parameters<typeof fetch>) => {
     w.__e2e.inflight++
+    const [input] = args
+    w.__e2e.fetched.push(input instanceof Request ? input.url : String(input))
     try {
       const response = await realFetch(...args)
       // Read the body here, so "no request in flight" also means "every answer is in".

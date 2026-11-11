@@ -215,11 +215,15 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       (NoSegment included) are dropped, and `mergeProbeRoutes` adds the new paths,
       tagged `source: 'probe'`, dropping any that match a known route by path. Ranking
       is unchanged; RoutePanel marks them "via side streets". e2e:
-      `e2e/sidestreets.spec.ts`. Open for later: probes in the reroute engine (#5);
-      a probe whose via snaps to a dead end can come back as a known route plus a short
-      out-and-back spur, which the 10 m path match does not catch (it is ranked by its
-      worse ETA, so it never wins on that alone); no `radiuses` limit is sent, so a via
-      far off-road snaps to whatever road is nearest.
+      `e2e/sidestreets.spec.ts`. Hardened in #63: the via goes with a 250 m
+      `radiuses` entry (`viaRadiusM`), a probe that covers a known route (a dead-end
+      spur, `coversRoute`, 10 m sampling) is dropped, a probe that takes the top spot
+      is announced in a polite live region, pointer or focus on the list or Start
+      drive counts as a pick, the other routes keep their signal counts while a probe's
+      load, and e2e covers pin-move cancellation, a held answer for the old trip and a
+      drive started with a probe recommended. Open for later: probes in the reroute
+      engine (#5); the live drive starts from the device's position and does not take
+      the plan's pick, so a recommended side street is not what the drive follows.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

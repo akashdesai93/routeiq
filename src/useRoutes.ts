@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_PROBE_BUDGET,
+  DEFAULT_PROBE_OPTIONS,
   mergeProbeRoutes,
   planProbes,
   rankRoutes,
   resolveSelectedId,
+  sideStreetNotice,
   withSignalCounts,
   type LngLat,
   type RankedRoute,
@@ -41,10 +43,29 @@ export interface RoutesState {
   /** True when Mapbox refused the token (401 or 403): every route request will fail the same way. */
   tokenRejected: boolean
   select: (id: string) => void
+  /**
+   * Counts the selected route as picked, as a tap on it would: called when
+   * the user's hand or focus is on the route list or Start drive, so a probe
+   * that joins (and reorders the list) cannot move the selection under them.
+   * Does nothing once something is picked.
+   */
+  keepSelection: () => void
+  /**
+   * One line for a polite live region when a side-street probe is the
+   * recommended route ("Faster route found via side streets, saves N min.").
+   * Null otherwise.
+   */
+  sideStreetNotice: string | null
   retry: () => void
   /** Signals on the selected route, in driving order, for the map. */
   selectedSignals: readonly RouteSignal[]
   signalsStatus: SignalsStatus
+  /**
+   * Routes whose signal count is still being worked out while the others
+   * keep theirs: a probed route that just joined. Empty while signalsStatus
+   * is 'loading' (then every route is).
+   */
+  countingRouteIds: ReadonlySet<string>
   /** User-readable note on what signal data is missing; null when none is. */
   signalsError: string | null
   retrySignals: () => void
@@ -54,6 +75,7 @@ export interface RoutesState {
 
 const NO_ROUTES: readonly RouteCandidate[] = []
 const NO_SIGNALS: readonly RouteSignal[] = []
+const NO_IDS: ReadonlySet<string> = new Set()
 
 const PARTIAL_HELP =
   'Signal data for part of this trip could not be loaded. Counts marked partial are a lower bound.'
@@ -94,7 +116,10 @@ function useSignalData(routes: readonly RouteCandidate[]) {
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
   // Data loaded for other routes, or before a retry, does not speak for these.
   const loaded = settled !== null && settled.routes === routes && settled.attempt === attempt ? settled.loaded : null
-  return { loaded, retry }
+  // The last load for other routes, same attempt: while a probed route's tiles load, it
+  // still speaks for the routes it was loaded for (see useRoutes).
+  const previous = loaded === null && settled !== null && settled.attempt === attempt ? settled : null
+  return { loaded, previous, retry }
 }
 
 /**
@@ -116,12 +141,15 @@ function useProbeRoutes(token: string | null, routes: readonly RouteCandidate[])
     if (token === null || routes.length === 0) return
     const vias = planProbes(routes, DEFAULT_PROBE_BUDGET)
     if (vias.length === 0) return
+    // The routes' own ends (Mapbox's snapped origin and destination), not the pins: the
+    // probes then start and end where the routes they are compared with do.
     const origin = routes[0]!.geometry[0]!
     const destination = routes[0]!.geometry.at(-1)!
     const controller = new AbortController()
     const timer = setTimeout(() => {
       vias.forEach((via, i) => {
-        void fetchProbeRoute({ origin, via: via.position, destination, token, signal: controller.signal }).then((probe) => {
+        const viaRadiusM = DEFAULT_PROBE_OPTIONS.viaRadiusM
+        void fetchProbeRoute({ origin, via: via.position, destination, token, viaRadiusM, signal: controller.signal }).then((probe) => {
           if (controller.signal.aborted || probe === null) return
           // Kept in via order, not arrival order, so the same answers always merge the same way.
           setSettled((prev) => {
@@ -198,8 +226,28 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
     return merged.length === provided.length ? provided : merged
   }, [provided, probed])
   const signals = useSignalData(fetched)
+  // When a probed route joins, the routes already counted keep their counts (and their
+  // tie-break) while the new route's tiles load: only the new one shows as counting.
+  const previous = signals.previous
+  const carried = useMemo(() => {
+    if (previous === null || previous.routes.length === 0) return null
+    const ids = new Set(fetched.map((r) => r.id))
+    return previous.routes.every((r) => ids.has(r.id)) ? previous : null
+  }, [previous, fetched])
   const signalData = signals.loaded?.data ?? null
-  const counted = useMemo(() => withSignalCounts(fetched, signalData), [fetched, signalData])
+  const counted = useMemo(() => {
+    if (signals.loaded !== null || carried === null) return withSignalCounts(fetched, signalData)
+    const known = new Set(carried.routes.map((r) => r.id))
+    const kept = withSignalCounts(fetched.filter((r) => known.has(r.id)), carried.loaded.data)
+    const byId = new Map(kept.routes.map((r) => [r.id, r]))
+    return { routes: fetched.map((r) => byId.get(r.id) ?? r), signalsByRouteId: kept.signalsByRouteId }
+  }, [fetched, signalData, signals.loaded, carried])
+  const countingRouteIds = useMemo(() => {
+    if (signals.loaded !== null || carried === null) return NO_IDS
+    const known = new Set(carried.routes.map((r) => r.id))
+    return new Set(fetched.filter((r) => !known.has(r.id)).map((r) => r.id))
+  }, [fetched, signals.loaded, carried])
+  const shownData = signals.loaded ?? carried?.loaded ?? null
   const routes = counted.routes
   const ranked = useMemo(() => rankRoutes(routes), [routes])
   const selectedId = useMemo(() => resolveSelectedId(routes, picked), [routes, picked])
@@ -208,8 +256,13 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
     (id: string) => setPicked(fetched.find((r) => r.id === id) ?? null),
     [fetched],
   )
+  const selectedRoute = routes.find((r) => r.id === selectedId) ?? null
+  const keepSelection = useCallback(() => {
+    if (selectedRoute !== null) setPicked((p) => p ?? selectedRoute)
+  }, [selectedRoute])
+  const notice = useMemo(() => sideStreetNotice(ranked), [ranked])
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
-  const missingSignalData = signals.loaded !== null && signals.loaded.missingTileIds.length > 0
+  const missingSignalData = shownData !== null && shownData.missingTileIds.length > 0
 
   return {
     routes,
@@ -219,11 +272,14 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
     error: result !== null && !result.ok ? result.message : null,
     tokenRejected: result !== null && !result.ok && result.kind === 'token',
     select,
+    keepSelection,
+    sideStreetNotice: notice,
     retry,
     selectedSignals: (selectedId !== null && counted.signalsByRouteId.get(selectedId)) || NO_SIGNALS,
-    signalsStatus: signals.loaded === null ? 'loading' : missingSignalData ? 'partial' : 'ready',
+    signalsStatus: shownData === null ? 'loading' : missingSignalData ? 'partial' : 'ready',
+    countingRouteIds,
     signalsError: missingSignalData ? PARTIAL_HELP : null,
     retrySignals: signals.retry,
-    signalDataDate: signals.loaded?.primaryDataDate ?? null,
+    signalDataDate: shownData?.primaryDataDate ?? null,
   }
 }

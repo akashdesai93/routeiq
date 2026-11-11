@@ -182,9 +182,11 @@ export {
 export {
   DEFAULT_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
+  coversRoute,
   mergeProbeRoutes,
   planProbes,
   selectViaPoints,
+  sideStreetNotice,
   type ProbeBudget,
   type ProbeOptions,
   type ProbeSide,
