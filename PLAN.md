@@ -53,7 +53,10 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    device cache -> Overpass, a covered tile never reaches the last two, is never
    refreshed tile by tile and is never copied into IndexedDB, and a covered tile
    without a file is "0 signals" without a request. Overpass is only the backup for
-   tiles outside the states or on their clipped outer edge. A tile that failed is
+   tiles outside the states or on their clipped outer edge. A failed read of the
+   bundle (its index or a tile file) is unknown, not "not covered" (#72): such a tile
+   reaches neither the cache nor Overpass and is read again after 5 s, doubling to a
+   minute; `askOnce` does not give up on it (#73). A tile that failed is
    left alone for 30 s, doubling to 8 minutes (per session), which is what step 6
    needs. The panel shows the data date. The Overpass seed (the metro box, one big
    query) is retired.
