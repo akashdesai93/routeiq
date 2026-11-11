@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
+  baselineProbe,
   bearingDeg,
   decideReroute,
   declineRoute,
@@ -34,14 +35,18 @@ interface PollSetup {
   options?: Partial<RerouteOptions>
   /** Changes to the candidate of a route, by name. */
   extra?: Partial<Record<RouteName, Partial<RouteCandidate>>>
+  /** What a request for the current path itself came back with (ETAs by route name). Left out: not asked. */
+  baseline?: Etas
 }
 
 /** One poll while driving the main road A, x meters along it. */
 function pollOnA(setup: PollSetup): RerouteDecision & { candidates: RouteCandidate[] } {
   const here = at(setup.xM, 0)
-  const candidates = (Object.keys(setup.etas) as RouteName[])
-    .map((name) => candidate(name, here, setup.etas[name]!, setup.extra?.[name]))
-    .filter((c): c is RouteCandidate => c !== null)
+  const made = (etas: Etas) =>
+    (Object.keys(etas) as RouteName[])
+      .map((name) => candidate(name, here, etas[name]!, setup.extra?.[name]))
+      .filter((c): c is RouteCandidate => c !== null)
+  const candidates = made(setup.etas)
   const decision = decideReroute(
     setup.state ?? INITIAL_REROUTE_STATE,
     {
@@ -50,6 +55,7 @@ function pollOnA(setup: PollSetup): RerouteDecision & { candidates: RouteCandida
       positionAlongM: setup.xM,
       speedMps: setup.speedMps ?? 5,
       candidates,
+      baseline: setup.baseline === undefined ? undefined : made(setup.baseline),
     },
     setup.options,
   )
@@ -74,6 +80,12 @@ describe('reroute thresholds', () => {
       routeLostPolls: 3,
       offRouteM: 50,
       sameRouteToleranceM: 10,
+      matchToleranceM: 20,
+      matchMinOverlap: 0.95,
+      matchMaxGapM: 400,
+      matchIgnoreStartM: 150,
+      baselineViaSpacingM: 3000,
+      baselineMaxViaPoints: 6,
       returnOverlapFraction: 0.5,
       requireTypicalDuration: true,
       etaTieWindowSec: 30,
@@ -153,6 +165,142 @@ describe('findCurrentRoute: which fresh candidate is the rest of the current rou
     // Nor is a route that stops short of the destination.
     expect(findCurrentRoute(driven, 3000, [{ ...fresh, geometry: fresh.geometry.slice(0, -4) }])).toBeNull()
     expect(findCurrentRoute(driven, 3000, [])).toBeNull()
+  })
+})
+
+// The shapes below are the ones measured on real answers (README, "Why the matching is by
+// overlap"), redrawn by hand on the made-up plane. Every position is invented.
+describe('the same route, drawn differently (patterns measured on real answers)', () => {
+  type Corner = readonly [xM: number, yM: number]
+  const line = (corners: readonly Corner[]): LngLat[] => corners.map(([x, y]) => at(x, y))
+  /** A fresh route along the corners, as a provider would return it. */
+  const fresh = (corners: readonly Corner[], durationSec = 1500): RouteCandidate => {
+    const geometry = line(corners)
+    return { ...candidate('A', at(0, 0), durationSec)!, id: `fresh-${corners.length}-${durationSec}`, geometry, distanceM: alongRouteM(geometry).at(-1)!, maneuvers: [] }
+  }
+  /** The main road A, straight east, being driven; the car is 3 km along it. */
+  const onA = candidate('A', at(0, 0), 2000)!
+  const HERE = 3000
+  const isCurrent = (corners: readonly Corner[]) => findCurrentRoute(onA, HERE, [fresh(corners)]) !== null
+
+  it('different vertex density: a bend drawn with 4 points or with 46 is the same road', () => {
+    // East for 2 km, a quarter circle of 300 m radius to the north, then north.
+    const bend = (stepDeg: number): Corner[] => {
+      const arc: Corner[] = []
+      for (let deg = -90; deg <= 0; deg += stepDeg) arc.push([2000 + 300 * Math.cos((deg * Math.PI) / 180), 300 + 300 * Math.sin((deg * Math.PI) / 180)])
+      return [...arc, [2300, 5000]]
+    }
+    const driven = { geometry: line([[0, 0], ...bend(2)]) }
+    // The coarse drawing cuts 10.2 m inside the fine one at each chord: more than the old 10 m, vertex by vertex.
+    const coarse = fresh([[500, 0], ...bend(30)])
+    expect(findCurrentRoute(driven, 500, [coarse])).toBe(coarse)
+    // And the other way round: driving the coarse drawing, offered the fine one.
+    const fine = fresh([[500, 0], ...bend(2)])
+    expect(findCurrentRoute({ geometry: line([[0, 0], ...bend(30)]) }, 500, [fine])).toBe(fine)
+  })
+
+  it('a different first 150 m: snapped to the parallel street, joining a block later', () => {
+    expect(isCurrent([[HERE, 40], [3120, 40], [3140, 0], [20000, 0]])).toBe(true)
+    // The same beginning that never joins is another road.
+    expect(isCurrent([[HERE, 40], [19980, 40], [20000, 0]])).toBe(false)
+  })
+
+  it('a divided road: the other drawing of the carriageway, 14 m to the side for 6 km', () => {
+    expect(isCurrent([[HERE, 0], [6000, 0], [6010, 14], [11990, 14], [12000, 0], [20000, 0]])).toBe(true)
+  })
+
+  it('one corner cut 14 m inside the old one', () => {
+    const onB = candidate('B', at(0, 0), 2000)!
+    // B turns north at 5 km; the fresh drawing starts the turn 20 m early.
+    const cut = fresh([[HERE, 0], [4980, 0], [5000, 20], [5000, 1000], [15000, 1000], [15000, 0], [20000, 0]])
+    expect(findCurrentRoute(onB, HERE, [cut])).toBe(cut)
+  })
+
+  it('the other lane group at a freeway exit: three short stretches up to 39 m apart', () => {
+    const exit: Corner[] = [
+      [HERE, 0], [9000, 0], [9030, 22], [9270, 22], [9300, 0], [9420, 0], [9440, 39], [9580, 39], [9600, 0],
+      [9750, 0], [9770, 38], [9910, 38], [9930, 0], [20000, 0],
+    ]
+    expect(isCurrent(exit)).toBe(true)
+    // It is the current route for the ETA, and never an alternative to it, whatever time it claims.
+    const decision = decideReroute(INITIAL_REROUTE_STATE, {
+      nowSec: 0,
+      route: onA,
+      positionAlongM: HERE,
+      speedMps: 20,
+      candidates: [fresh(exit, 1400), candidate('A', at(HERE, 0), 2000)!],
+    })
+    expect(decision).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 2000, asked: false } })
+    // Offered alone, its time is the current route's time.
+    const alone = decideReroute(INITIAL_REROUTE_STATE, { nowSec: 0, route: onA, positionAlongM: HERE, speedMps: 20, candidates: [fresh(exit, 1400)] })
+    expect(alone).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 1400 } })
+  })
+
+  it('a genuinely different route that shares four fifths is still a different route', () => {
+    // 17 km to go; for 4 km of them it runs on the next road, 300 m north.
+    const detour: Corner[] = [[HERE, 0], [10000, 0], [10000, 300], [14000, 300], [14000, 0], [20000, 0]]
+    expect(isCurrent(detour)).toBe(false)
+    // Even a frontage road 30 m to the side, for the same 4 km.
+    expect(isCurrent([[HERE, 0], [10000, 0], [10010, 30], [13990, 30], [14000, 0], [20000, 0]])).toBe(false)
+    // And a 700 m detour that would fit inside the 5% allowance of a long route: one stretch apart is too long.
+    expect(isCurrent([[HERE, 0], [10000, 0], [10000, 100], [10500, 100], [10500, 0], [20000, 0]])).toBe(false)
+    // A route that overshoots and comes back along the same road is never apart, but it is longer.
+    expect(isCurrent([[HERE, 0], [10000, 0], [10000, 15], [9000, 15], [9000, 0], [20000, 0]])).toBe(false)
+    // So it is weighed as an alternative: five minutes faster than the current route, it starts a confirmation.
+    const decision = decideReroute(INITIAL_REROUTE_STATE, {
+      nowSec: 0,
+      route: onA,
+      positionAlongM: HERE,
+      speedMps: 20,
+      candidates: [candidate('A', at(HERE, 0), 2000)!, fresh(detour, 1700)],
+    })
+    expect(decision).toMatchObject({ action: 'stay', code: 'confirming', considered: { savingSec: 300 } })
+    expect(decision.considered!.turnInM).toBeCloseTo(7000, -2)
+  })
+
+  it('route gone from the answers while the driver is on the road: stays; gone and off the road: a new route at once', () => {
+    const others = [candidate('B', at(HERE, 0), 1500)!, candidate('C', at(HERE, 0), 1600)!]
+    const observation = { nowSec: 0, route: onA, positionAlongM: HERE, speedMps: 15, candidates: others }
+    let state = INITIAL_REROUTE_STATE
+    for (let poll = 0; poll < 10; poll++) {
+      const decision = decideReroute(state, { ...observation, nowSec: poll * 60 })
+      expect(decision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+      state = decision.nextState
+    }
+    // The tracker says the car has left the route: that, not the list of routes, is the reason to change.
+    const off = decideReroute(state, { ...observation, nowSec: 600, offRouteM: 80 })
+    expect(off).toMatchObject({ action: 'switch', code: 'off-route', toRouteId: others[0]!.id })
+  })
+})
+
+describe('baselineProbe: how to ask for the current route when it is not offered', () => {
+  const onA = candidate('A', at(0, 0), 2000)!
+  const here = at(3000, 0)
+  /** Where along the main road each via point is, to the nearest 100 m (the stretches are found in 10 m steps). */
+  const xOf = (via: readonly { point: LngLat }[]) => via.map((v) => Math.round(alongRouteM([at(0, 0), v.point])[1]! / 100) * 100)
+
+  it('asks nothing when the current route is among the fresh routes, or there are none', () => {
+    expect(baselineProbe(onA, 3000, [candidate('A', here, 1500)!, candidate('B', here, 1400)!])).toBeNull()
+    expect(baselineProbe(onA, 3000, [])).toBeNull()
+  })
+
+  it('puts via points on the stretches the fresh routes leave, with the heading of travel', () => {
+    // B leaves the main road between 5 and 15 km, C between 8 and 12 km: one set of points pins both.
+    const probe = baselineProbe(onA, 3000, [candidate('B', here, 1400)!, candidate('C', here, 1450)!])!
+    expect(xOf(probe.via)).toEqual([6300, 8800, 11300, 13700])
+    probe.via.forEach((v) => {
+      expect(v.bearingDeg).toBeCloseTo(90, 0)
+      // On the main road itself.
+      expect(Math.abs(v.point[1] - at(0, 0)[1]) * 111_195).toBeLessThan(1)
+    })
+    // A short loop near the end gets a point of its own.
+    const withE = baselineProbe(onA, 3000, [candidate('B', here, 1400)!, candidate('E', here, 1450)!])!
+    expect(xOf(withE.via)).toEqual([6300, 8800, 11300, 13700, 19000])
+  })
+
+  it('never more than the cap, spread over the way', () => {
+    const probe = baselineProbe(onA, 3000, [candidate('B', here, 1400)!, candidate('E', here, 1450)!], { baselineMaxViaPoints: 2 })!
+    expect(xOf(probe.via)).toEqual([8800, 13700])
   })
 })
 
@@ -317,32 +465,73 @@ describe('scripted drives', () => {
     expect(log.polls[6]!.decision.nextState.failedPolls).toBe(0)
   })
 
-  it('current route not among the candidates: waits three polls, then takes the best fresh route', () => {
+  // The old rule here was "missing from the fresh routes three polls in a row: take the best
+  // fresh route". On real drives that fired with nothing wrong (the provider returns three
+  // routes at most, and the same road came back drawn a little differently), so a route that
+  // is merely not offered is no longer a reason to switch: the next four tests replace it.
+  it('current route not among the candidates and nothing else known: stays on it, however long', () => {
+    const log = drive({
+      polls: 12,
+      eta: fixed({ A: 2000, B: 1900, C: 1950 }),
+      tamper: (candidates, { poll }) => (poll >= 1 ? candidates.filter((c) => nameOf(c) !== 'A') : candidates),
+    })
+    expect(log.switches).toEqual([])
+    expect(log.codes).toEqual(['saving-too-small', ...Array<string>(11).fill('route-unconfirmed')])
+    expect(log.polls[1]!.decision.reason).toBe(
+      'Staying: current route is not among the fresh routes, and its travel time could not be checked',
+    )
+    // Not being offered is not evidence against the road ahead: nothing counts up.
+    expect(log.polls.map((p) => p.decision.nextState.lostPolls)).toEqual(Array<number>(12).fill(0))
+    expect(log.polls[5]!.decision.current).toBeNull()
+  })
+
+  it('current route not among the candidates: its own travel time is asked for, and the usual rules decide', () => {
+    // The provider only offers B and C. Asked for the main road itself it says 2000 s, and from the fourth poll 2300 s.
+    const log = drive({
+      polls: 6,
+      eta: fixed({ B: 1900, C: 1950 }),
+      baseline: (_, { poll, position }) => [candidate('A', position, poll >= 3 ? 2300 : 2000)!],
+    })
+    expect(log.codes).toEqual(['saving-too-small', 'saving-too-small', 'saving-too-small', 'confirming', 'faster-route', 'current-best'])
+    expect(log.polls[0]!.decision.current).toMatchObject({ durationSec: 2000, asked: true })
+    expect(log.polls[0]!.decision.reason).toBe('Staying: faster route saves only 1.6 minutes')
+    // A real saving, measured like for like, confirmed over two polls: an ordinary switch.
+    expect(log.polls[4]!.decision.reason).toBe('Switching: saves 6.6 minutes, turn in 2.3 miles')
+    expect(log.polls[4]!.decision.considered!.savingSec).toBe(400)
+    expect(log.switches).toEqual([{ nowSec: 240, from: 'A', to: 'B' }])
+    expect(log.polls.every((p) => p.decision.nextState.lostPolls === 0)).toBe(true)
+  })
+
+  it('asked for the road ahead three times and no route found that way: takes the best fresh route, and says why', () => {
     const log = drive({
       polls: 6,
       eta: fixed({ A: 2000, B: 1900, C: 1950 }),
       tamper: (candidates, { poll }) => (poll >= 1 ? candidates.filter((c) => nameOf(c) !== 'A') : candidates),
+      // Asked for the main road itself, the provider finds no route along it.
+      baseline: (_, { poll }) => (poll >= 1 ? [] : null),
     })
-    expect(log.codes.slice(0, 4)).toEqual(['saving-too-small', 'route-lost-waiting', 'route-lost-waiting', 'route-lost'])
-    expect(log.polls[1]!.decision.reason).toBe('Staying: current route is missing from the fresh routes, check 1 of 3')
-    expect(log.polls[3]!.decision.reason).toBe('Switching: current route is no longer offered, turn in 2.5 miles')
+    expect(log.codes.slice(0, 4)).toEqual(['saving-too-small', 'route-unconfirmed', 'route-unconfirmed', 'route-lost'])
+    expect(log.polls[1]!.decision.reason).toBe('Staying: the road ahead could not be routed, check 1 of 3')
+    expect(log.polls[3]!.decision.reason).toBe('Switching: the road ahead can no longer be routed, turn in 2.5 miles')
     expect(log.polls[3]!.decision.considered!.savingSec).toBeNull()
     expect(log.switches).toEqual([{ nowSec: 180, from: 'A', to: 'B' }])
   })
 
-  it('current route not among the candidates: the route left a moment ago may be the one to take', () => {
-    // On B since the switch at 60 s. Then the provider stops offering B and puts A first.
+  it('the road ahead cannot be routed: the route left a moment ago may be the one to take', () => {
+    // On B since the switch at 60 s. Then the provider stops offering B, puts A first, and
+    // finds no route when asked for B itself.
     const log = drive({
       polls: 9,
       eta: (name, { poll }) => (name === 'A' ? (poll >= 2 ? 1700 : 2000) : name === 'B' ? 1820 : name === 'C' ? 1900 : null),
       tamper: (candidates, { poll }) => (poll >= 2 ? candidates.filter((c) => nameOf(c) !== 'B') : candidates),
+      baseline: (_, { poll }) => (poll >= 2 ? [] : null),
     })
     expect(log.codes.slice(0, 8)).toEqual([
       'confirming',
       'faster-route',
-      'route-lost-waiting',
-      'route-lost-waiting',
-      // Three polls without it, but the cooldown (until 360 s) still holds.
+      'route-unconfirmed',
+      'route-unconfirmed',
+      // Three such answers, but the cooldown (until 360 s) still holds.
       'cooldown',
       'cooldown',
       'route-lost',
@@ -353,7 +542,7 @@ describe('scripted drives', () => {
       { nowSec: 360, from: 'B', to: 'A' },
     ])
     expect(log.polls[4]!.decision.reason).toBe(
-      'Staying: switched routes 3 minutes ago, and the current route is no longer offered',
+      'Staying: switched routes 3 minutes ago, and the road ahead can no longer be routed',
     )
   })
 
@@ -371,39 +560,65 @@ describe('scripted drives', () => {
     expect(poll(3000).code).toBe('current-best')
     // 40 m on (a second or two of driving): still the same route.
     expect(poll(3040).code).toBe('current-best')
-    // 300 m on, the answer is stale: nothing matches, and nothing is switched on one such poll.
-    expect(poll(3300)).toMatchObject({ action: 'stay', code: 'route-lost-waiting' })
+    // 300 m on, the answer is stale. The old matcher (every vertex within 10 m, starts together)
+    // called that "current route missing" and counted towards leaving it, which was the bug:
+    // routes that start a little behind the car are still the same routes, compared like for like.
+    expect(poll(3300)).toMatchObject({ action: 'stay', code: 'current-best' })
   })
 
-  it('current route missing for one poll only: the count starts again', () => {
+  it('the road ahead not routed for one poll only: the count starts again', () => {
     const log = drive({
       polls: 8,
       eta: fixed({ A: 2000, B: 1900 }),
       tamper: (candidates, { poll }) => (poll % 3 === 1 ? candidates.filter((c) => nameOf(c) !== 'A') : candidates),
+      baseline: (_, { poll }) => (poll % 3 === 1 ? [] : null),
     })
     expect(log.switches).toEqual([])
-    expect(log.codes).toEqual(['saving-too-small', 'route-lost-waiting', 'saving-too-small', 'saving-too-small', 'route-lost-waiting', 'saving-too-small', 'saving-too-small', 'route-lost-waiting'])
+    expect(log.codes).toEqual(['saving-too-small', 'route-unconfirmed', 'saving-too-small', 'saving-too-small', 'route-unconfirmed', 'saving-too-small', 'saving-too-small', 'route-unconfirmed'])
     expect(log.polls.map((p) => p.decision.nextState.lostPolls)).toEqual([0, 1, 0, 0, 1, 0, 0, 1])
   })
 
-  it('current route no longer offered and the only other route turns off too soon: stays', () => {
-    const lost = pollOnA({ xM: 4700, etas: { B: 1500 }, options: { routeLostPolls: 1 } })
+  it('a poll that could not ask for the current path neither adds to the count nor clears it', () => {
+    const state: RerouteState = { ...INITIAL_REROUTE_STATE, lostPolls: 2 }
+    const notAsked = pollOnA({ xM: 1000, etas: { B: 1500 }, state })
+    expect(notAsked).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    expect(notAsked.nextState.lostPolls).toBe(2)
+    // "No route through these points" is the answer that counts: the third in a row.
+    expect(pollOnA({ xM: 1000, etas: { B: 1500 }, state, baseline: {} })).toMatchObject({ action: 'switch', code: 'route-lost' })
+    // Answered with another road (the via points did not pin the path): no evidence, and the count starts again.
+    const otherRoad = pollOnA({ xM: 1000, etas: { B: 1500 }, state, baseline: { B: 1500 } })
+    expect(otherRoad).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    expect(otherRoad.reason).toBe('Staying: current route is not among the fresh routes, and asking for it brought back another road')
+    expect(otherRoad.nextState.lostPolls).toBe(0)
+    // An answer that is the current path but has no typical duration is not compared, and is not shown as its ETA.
+    const noTraffic = pollOnA({ xM: 1000, etas: { B: 1500 }, baseline: { A: 2400 }, extra: { A: { typicalDurationSec: null } } })
+    expect(noTraffic).toMatchObject({ action: 'stay', code: 'no-traffic-data', current: null })
+  })
+
+  it('the road ahead cannot be routed and the only other route turns off too soon: stays', () => {
+    const lost = pollOnA({ xM: 4700, etas: { B: 1500 }, baseline: {}, options: { routeLostPolls: 1 } })
     expect(lost).toMatchObject({ action: 'stay', code: 'too-late' })
     expect(lost.reason).toBe(
-      'Staying: current route is no longer offered, but the other route turns off in 0.1 miles, too late to take safely',
+      'Staying: the road ahead can no longer be routed, but the other route turns off in 0.1 miles, too late to take safely',
     )
     // Inside the cooldown it waits as well.
     const cooling = pollOnA({
       xM: 1000,
       nowSec: 100,
       etas: { B: 1500 },
+      baseline: {},
       options: { routeLostPolls: 1 },
       state: { ...INITIAL_REROUTE_STATE, lastSwitchAtSec: 0 },
     })
     expect(cooling).toMatchObject({ action: 'stay', code: 'cooldown' })
-    expect(pollOnA({ xM: 1000, etas: { B: 1500 }, options: { routeLostPolls: 1 } })).toMatchObject({
+    expect(pollOnA({ xM: 1000, etas: { B: 1500 }, baseline: {}, options: { routeLostPolls: 1 } })).toMatchObject({
       action: 'switch',
       code: 'route-lost',
+    })
+    // Without the answer to that request there is no switch, whatever routeLostPolls says.
+    expect(pollOnA({ xM: 1000, etas: { B: 1500 }, options: { routeLostPolls: 1 } })).toMatchObject({
+      action: 'stay',
+      code: 'route-unconfirmed',
     })
   })
 

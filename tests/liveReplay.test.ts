@@ -315,7 +315,9 @@ describe('a whole replayed drive through the live runner', () => {
     polls.forEach((t, i) => {
       if (i > 0) expect(t - polls[i - 1]!).toBeGreaterThanOrEqual(60)
     })
-    expect(drive.queries[0]).toMatchObject({ purpose: 'plan', driving: null, headingDeg: null })
+    expect(drive.queries[0]).toMatchObject({ purpose: 'plan', driving: null, headingDeg: null, baseline: false })
+    // Every check carries leave to ask for the current path itself, should the fresh routes lack it.
+    expect(drive.queries[1]).toMatchObject({ purpose: 'poll', baseline: true })
     expect(drive.queries.filter((q) => q.purpose === 'replan')).toEqual([])
     // Checks are asked from the road with the heading of travel, never more than the budget.
     expect(drive.queries[1]!.headingDeg).toBeCloseTo(90, 0)

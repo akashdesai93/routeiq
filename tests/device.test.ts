@@ -52,6 +52,40 @@ describe('speech queue rules', () => {
     expect(enqueueSpeech(queue, { text: '  ', priority: 'urgent' }).action).toBe('drop')
   })
 
+  it('a line that must be heard is not replaced while it waits: the follow-up is said after it', () => {
+    // A switch is being announced when the car leaves the route; a second later the new route is there.
+    const offRoute: SpokenLine = { ...urgent('You are off the route. Finding a new one.'), mustHear: true }
+    let queue = enqueueSpeech(EMPTY_SPEECH_QUEUE, urgent('Switching to a faster route.')).queue
+    queue = enqueueSpeech(queue, offRoute).queue
+    expect(queue.waiting).toBe(offRoute)
+    const followed = enqueueSpeech(queue, urgent('New route. 12 minutes to your destination.'))
+    expect(followed.action).toBe('wait')
+    expect(followed.queue.speaking!.text).toBe('Switching to a faster route.')
+    expect(followed.queue.waiting).toMatchObject({
+      text: 'You are off the route. Finding a new one. New route. 12 minutes to your destination.',
+      priority: 'urgent',
+      mustHear: true,
+    })
+    // A still newer follow-up takes the place of the older one, not of the reason: never more than two lines.
+    const again = enqueueSpeech(followed.queue, urgent('New route. 11 minutes to your destination.'))
+    expect(again.queue.waiting!.text).toBe('You are off the route. Finding a new one. New route. 11 minutes to your destination.')
+    // Something less important is still dropped.
+    expect(enqueueSpeech(again.queue, turn('In a mile, turn right.', 1600)).action).toBe('drop')
+    // Its turn comes: the reason first, in one go.
+    const next = speechFinished(again.queue)
+    expect(next.next!.text).toMatch(/^You are off the route\. Finding a new one\. New route\./)
+    expect(next.queue.waiting).toBeNull()
+    // Being spoken, it is not cut off by the follow-up either: that one waits, as any urgent line does.
+    const speaking = enqueueSpeech(EMPTY_SPEECH_QUEUE, offRoute).queue
+    expect(enqueueSpeech(speaking, urgent('New route. 12 minutes to your destination.'))).toMatchObject({
+      action: 'wait',
+      queue: { speaking: { text: offRoute.text }, waiting: { text: 'New route. 12 minutes to your destination.' } },
+    })
+    // And without the mark the old rule holds: of two equals the newer.
+    const plain = enqueueSpeech(enqueueSpeech(EMPTY_SPEECH_QUEUE, urgent('One.')).queue, urgent('Two.')).queue
+    expect(enqueueSpeech(plain, urgent('Three.')).queue.waiting!.text).toBe('Three.')
+  })
+
   it('moves the waiting line up when the spoken one ends', () => {
     let queue = enqueueSpeech(EMPTY_SPEECH_QUEUE, urgent('One.')).queue
     queue = enqueueSpeech(queue, urgent('Two.')).queue
@@ -112,6 +146,18 @@ describe('createSpeaker', () => {
     expect(texts()).toHaveLength(2)
     spoken[1]!.onend!()
     expect(texts().at(-1)).toBe('In a mile, turn right.')
+  })
+
+  it('off the route during another announcement: the driver hears why before the new route', () => {
+    const { speaker, spoken, texts } = fakeSynth()
+    speaker.say(urgent('Switching to a faster route. Saves 3 minutes.'))
+    speaker.say({ ...urgent('You are off the route. Finding a new one.'), mustHear: true })
+    speaker.say(urgent('New route. 12 minutes to your destination.'))
+    expect(texts()).toEqual(['Switching to a faster route. Saves 3 minutes.'])
+    spoken[0]!.onend!()
+    expect(texts().at(-1)).toBe('You are off the route. Finding a new one. New route. 12 minutes to your destination.')
+    spoken[1]!.onend!()
+    expect(texts()).toHaveLength(2)
   })
 
   it('muted it says nothing; the Start tap still primes the voice, silently', () => {

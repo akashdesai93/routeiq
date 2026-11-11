@@ -5,7 +5,6 @@ import {
   decideReroute,
   declineRoute,
   DEFAULT_REROUTE_OPTIONS,
-  findCurrentRoute,
   INITIAL_REROUTE_STATE,
   spokenDistance,
   spokenDuration,
@@ -237,8 +236,21 @@ export type LiveEvent =
   | { readonly type: 'start'; readonly nowMs: number; readonly destination: LngLat }
   | { readonly type: 'fix'; readonly nowMs: number; readonly fix: PositionFix }
   | { readonly type: 'position-error'; readonly nowMs: number; readonly kind: PositionErrorKind }
-  /** The answer to a 'request-routes' effect. `routes` null: the request failed (`message` says how). */
-  | { readonly type: 'routes'; readonly nowMs: number; readonly requestId: number; readonly routes: readonly RouteCandidate[] | null; readonly message?: string }
+  /**
+   * The answer to a 'request-routes' effect. `routes` null: the request failed (`message` says how).
+   * `baseline`: what came back when the current path itself was asked for (see the effect's
+   * `baseline` and RerouteObservation.baseline); left out or null when it was not asked or failed.
+   * `requests`: how many requests the answer took, when more than the one the effect counted.
+   */
+  | {
+      readonly type: 'routes'
+      readonly nowMs: number
+      readonly requestId: number
+      readonly routes: readonly RouteCandidate[] | null
+      readonly message?: string
+      readonly baseline?: readonly RouteCandidate[] | null
+      readonly requests?: number
+    }
   /** About once a second. */
   | { readonly type: 'tick'; readonly nowMs: number }
   | { readonly type: 'visibility'; readonly nowMs: number; readonly hidden: boolean }
@@ -261,6 +273,13 @@ export type LiveEffect =
       readonly origin: LngLat
       /** The direction of travel to send with the request. Null: none (standing still, or unknown). */
       readonly headingDeg: number | null
+      /**
+       * True when the shell may spend ONE more request on this check: if the
+       * fresh routes do not include the route being driven, it asks for that
+       * path itself (baselineProbe) and answers with it as `baseline`. False
+       * when the request budget has no room for it, and for anything but a check.
+       */
+      readonly baseline: boolean
     }
   | { readonly type: 'cancel-request' }
   | { readonly type: 'speak'; readonly line: SpokenLine }
@@ -292,7 +311,8 @@ export function switchLine(code: RerouteCode, savingSec: number | null, turnInM:
   const turn = turnInM === null ? '' : ` Turn in ${spokenDistance(turnInM)}.`
   if (code === 'off-route') return `New route. ${spokenDuration(newDurationSec)} to your destination.`
   if (code === 'faster-route' && savingSec !== null) return `Switching to a faster route. Saves ${spokenDuration(savingSec)}.${turn}`
-  return `Switching routes. The current route is no longer offered.${turn}`
+  // The only other switch (route-lost): asked several times, the provider found no route along the road ahead.
+  return `Switching routes. The road ahead on your route looks closed.${turn}`
 }
 
 export function arrivalLine(summary: LiveSummary): string {
@@ -404,7 +424,17 @@ function request(state: LiveState, purpose: RequestPurpose, nowMs: number, opts:
       lastRequestAtMs: nowMs,
       recheck: false,
     },
-    effects: [{ type: 'request-routes', requestId: id, purpose, origin, headingDeg }],
+    effects: [
+      {
+        type: 'request-routes',
+        requestId: id,
+        purpose,
+        origin,
+        headingDeg,
+        // Room for this request and one more within the budget of ordinary checks.
+        baseline: purpose === 'poll' && state.requestsUsed + 2 <= opts.maxRequests,
+      },
+    ],
   }
 }
 
@@ -441,7 +471,9 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
     const firstWord = !next.offRouteNotified
     if (firstWord) {
       next = { ...next, offRouteNotified: true, switchBanner: null, undo: null }
-      effects.push({ type: 'speak', line: { text: SPOKEN.offRoute, priority: 'urgent' } })
+      // Must be heard: the "New route" line that follows within a second or two would
+      // otherwise take its place in the queue, and the driver would never hear why.
+      effects.push({ type: 'speak', line: { text: SPOKEN.offRoute, priority: 'urgent', mustHear: true } })
     }
     // A new route at once, the first time, whatever was asked a moment ago. If the car is
     // still off after that (a car park, a road the map does not know), again only every
@@ -496,7 +528,14 @@ function planned(state: LiveState, routes: readonly RouteCandidate[] | null, mes
 }
 
 /** A check, or a search for a new route, has come back. */
-function checked(state: LiveState, routes: readonly RouteCandidate[] | null, message: string | undefined, nowMs: number, opts: LiveOptions): LiveStep {
+function checked(
+  state: LiveState,
+  routes: readonly RouteCandidate[] | null,
+  message: string | undefined,
+  baseline: readonly RouteCandidate[] | null | undefined,
+  nowMs: number,
+  opts: LiveOptions,
+): LiveStep {
   const sent = state.request!
   const route = state.route!
   const tracking = state.tracking!
@@ -512,6 +551,7 @@ function checked(state: LiveState, routes: readonly RouteCandidate[] | null, mes
       candidates: routes,
       // The tracker's verdict, not one reading: only a search for a new route says "off".
       offRouteM: sent.purpose === 'replan' ? Math.max(sent.distanceFromRouteM, rerouteOffRouteM + 1) : 0,
+      baseline,
     },
     opts.reroute,
   )
@@ -527,7 +567,7 @@ function checked(state: LiveState, routes: readonly RouteCandidate[] | null, mes
   next = { ...next, candidates: routes, lastCheckedAtMs: nowMs }
   const chosen = decision.action === 'switch' ? routes.find((c) => c.id === decision.toRouteId) : undefined
   if (chosen === undefined) {
-    const current = findCurrentRoute(route, sent.alongM, routes)
+    const current = decision.current
     const pending = decision.code === 'confirming' || decision.code === 'cooldown'
     return {
       state: {
@@ -559,7 +599,7 @@ function checked(state: LiveState, routes: readonly RouteCandidate[] | null, mes
         ? 'New route from here'
         : saving !== null
           ? `Switched to a faster route: saves ${spokenDuration(saving)}`
-          : 'Switched routes: the previous one is no longer offered',
+          : 'Switched routes: the road ahead looks closed',
       canKeep: !offRoute,
     },
     // Off the route there is no previous route to keep.
@@ -587,7 +627,10 @@ function checked(state: LiveState, routes: readonly RouteCandidate[] | null, mes
  * - **routes**: the first answer starts the drive on the best-ranked route. A
  *   later one goes to the reroute engine with the place the request was sent
  *   from; a switch is applied, announced, and can be undone for a few
- *   seconds. A failed check changes nothing but the engine's counter.
+ *   seconds. A failed check changes nothing but the engine's counter. When
+ *   the fresh routes did not include the route being driven, the shell has
+ *   asked for that path itself (one more request, counted) and the answer
+ *   comes along as `baseline`: the current route's like-for-like ETA.
  * - **keep-previous**: back to the route just left, and the engine is told
  *   not to offer the other one again for `noReturnSec`.
  * - **visibility**: a spell in the background is measured; on return the
@@ -644,7 +687,10 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       if (state.request === null || state.request.id !== event.requestId) return { state, effects: [] }
       if (state.request.purpose === 'plan') return planned(state, event.routes, event.message, event.nowMs, opts)
       if (state.status !== 'driving' || state.route === null || state.tracking === null) return { state: { ...state, request: null }, effects: [] }
-      return checked(state, event.routes, event.message, event.nowMs, opts)
+      // A second request made for this answer (the current path's own travel time) counts too.
+      const extra = Math.max(0, Math.round((event.requests ?? 1) - 1))
+      const counted = extra === 0 ? state : { ...state, requestsUsed: state.requestsUsed + extra }
+      return checked(counted, event.routes, event.message, event.baseline, event.nowMs, opts)
     }
     case 'keep-previous': {
       const { undo, route, tracking, switchBanner } = state

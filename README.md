@@ -302,8 +302,9 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 reroute.test.ts drives the reroute engine through scripted trips on a
                 made-up road network (helpers/driveWorld.ts) with a fake clock:
                 oscillating ETAs, a steady gain, a gain that comes too late, cooldown,
-                no return, no alternatives, missing data, failed polls, a current
-                route that is no longer offered, off route, freeway exits, tiny trips,
+                no return, no alternatives, missing data, failed polls, the same
+                route drawn differently (the patterns measured on real answers), a
+                current route missing from the answers, off route, freeway exits, tiny trips,
                 signals, determinism, and seeded random ETAs. drive.test.ts covers the
                 simulated clock, the request budget at 1x, 5x and 20x, the what-if
                 delay, a whole simulated drive offline, and the once-only signal
@@ -498,12 +499,25 @@ The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order
 1. A failed check changes nothing but a counter.
 2. Off route (the fresh routes start more than 50 m from the current route's line):
    take the best fresh route at once.
-3. Like for like: the fresh route that IS the rest of the current route (same path
-   within 10 m from the car to the destination; route ids are never compared between
-   checks) gives the current route's fresh ETA. Everything is compared with that.
-4. Current route no longer offered (Mapbox returns three routes at most): its ETA is
-   unknown. Nothing happens on one such check; after three in a row the best fresh
-   route is taken, if its turn-off is far enough ahead and the cooldown is over.
+3. Like for like: the fresh route that IS the rest of the current route gives the
+   current route's fresh ETA, and everything is compared with that. "Is" means the same
+   roads from the car to the destination, measured by overlap and not point by point:
+   at least 95% of the length of each line within 20 m of the other, no single stretch
+   apart longer than 400 m (nor the two lengths differing by more), both ending at the
+   same place, and the first 150 m after the car not compared. Route ids are never
+   compared between checks. A fresh route that is the same road with a small variation
+   (the other lane group at an exit, a corner drawn differently) is the current route
+   for this purpose and is never an alternative to it.
+4. Current route not among the fresh routes (Mapbox returns three at most): that alone
+   is no reason to leave a perfectly good road, so the route and its guidance are kept.
+   Its ETA is asked for by one more request, for the current path itself through via
+   points along it (see "The request"). If the answer is the current path with traffic
+   data, it is the baseline and rules 5 to 10 apply as always: a switch then is an
+   ordinary "faster route" with a real saving. If there is no usable answer: stay. Only
+   when Mapbox finds no route at all along the road ahead, three checks in a row, is
+   the road taken to be closed and the best fresh route taken (if its turn-off is far
+   enough ahead and the cooldown is over), announced as "The road ahead on your route
+   looks closed". Off the route (rule 2) is the tracker's verdict and stays as it was.
 5. Missing data (no alternative, no travel time, no typical duration to show the time
    includes traffic): stay.
 6. Minimum saving: at least 120 seconds AND at least 5% of the time left.
@@ -530,9 +544,13 @@ faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 
 | `noReturnSec`, `returnSavingFactor` | 600 s, 2x |
 | `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
 | `freewayLeadDistanceM` | 1200 m |
-| `routeLostPolls` | 3 |
+| `routeLostPolls` (checks in a row with no route along the road ahead) | 3 |
 | `offRouteM` | 50 m |
-| `sameRouteToleranceM` | 10 m |
+| `sameRouteToleranceM` (a point is on the current route: where an alternative turns off) | 10 m |
+| `matchToleranceM`, `matchMinOverlap` (a fresh route IS the current one) | 20 m, 0.95 |
+| `matchMaxGapM` (longest stretch apart, and largest difference in length) | 400 m |
+| `matchIgnoreStartM` (not compared after the query point) | 150 m |
+| `baselineViaSpacingM`, `baselineMaxViaPoints` (asking for the current path) | 3000 m, 6 |
 | `returnOverlapFraction` | 0.5 |
 | `requireTypicalDuration` | true |
 | `etaTieWindowSec` | 30 s |
@@ -559,6 +577,26 @@ which a check does not have; `avoid_maneuver_radius` (1 to 1000 m, no maneuver t
 close to the origin) exists for this case but is not used, because the engine's own
 too-late rule gives a reason that can be shown.
 
+**The second request (only when the current route is missing from the answer).** To
+get a travel time for one particular path, the request carries points of that path as
+extra coordinates and `waypoints=0;N` (N the index of the destination), which names
+only the first and last coordinate as waypoints: the ones between guide the path
+without adding legs or "arrive" steps ("silent" waypoints; the leg lists them under
+`via_waypoints`). Checked in the Mapbox Directions docs, Nov 2026: `waypoints` must
+include the first and last index, and every profile, `driving-traffic` included, takes
+up to 25 coordinates. `baselineProbe` (`src/core/reroute.ts`) picks the points: on the
+stretches of the current path that the fresh routes leave, one every 3 km, six at most,
+each with the route's heading as its `bearings` entry; `alternatives=false`. The answer
+is used only if it is the current path by the matching of rule 3. Measured on real
+answers (Nov 11, 2026): with 2 to 10 via points the answer was the current path in 10
+of 13 tries; with more than 8 coordinates in all `duration_typical` came back null,
+which the engine refuses to compare, hence the cap of six via points; and the time for
+a path asked this way ran 3 to 13% below Mapbox's time for the same path as an
+ordinary route (2016 s against 2297 s in the one pair taken minutes apart at the same
+place). Why is not known. It makes the current route look slightly better than it is,
+so the bias is towards staying. The request counts
+against the budget and is made only when a check leaves room for it.
+
 **Signals during a drive.** Fresh routes are counted from the bundled tiles like any
 other route. A check never passes `retryFailed`. Outside the bundle the plain tile
 source would ask Overpass again for a failed tile every 30 seconds to 8 minutes; a
@@ -572,20 +610,38 @@ next one on, until a switch or Clear. Log lines made with it are marked `[what-i
 It lives in `src/drive/simulation.ts`, outside `src/core`; the engine cannot tell and
 applies its normal rules. Note what follows a what-if switch: the delay is gone, the
 route just left is truly the faster one again, and the engine goes back to it by its
-own rules (after the cooldown and for twice the saving, or after three checks if Mapbox
-no longer offers the slower route it was moved to).
+own rules (after the cooldown and for twice the saving, measured against the travel
+time asked for the route it was moved to when Mapbox no longer offers that one).
 
 **Not covered by the simulation.** The car sits exactly on the route line at a steady
 speed. What real GPS needs before this engine (positions matched to the route, an
 off-route test with patience, a smoothed speed, and the position the directions query
 was sent from passed with its answer) is the live drive's job: see Live drive.
 
-**Seen with live traffic (Nov 11, 2026, mid-afternoon), in the simulated and the live
-drive alike:** on the first miles out of Uptown the fresh routes often did not contain
-the route being driven (rule 4), so after three checks the engine moved to the best
-fresh route ("current route is no longer offered"); further on the same road the match
-was exact at every check. Whether Mapbox really drops the route there or the 10 m
-path match is too strict for that stretch has not been established.
+**Why the matching is by overlap (measured Nov 11, 2026, mid-afternoon).** Until then
+rule 3 wanted every point of both lines within 10 m of the other, and rule 4 left a
+route after three checks without a match ("current route is no longer offered"). On
+the default trip that fired on the first miles out of Uptown with no traffic change.
+So 27 answers were collected from positions along two routes (Uptown to Indian Land;
+the airport to UNC Charlotte), with and without `bearings`, and each fresh route was
+laid over the rest of the route being driven:
+
+| What came back | Answers | Old match | Share within 10 / 20 / 30 m | Where it differed |
+| --- | --- | --- | --- | --- |
+| The current path exactly | 17 | yes | 100 / 100 / 100% | nowhere (under 3 m, start included) |
+| The current path, the other lane group at one freeway exit (first 3.3 km of the default trip, the only route returned) | 5 | no | 86 / 98 / 99.6% | three stretches of 160 to 280 m, 22 to 39 m apart, 21 to 24 km ahead |
+| The current path, one corner drawn differently (second route, from 11 km on) | 5 | no | 100 / 100 / 100% by length | one vertex 14.1 m off |
+| A different route (the second answer, when there was one) | 19 | no | 3 to 72% within 20 m | one or two stretches, 2.7 to 45 km in all |
+
+Mapbox returned the route being driven every time; the 10 m all-or-nothing test
+rejected it in 10 of 27. `bearings` made no difference to any answer, the start never
+snapped more than 2.5 m away, and the number of vertices differed without harm. With
+the rule above all 27 match and none of the 19 different routes does. A replay of the
+default trip at 20x then made 24 checks and no switch (the old test would have missed
+the first three and switched); with the what-if delay it made one, "Switching to a
+faster route. Saves 2 minutes. Turn in 3.5 miles." The current route was genuinely
+missing from an answer only after that what-if switch, on a route Mapbox itself
+ranked slower: that is the case rule 4 now handles by asking.
 
 ## Side-street probing (planned)
 
@@ -695,6 +751,10 @@ route. Finding a new one.", the new route after that, and the arrival. Decisions
 stay are never spoken. One line is spoken and at most one waits: a route change cuts
 off a turn prompt that is still more than 200 m from its turn, and waits behind one
 that is not; of two lines waiting, the more important stays, and of equals the newer.
+One line is marked as having to be heard: "You are off the route. Finding a new one."
+If it is still waiting when the new route is announced a second later, it is not
+replaced: the announcement is said straight after it as part of the same line, so
+the driver hears why the route changed, and there are still never more than two lines.
 Phone browsers only speak after a tap, so the Start tap itself says "RouteIQ started"
 (silently when muted, so that unmuting works later).
 
@@ -744,7 +804,10 @@ memory and nowhere else: it never becomes a pin, never enters the place book, th
 recents or the last trip, is never logged, and is gone when the drive ends. What leaves
 the device is what a route needs: the position (snapped to the route when on it) and
 the heading go to Mapbox as the origin of each route request, at most 60 times a drive
-plus a few when off the route. Spoken text is made on the device by the browser's own
+plus a few when off the route. When an answer does not contain the route being driven,
+one of those requests also carries up to six points of that route ahead of the car
+(points of a route Mapbox itself returned), to ask for its travel time. Spoken text is
+made on the device by the browser's own
 speech engine; RouteIQ sends it nowhere. The development replay uses a made-up position
 that starts at the origin pin, not the device's.
 

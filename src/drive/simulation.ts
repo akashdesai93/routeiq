@@ -1,4 +1,4 @@
-import { findCurrentRoute, type RouteCandidate } from '../core/index.ts'
+import { findCurrentRoute, type RerouteOptions, type RouteCandidate } from '../core/index.ts'
 
 /**
  * The pure parts of the simulated drive (PLAN step 6): the simulated clock,
@@ -126,9 +126,11 @@ export function withWhatIfDelay(
   route: Pick<RouteCandidate, 'geometry'>,
   alongM: number,
   delaySec: number,
+  /** The engine's thresholds in use, so the delay lands on the candidate the engine takes for the current route. */
+  rerouteOptions: Partial<RerouteOptions> = {},
 ): readonly RouteCandidate[] {
   if (!Number.isFinite(delaySec) || delaySec <= 0) return candidates
-  const current = findCurrentRoute(route, alongM, candidates)
+  const current = findCurrentRoute(route, alongM, candidates, rerouteOptions)
   if (current === null) return candidates
   return candidates.map((c) => (c === current ? { ...c, durationSec: c.durationSec + delaySec } : c))
 }

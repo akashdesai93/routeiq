@@ -153,6 +153,11 @@ export interface DriveScript {
   readonly eta: (name: RouteName, context: PollContext) => number | null
   /** Changes a poll's candidates before the engine sees them; null makes the poll fail. */
   readonly tamper?: (candidates: RouteCandidate[], context: PollContext) => readonly RouteCandidate[] | null
+  /**
+   * What a request for the current path itself answers at a poll (RerouteObservation.baseline),
+   * given the poll's candidates. Left out, or null: not asked.
+   */
+  readonly baseline?: (candidates: readonly RouteCandidate[], context: PollContext) => readonly RouteCandidate[] | null
   readonly options?: Partial<RerouteOptions>
 }
 
@@ -180,7 +185,7 @@ export interface DriveLog {
  * No network, no timers, no randomness.
  */
 export function drive(script: DriveScript): DriveLog {
-  const { start = 'A', startAlongM = 0, speedMps = 5, pollEverySec = 60, polls, eta, tamper, options = {} } = script
+  const { start = 'A', startAlongM = 0, speedMps = 5, pollEverySec = 60, polls, eta, tamper, baseline, options = {} } = script
   let on: RouteName = start
   let route: Pick<RouteCandidate, 'geometry' | 'maneuvers' | 'limitedAccessSpansM'> = {
     geometry: LINES[start],
@@ -215,7 +220,8 @@ export function drive(script: DriveScript): DriveLog {
     }
     const candidates = tamper ? tamper(offered, context) : offered
 
-    const decision = decideReroute(state, { nowSec, route, positionAlongM: alongM, speedMps, candidates }, options)
+    const asked = candidates === null || baseline === undefined ? null : baseline(candidates, context)
+    const decision = decideReroute(state, { nowSec, route, positionAlongM: alongM, speedMps, candidates, baseline: asked }, options)
     records.push({ nowSec, on, decision, stateBefore: state })
     state = decision.nextState
     if (decision.action === 'switch') {

@@ -59,8 +59,9 @@ function session(options: Partial<LiveOptions> = {}) {
       return send({ type: 'fix', nowMs: nowMs(), fix: { lng, lat, accuracyM: 8, speedMps: null, headingDeg: null, timeMs: nowMs(), ...extra } })
     },
     tick: () => send({ type: 'tick', nowMs: nowMs() }),
-    answer(routes: readonly RouteCandidate[] | null, message?: string) {
-      return send({ type: 'routes', nowMs: nowMs(), requestId: state.request!.id, routes, message })
+    answer(routes: readonly RouteCandidate[] | null, message?: string, baseline?: readonly RouteCandidate[] | null) {
+      const requests = baseline === undefined ? undefined : 2
+      return send({ type: 'routes', nowMs: nowMs(), requestId: state.request!.id, routes, message, baseline, requests })
     },
     requests: () => effects.filter((e): e is { atSec: number; effect: Requested } => e.effect.type === 'request-routes'),
     spoken: () => effects.flatMap((e) => (e.effect.type === 'speak' ? [e.effect.line.text] : [])),
@@ -355,6 +356,70 @@ describe('checks that change nothing', () => {
   })
 })
 
+describe('the route being driven is not among the fresh routes', () => {
+  it('keeps the route and its guidance, says nothing, and lets the shell ask for the current path', () => {
+    const s = driving()
+    const route = s.state.route
+    // Ten checks in a row come back with B and C only. (The old rule left the route after three.)
+    cruise(s, 620, (xM) => routesAt(xM, { B: 1250, C: 1280 }), 5)
+    expect(s.state.route).toBe(route)
+    expect(s.state.switches).toEqual([])
+    expect(s.spoken()).toEqual([])
+    expect(s.state.switchBanner).toBeNull()
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    expect(s.state.tracking!.alongRouteM).toBeCloseTo(3100, -2)
+    expect(s.view().offRoute).toBe(false)
+    // Every check carried leave for one more request; the first route did not.
+    expect(s.requests().map((p) => p.effect.baseline)).toEqual([false, ...Array<boolean>(10).fill(true)])
+  })
+
+  it('the answer for the current path is the like-for-like ETA: shown, counted, and what a switch is measured against', () => {
+    const s = driving()
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    // B alone comes back; asked for the main road itself, the provider says 1200 s. B saves 50 s: stay.
+    s.answer(routesAt(900, { B: 1150 }), undefined, routesAt(900, { A: 1200 }))
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'saving-too-small' })
+    expect(s.state.eta).toMatchObject({ durationSec: 1200 })
+    // Two requests went into that check.
+    expect(s.state.requestsUsed).toBe(3)
+    // From now on the main road is five minutes slower than B: confirmed over two checks, then an ordinary switch.
+    for (let t = 61; t <= 180; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null) s.answer(routesAt(15 * t, { B: 1000 }), undefined, routesAt(15 * t, { A: 1300 }))
+    }
+    expect(s.state.switches).toHaveLength(1)
+    expect(s.state.switches[0]).toMatchObject({ code: 'faster-route' })
+    expect(s.spoken()).toEqual(['Switching to a faster route. Saves 5 minutes. Turn in 1.4 miles.'])
+    expect(s.state.requestsUsed).toBe(7)
+  })
+
+  it('leave for the second request ends when the budget has no room for it', () => {
+    const s = driving({ maxRequests: 4 })
+    cruise(s, 200, (xM) => routesAt(xM, { A: 1300 }))
+    // Requests 2 and 3 could each have been followed by one more; the fourth and last could not.
+    expect(s.requests().map((p) => p.effect.baseline)).toEqual([false, true, true, false])
+  })
+
+  it('asked three times for the road ahead and no route found along it: switches, and says why', () => {
+    const s = driving()
+    cruise(s, 59)
+    for (let t = 60; t <= 180; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null) s.answer(routesAt(15 * t, { B: 1250 }), undefined, [])
+    }
+    expect(s.state.switches).toHaveLength(1)
+    expect(s.state.switches[0]).toMatchObject({ code: 'route-lost', atMs: s.nowMs() })
+    expect(s.spoken()).toEqual(['Switching routes. The road ahead on your route looks closed. Turn in 1.4 miles.'])
+    expect(s.state.switchBanner).toMatchObject({ text: 'Switched routes: the road ahead looks closed', canKeep: true })
+  })
+})
+
 describe('switching by itself', () => {
   /** B saves five minutes from the first check on. */
   const faster = (xM: number) => routesAt(xM, { A: 1300, B: 1000 })
@@ -511,6 +576,9 @@ describe('off the route', () => {
     // not a minute, and from the device's position, not from the route line.
     expect(effects.map((e) => e.type)).toEqual(['speak', 'request-routes'])
     expect(s.spoken()).toEqual(['You are off the route. Finding a new one.'])
+    // Marked so that the "New route" line a second later cannot take its place in the voice's queue.
+    expect(effects[0]).toMatchObject({ line: { priority: 'urgent', mustHear: true } })
+    expect(effects[1]).toMatchObject({ purpose: 'replan', baseline: false })
     const replan = s.requests().at(-1)!
     expect(replan).toMatchObject({ atSec: 70, effect: { purpose: 'replan', origin: at(1050, 120) } })
     expect(s.view()).toMatchObject({ offRoute: true, nextTurn: null, statusLine: 'Off the route. Finding a new one…' })
