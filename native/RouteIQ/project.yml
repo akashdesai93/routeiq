@@ -32,6 +32,11 @@ targets:
     platform: iOS
     sources:
       - path: RouteIQ
+      # The OpenStreetMap signal tiles packed into one file, and their ODbL
+      # license, written by native/scripts/pack-signal-bundle.mjs before the
+      # project is generated. Not optional: a build without them fails here.
+      - path: Resources
+        buildPhase: resources
     configFiles:
       Debug: Config/App.xcconfig
       Release: Config/App.xcconfig

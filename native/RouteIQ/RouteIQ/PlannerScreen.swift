@@ -11,7 +11,13 @@ struct PlannerScreen: View {
     /// Bumped by "Try again". `.task(id:)` cancels the running load and starts a new one.
     @State private var attempt = 0
 
+    @State private var signalCredit: String?
+
     private let tokenStatus = MapboxToken.check(Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String)
+
+    /// The OpenStreetMap signal tiles shipped in the app (osm-signals.json, packed by
+    /// native/scripts/pack-signal-bundle.mjs), read once in the background.
+    private static let signals = SignalBundleLoader(url: Bundle.main.url(forResource: "osm-signals", withExtension: "json"))
 
     private var rows: [RouteRow] {
         if case .routes(let rows) = plan { return rows }
@@ -48,10 +54,18 @@ struct PlannerScreen: View {
                 }
                 .padding()
             case .routes(let rows):
-                List(rows) { row in
-                    RouteRowView(row: row, isSelected: row.id == (selectedId ?? rows.first?.id))
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedId = row.id }
+                List {
+                    ForEach(rows) { row in
+                        RouteRowView(row: row, isSelected: row.id == (selectedId ?? rows.first?.id))
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedId = row.id }
+                    }
+                    if let signalCredit {
+                        // The OpenStreetMap license asks for this credit wherever the data is used.
+                        Text(signalCredit)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .listStyle(.plain)
             }
@@ -69,9 +83,11 @@ struct PlannerScreen: View {
             destination: DemoTrip.destination.position,
             token: token
         )
+        let bundle = await Self.signals.bundle()
         // A load that was replaced by a newer one leaves the screen to it.
         if Task.isCancelled { return }
-        plan = RoutePlan.from(result)
+        signalCredit = bundle?.creditLine
+        plan = RoutePlan.from(result, signals: bundle)
         selectedId = nil
     }
 }

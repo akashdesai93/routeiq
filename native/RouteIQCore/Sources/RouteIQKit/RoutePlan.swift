@@ -50,6 +50,14 @@ public enum RoutePlan: Hashable, Sendable {
         }
     }
 
+    /// The plan for a Directions answer, with each route's signals counted
+    /// from the bundled tiles the routes touch. Nil `signals` (no bundle in
+    /// the app) leaves every count unknown.
+    public static func from(_ result: Directions.Result, signals bundle: SignalBundle?) -> RoutePlan {
+        guard let bundle, case .ok(let routes) = result else { return from(result) }
+        return from(result, signalData: bundle.signalData(for: routes).data)
+    }
+
     /// The plan for a Directions answer.
     public static func from(_ result: Directions.Result, signalData: SignalData? = nil) -> RoutePlan {
         switch result {
