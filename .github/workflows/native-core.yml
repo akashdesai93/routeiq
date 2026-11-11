@@ -5,6 +5,7 @@ name: native-core
 # macOS one for a private repository) is enough. The GitHub-hosted
 # ubuntu-24.04 image ships a Swift toolchain, so nothing is downloaded.
 
+# Public repository: Linux and macOS minutes are free.
 on:
   push:
     paths:
