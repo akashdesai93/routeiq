@@ -31,13 +31,30 @@ Not ported yet:
 
 ## Running the tests
 
-There is no Swift toolchain on the Windows PC. CI runs them:
+CI runs them with
 [`.github/workflows/native-core.yml`](../../.github/workflows/native-core.yml) on
 `ubuntu-24.04`, which ships Swift 6.4. Anywhere with Swift 5.9 or newer:
 
 ```bash
 cd native/RouteIQCore && swift test
 ```
+
+**On the Windows PC.** Swift 6.4.2 is installed with `winget install --id Swift.Toolchain`,
+next to Visual Studio 2022 with the C++ x64 tools and the Windows 11 SDK (22621). Run swift
+from an "x64 Native Tools Command Prompt for VS 2022", so that `link.exe` and the C headers
+are found. Use the classic build system: in 6.4.2 the default one does not find the
+Windows C headers (`'stdlib.h' file not found`).
+
+```bat
+cd native\RouteIQCore
+swift test --build-system native
+```
+
+On 2026-11-11 all 159 tests passed there in about 9 s. The suite also caught each of three
+bugs planted on purpose:
+- the minimum saving set to 119 s
+- Swift rounding in place of JavaScript rounding in the route id hash
+- the 30 s tie window made exclusive
 
 ## Same behaviour as the TypeScript, on purpose
 
