@@ -10,7 +10,11 @@ export default defineConfig({
     host: 'localhost',
     port: 5173,
     strictPort: true,
+    // design/ is a separate project with its own dev server; don't watch it.
+    watch: { ignored: ['**/design/**'] },
   },
+  // Only scan the app's own page for dependencies, not design/index.html.
+  optimizeDeps: { entries: ['index.html'] },
   build: {
     // Mapbox GL JS alone is about 1.5 MB minified, so the default 500 kB warning always fires.
     chunkSizeWarningLimit: 2000,

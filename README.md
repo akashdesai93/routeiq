@@ -357,6 +357,23 @@ e2e/            Playwright end-to-end scenarios (see End-to-end scenarios): *.sp
 check-prereqs.ps1  Windows prerequisite check.
 ```
 
+## Design workspace
+
+`design/` holds the UI design explorations for the iPhone app (the three
+directions and the merged direction for #21 and #22), built with the
+[Stageshow](https://benji.org/stageshow) skill. It is a separate project with
+its own `package.json`: the root `npm ci`, typecheck, lint, tests and e2e do not
+touch it.
+
+```
+cd design
+npm install
+npm run dev        # http://127.0.0.1:5273
+```
+
+Decisions, stages and export commands are in `design/README.md`; the exports
+to look at are in `design/exports/merged/`.
+
 ## Data sources
 
 - **Routes and map:** Mapbox Directions API (`driving-traffic`) and Mapbox GL JS, with
