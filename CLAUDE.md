@@ -88,6 +88,11 @@ a PR. When nothing is ready, it files new `triage` issues instead. Loops never p
   to the owner. Other sessions don't merge.
 - **Status board:** pinned issue #17. Every session posts with `/status` when it starts,
   ships, gets blocked or stops, and at least once an hour while working.
+- **Check in on start (required):** the first thing any session working on RouteIQ does is
+  send the orchestrator a 5-line status (goal, branch/worktree, files you touch, done, next)
+  with SendMessage. Find it in `ListAgents`: it's the CLI session whose cwd is
+  `C:\Users\akash\dev`, and its current name is on #17. Message it again when you ship,
+  get blocked or stop. The fleet mod also greets new RouteIQ sessions automatically.
 - **Before editing:** run `mcp__fleet__roster` (the fleet mod) or `ListAgents` to see who
   else is in the repo, and `mcp__fleet__brief <id>` to read their context. Work in your
   own worktree. Never edit another session's uncommitted files.
