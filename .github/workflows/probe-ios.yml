@@ -1,0 +1,121 @@
+name: Probe iOS (unsigned ipa)
+
+# Builds native/probe into an UNSIGNED .ipa for sideloading. Nothing here signs,
+# uploads to Apple, or uses a secret.
+#
+# macOS minutes are billed at 10x on a private repo, so this only runs when the
+# probe (or this file) changes on the native-probe branch, or when started by
+# hand. GitHub only offers the "Run workflow" button once this file exists on
+# the default branch; until then, a push to native-probe is the trigger.
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-probe]
+    paths:
+      - 'native/probe/**'
+      - '.github/workflows/probe-ios.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned ipa
+    # Capacitor 8 needs Xcode 26 or newer, which is the default on macos-26.
+    runs-on: macos-26
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: native/probe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (log summary, Info.plist patch)
+        run: npm test
+
+      - name: Bundle the web page
+        run: npm run build
+
+      - name: Generate and patch the Xcode project
+        run: npm run ios:generate
+
+      - name: Build for a generic iOS device, unsigned
+        run: |
+          mkdir -p build
+          status=0
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build > build/xcodebuild.log 2>&1 || status=$?
+          # The full log is long; show compiler diagnostics and the ending.
+          grep -E "(error|warning): " build/xcodebuild.log | sort -u | head -100 || true
+          tail -30 build/xcodebuild.log
+          if [ "$status" -ne 0 ]; then
+            echo "::error::xcodebuild failed with status $status"
+            exit "$status"
+          fi
+
+      - name: Check the built app
+        run: |
+          APP=build/derived/Build/Products/Release-iphoneos/App.app
+          test -d "$APP"
+          plutil -p "$APP/Info.plist" | grep -A3 UIBackgroundModes
+          plutil -extract UIBackgroundModes json -o - "$APP/Info.plist" | grep -q location
+          plutil -extract UIBackgroundModes json -o - "$APP/Info.plist" | grep -q audio
+          plutil -extract NSLocationAlwaysAndWhenInUseUsageDescription raw "$APP/Info.plist" > /dev/null
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")" = "dev.routeiq.probe"
+          plutil -extract MinimumOSVersion raw "$APP/Info.plist"
+          lipo -info "$APP/App"
+          test -f "$APP/public/app.js"
+          grep -q ProbeNativePlugin "$APP/capacitor.config.json"
+          ls "$APP/Frameworks" 2>/dev/null || echo "(no embedded frameworks)"
+
+      - name: Package Payload/App.app as an ipa
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/derived/Build/Products/Release-iphoneos/App.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../RouteIQ-Probe-unsigned.ipa Payload)
+          ls -lh build/RouteIQ-Probe-unsigned.ipa
+          echo "ipa size: $(du -h build/RouteIQ-Probe-unsigned.ipa | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: RouteIQ-Probe-unsigned
+          path: native/probe/build/RouteIQ-Probe-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xcodebuild-log
+          path: native/probe/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7

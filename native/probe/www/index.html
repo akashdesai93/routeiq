@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>RouteIQ Probe</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #111111;
+        --muted: #555555;
+        --line: #cccccc;
+        --bad: #b00020;
+        --good: #0a7a2f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #000000;
+          --fg: #f2f2f2;
+          --muted: #aaaaaa;
+          --line: #444444;
+          --bad: #ff6b6b;
+          --good: #4cd964;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 20px/1.35 -apple-system, system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 4px;
+      }
+      #state {
+        font-size: 34px;
+        font-weight: 700;
+        margin: 8px 0;
+      }
+      #state.on {
+        color: var(--good);
+      }
+      #state.off {
+        color: var(--muted);
+      }
+      .buttons {
+        display: grid;
+        gap: 12px;
+        margin: 12px 0;
+      }
+      button {
+        font: inherit;
+        font-size: 30px;
+        font-weight: 700;
+        min-height: 84px;
+        border-radius: 16px;
+        border: 2px solid var(--fg);
+        background: var(--bg);
+        color: var(--fg);
+      }
+      button#start {
+        background: var(--good);
+        border-color: var(--good);
+        color: #ffffff;
+      }
+      button:disabled {
+        opacity: 0.35;
+      }
+      #message {
+        min-height: 1.4em;
+      }
+      .bad {
+        color: var(--bad);
+      }
+      #live {
+        white-space: pre-line;
+        font-size: 22px;
+        margin: 8px 0 16px;
+      }
+      h2 {
+        font-size: 24px;
+        margin: 20px 0 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        display: block;
+        text-align: left;
+        padding: 0;
+      }
+      th {
+        font-size: 16px;
+        font-weight: 400;
+        color: var(--muted);
+        padding-top: 10px;
+      }
+      td {
+        font-size: 22px;
+        font-weight: 600;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+        overflow-wrap: anywhere;
+      }
+      tr.bad td {
+        color: var(--bad);
+      }
+      p.small {
+        font-size: 15px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>RouteIQ Probe</h1>
+    <div id="state" class="off">STOPPED</div>
+    <div id="message"></div>
+    <div class="buttons">
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="export">Export log</button>
+    </div>
+    <div id="live"></div>
+    <h2 id="summaryTitle">No session recorded yet</h2>
+    <table id="summary"></table>
+    <p class="small">
+      Speaks every 30 s and makes one small web request every 60 s. Location is counted, never stored or
+      sent. Red rows need a look.
+    </p>
+    <script src="app.js"></script>
+  </body>
+</html>

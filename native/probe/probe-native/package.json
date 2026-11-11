@@ -1,0 +1,7 @@
+{
+  "name": "routeiq-probe-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Capacitor plugin: native location, speech, fetch and log for the RouteIQ Probe.",
+  "capacitor": { "ios": { "src": "ios" } }
+}
