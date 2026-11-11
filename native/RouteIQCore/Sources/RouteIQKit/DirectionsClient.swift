@@ -10,24 +10,65 @@ public protocol HTTPTransport: Sendable {
     func get(_ url: URL) async throws -> (status: Int, body: Data)
 }
 
-/// The real transport: URLSession, no caching, a 20 s timeout.
-public struct URLSessionTransport: HTTPTransport {
-    public init() {}
+/// The real transport: URLSession, no caching, a 20 s timeout. Cancelling
+/// the calling Task cancels the request itself, so a replaced reroute poll
+/// does not keep a connection open until its timeout.
+public struct URLSessionTransport: HTTPTransport, @unchecked Sendable {
+    let session: URLSession
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     public func get(_ url: URL) async throws -> (status: Int, body: Data) {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.httpMethod = "GET"
-        return try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.dataTask(with: request) { data, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+        let handle = DataTaskHandle()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = session.dataTask(with: request) { data, response, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    continuation.resume(returning: (status, data ?? Data()))
                 }
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                continuation.resume(returning: (status, data ?? Data()))
+                // Started only if the Task was not cancelled first; else cancelled at once.
+                handle.start(task)
             }
-            task.resume()
+        } onCancel: {
+            handle.cancel()
         }
+    }
+}
+
+/// The data task of one request, shared between the request and its
+/// cancellation handler, which can run on any thread and even before the
+/// task exists.
+final class DataTaskHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+
+    func start(_ task: URLSessionDataTask) {
+        lock.lock()
+        self.task = task
+        let alreadyCancelled = cancelled
+        lock.unlock()
+        // Always resumed first: a running task that is cancelled calls its
+        // completion handler with URLError.cancelled, so the continuation
+        // is resumed on every platform.
+        task.resume()
+        if alreadyCancelled { task.cancel() }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = self.task
+        lock.unlock()
+        task?.cancel()
     }
 }
 
