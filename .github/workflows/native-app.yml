@@ -34,7 +34,9 @@ permissions:
 jobs:
   build:
     name: Build unsigned ipa
-    runs-on: macos-15
+    # Mapbox ships its 3.34.2 binaries built with Swift 6.3.2 (Xcode 26), which
+    # Xcode 16 cannot read, so this needs the macos-26 image.
+    runs-on: macos-26
     timeout-minutes: 45
     defaults:
       run:
@@ -42,10 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Select Xcode 16.4
+      - name: Select Xcode 26.6
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.4.app
+          sudo xcode-select -s /Applications/Xcode_26.6.app
           xcodebuild -version
+          swift --version
 
       - name: Install XcodeGen
         run: |
