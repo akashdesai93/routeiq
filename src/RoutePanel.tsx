@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import {
   delayVsTypicalSec,
   formatDelay,
@@ -6,7 +6,12 @@ import {
   formatDistance,
   formatDuration,
   formatSignalCount,
+  GOOGLE_MAPS_MAX_WAYPOINTS,
+  GOOGLE_MAPS_MAX_WAYPOINTS_MOBILE,
+  googleMapsUrl,
+  handoffWaypoints,
   signalCountNote,
+  wazeUrl,
   type RankedRoute,
   type RouteCandidate,
 } from './core/index.ts'
@@ -30,6 +35,12 @@ interface RoutePanelProps {
   onStartDrive?: () => void
   /** False while a live drive cannot start (no token). */
   canStartDrive?: boolean
+  /**
+   * True when the trip's origin is the device's own position ("Use my location").
+   * The Google Maps link then leaves the origin out, so Google starts from its own
+   * reading of the device's position and RouteIQ sends the location to no one.
+   */
+  originIsDeviceLocation?: boolean
   /** Shown under the Start drive button: the development replay controls. */
   startDriveExtra?: ReactNode
   /** Shown under the route list: the simulated drive controls. */
@@ -52,6 +63,52 @@ function signalHoverText(route: RouteCandidate): string | undefined {
 }
 
 /**
+ * Google Maps takes 3 waypoints in a mobile browser and 9 elsewhere. The app
+ * hands off to the phone's Maps app, so anything that looks like a phone or
+ * tablet gets the mobile limit.
+ */
+function isMobileBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const hinted = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile
+  if (hinted !== undefined) return hinted
+  // iPadOS Safari reports a Mac user agent; a Mac with touch is an iPad.
+  const iPad = /Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1
+  return iPad || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+}
+
+/** Links that open the selected route in Google Maps (pinned by waypoints) and Waze (destination only). */
+function HandoffLinks({
+  route,
+  alternatives,
+  fromDevice,
+}: {
+  route: RouteCandidate
+  alternatives: readonly RouteCandidate[]
+  fromDevice: boolean
+}) {
+  const links = useMemo(() => {
+    const origin = route.geometry[0]
+    const destination = route.geometry.at(-1)
+    if (origin === undefined || destination === undefined) return null
+    const maxWaypoints = isMobileBrowser() ? GOOGLE_MAPS_MAX_WAYPOINTS_MOBILE : GOOGLE_MAPS_MAX_WAYPOINTS
+    const waypoints = handoffWaypoints(route, alternatives, { maxWaypoints })
+    return { google: googleMapsUrl(fromDevice ? null : origin, destination, waypoints), waze: wazeUrl(destination) }
+  }, [route, alternatives, fromDevice])
+  if (links === null) return null
+  return (
+    <p className="handoff">
+      <a href={links.google} target="_blank" rel="noopener">
+        Open in Google Maps
+      </a>
+      {' · '}
+      <a href={links.waze} target="_blank" rel="noopener">
+        Open in Waze
+      </a>
+    </p>
+  )
+}
+
+/**
  * Lists the routes in rank order with each one's facts and the reason for its
  * place. Presentation only: the numbers, the order and the wording of the
  * reasons come from src/core. Highlighting follows the selection, not the rank.
@@ -69,10 +126,12 @@ export function RoutePanel({
   signalDataDate = null,
   onStartDrive,
   canStartDrive = true,
+  originIsDeviceLocation = false,
   startDriveExtra,
   children,
 }: RoutePanelProps) {
   const dataMonth = formatDataMonth(signalDataDate)
+  const candidates = useMemo(() => ranked.map((r) => r.route), [ranked])
   return (
     <aside className="panel" aria-label="Routes">
       <h2>Routes</h2>
@@ -120,6 +179,7 @@ export function RoutePanel({
               <span className="route-delay">{formatDelay(delayVsTypicalSec(route))}</span>
               <span className="route-reasons">{reasons.join(' · ')}</span>
             </button>
+            {route.id === selectedId && <HandoffLinks route={route} alternatives={candidates} fromDevice={originIsDeviceLocation} />}
           </li>
         ))}
       </ol>

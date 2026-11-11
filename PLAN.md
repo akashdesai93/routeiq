@@ -181,6 +181,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
      ordered points out, with tests for the limits and URL encoding.
    - Both Google Maps and Waze already run on CarPlay, so hand-off is a way to drive
      a RouteIQ-chosen route in the car before RouteIQ has its own CarPlay entitlement.
+   Done (Nov 11, 2026): `handoffWaypoints`, `googleMapsUrl` and `wazeUrl` in
+   `src/core/handoff.ts`, thresholds in `DEFAULT_HANDOFF_OPTIONS`, two links on the
+   selected route in RoutePanel (README, Route hand-off). Open for later: try the links
+   in the iPhone Google Maps app (how many waypoints it really accepts, and whether it
+   keeps them when opened from Safari); leg-by-leg Waze (navigate to each pin in turn);
+   the native app should use the `comgooglemaps://` and `waze://` schemes when installed.
 10. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
     faster cut-through that is not among them is never considered. Widen the search:

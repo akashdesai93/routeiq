@@ -166,6 +166,17 @@ export {
   type TrackingState,
 } from './tracking.ts'
 export {
+  DEFAULT_HANDOFF_OPTIONS,
+  GOOGLE_MAPS_MAX_URL_LENGTH,
+  GOOGLE_MAPS_MAX_WAYPOINTS,
+  GOOGLE_MAPS_MAX_WAYPOINTS_MOBILE,
+  googleMapsUrl,
+  handoffWaypoints,
+  wazeUrl,
+  type HandoffOptions,
+  type HandoffWaypoint,
+} from './handoff.ts'
+export {
   DEFAULT_PROBE_OPTIONS,
   selectViaPoints,
   type ProbeOptions,

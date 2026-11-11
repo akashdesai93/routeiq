@@ -455,6 +455,24 @@ describe('RoutePanel', () => {
     expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
   })
 
+  it('offers Google Maps and Waze hand-off links on the selected route only', () => {
+    const routes = [route('route-0', 900, 780), route('route-1', 840, null)]
+    const html = renderToString(<RoutePanel {...idle} ranked={rankRoutes(routes)} selectedId="route-1" />)
+    expect(html.match(/Open in Google Maps/g)).toHaveLength(1)
+    expect(html.match(/Open in Waze/g)).toHaveLength(1)
+    expect(html).toContain(
+      'href="https://www.google.com/maps/dir/?api=1&amp;origin=35.220000%2C-80.840000&amp;destination=35.150000%2C-80.830000&amp;travelmode=driving"',
+    )
+    expect(html).toContain('href="https://waze.com/ul?ll=35.150000%2C-80.830000&amp;navigate=yes"')
+    expect(html.match(/target="_blank" rel="noopener"/g)).toHaveLength(2)
+    expect(renderToString(<RoutePanel {...idle} ranked={rankRoutes(routes)} selectedId={null} />)).not.toContain('Open in')
+    const fromHere = renderToString(
+      <RoutePanel {...idle} ranked={rankRoutes(routes)} selectedId="route-1" originIsDeviceLocation />,
+    )
+    expect(fromHere).toContain('href="https://www.google.com/maps/dir/?api=1&amp;destination=35.150000%2C-80.830000')
+    expect(fromHere).not.toContain('origin=')
+  })
+
   it('lists routes in rank order with one Recommended badge and a reason under each', () => {
     // Given slowest first; the panel shows them as ranked.
     const routes = [
