@@ -76,6 +76,14 @@ export interface RerouteOptions {
    */
   readonly matchMaxGapM: number
   /**
+   * ...and no point of either line may run farther than this from the other,
+   * in meters. The stretches apart that the rules above allow are the way the
+   * same road comes back drawn (the farthest measured: 39 m, the other lane
+   * group at a freeway exit); a street one block over runs a hundred meters
+   * or more away, and is another route however short the stretch (#41).
+   */
+  readonly matchMaxDivergenceM: number
+  /**
    * The first meters after the query point are not compared: the provider
    * snaps the start to a road its own way (the other side of a divided road,
    * a parallel street), and the two lines join a moment later.
@@ -127,6 +135,7 @@ export const DEFAULT_REROUTE_OPTIONS: RerouteOptions = {
   matchToleranceM: 20,
   matchMinOverlap: 0.95,
   matchMaxGapM: 400,
+  matchMaxDivergenceM: 50,
   matchIgnoreStartM: 150,
   baselineViaSpacingM: 3000,
   baselineMaxViaPoints: 6,
@@ -302,6 +311,7 @@ function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
     matchToleranceM: numberOr(options.matchToleranceM, d.matchToleranceM),
     matchMinOverlap: Math.min(1, numberOr(options.matchMinOverlap, d.matchMinOverlap)),
     matchMaxGapM: numberOr(options.matchMaxGapM, d.matchMaxGapM),
+    matchMaxDivergenceM: numberOr(options.matchMaxDivergenceM, d.matchMaxDivergenceM),
     matchIgnoreStartM: numberOr(options.matchIgnoreStartM, d.matchIgnoreStartM),
     baselineViaSpacingM: Math.max(1, numberOr(options.baselineViaSpacingM, d.baselineViaSpacingM)),
     baselineMaxViaPoints: Math.max(1, Math.round(numberOr(options.baselineMaxViaPoints, d.baselineMaxViaPoints))),
@@ -335,12 +345,13 @@ export function spokenDistance(meters: number): string {
 }
 
 /** The closest point of a line to P: how far it is, and where along the line (as segment index and share of it). */
-function nearestOnLine(p: XY, line: readonly XY[]): { distanceM: number; index: number; t: number } {
+function nearestOnLine(p: XY, line: readonly XY[], meter?: MatchMeter): { distanceM: number; index: number; t: number } {
   let best = { distanceM: Infinity, index: 0, t: 0 }
   const only = line[0]
   if (line.length === 1 && only !== undefined) {
     return { distanceM: Math.hypot(p[0] - only[0], p[1] - only[1]), index: 0, t: 0 }
   }
+  if (meter !== undefined) meter.segmentChecks += line.length - 1
   for (let i = 1; i < line.length; i++) {
     const hit = pointToSegment(p, line[i - 1]!, line[i]!)
     if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, index: i - 1, t: hit.t }
@@ -364,57 +375,140 @@ function lengthOf(line: readonly XY[]): number {
 }
 
 /**
- * Answers "is this point within the tolerance of `line`" for points that
- * come in driving order: the search starts at the segment the last point was
- * near, so walking two lines that run together costs a few segments a point,
- * and only a point that is apart looks at the whole line.
+ * Counts the work of matching (findCurrentRoute), for tests and benchmarks:
+ * point-to-segment distance checks, and entries put in a segment grid. A
+ * count, not a time, so that it is the same on every machine.
  */
-function nearWalker(line: readonly XY[], toleranceM: number): (p: XY) => boolean {
-  const segments = line.length - 1
-  let hint = 0
-  return (p) => {
-    for (let k = 0; k < segments; k++) {
-      const i = (hint + k) % segments
-      const a = line[i]!
-      const b = line[i + 1]!
-      // Outside the segment's box by more than the tolerance: not worth measuring.
-      if (
-        p[0] < Math.min(a[0], b[0]) - toleranceM ||
-        p[0] > Math.max(a[0], b[0]) + toleranceM ||
-        p[1] < Math.min(a[1], b[1]) - toleranceM ||
-        p[1] > Math.max(a[1], b[1]) + toleranceM
-      ) {
-        continue
-      }
-      if (pointToSegment(p, a, b).distanceM <= toleranceM) {
-        hint = i
-        return true
+export interface MatchMeter {
+  segmentChecks: number
+  gridEntries: number
+}
+
+/** Answers how far a point is from a line, looking only at the segments near it. */
+interface SegmentGrid {
+  /**
+   * The distance from `p` to the line when it is at most the grid's reach,
+   * Infinity when it is farther. Stops looking at the first segment within
+   * `enoughM` (and then says only that it is within that).
+   */
+  readonly distanceWithin: (p: XY, enoughM: number) => number
+}
+
+/**
+ * A bounding-box index of a line's segments: square cells as wide as `reachM`,
+ * each listing the segments that pass through it (a long segment is cut into
+ * pieces no longer than a cell, so that it is listed only in cells it really
+ * crosses). A point then looks at the segments of the 3 x 3 cells around it,
+ * a handful, instead of the whole line: any segment within `reachM` of the
+ * point crosses one of them. Built once per line and comparison.
+ */
+function segmentGrid(line: readonly XY[], reachM: number, meter?: MatchMeter): SegmentGrid {
+  const cellM = Math.max(1, reachM)
+  const cells = new Map<number, number[]>()
+  // Two cell numbers in one key: rows within 2^21 cells (2000 km at 1 m) of the origin never collide.
+  const key = (ix: number, iy: number) => ix * 4_194_304 + iy
+  const cellOf = (v: number) => Math.floor(v / cellM)
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1]!
+    const b = line[i]!
+    const pieces = Math.max(1, Math.ceil(apart(a, b) / cellM))
+    for (let k = 0; k < pieces; k++) {
+      const x0 = a[0] + ((b[0] - a[0]) * k) / pieces
+      const y0 = a[1] + ((b[1] - a[1]) * k) / pieces
+      const x1 = a[0] + ((b[0] - a[0]) * (k + 1)) / pieces
+      const y1 = a[1] + ((b[1] - a[1]) * (k + 1)) / pieces
+      for (let ix = cellOf(Math.min(x0, x1)); ix <= cellOf(Math.max(x0, x1)); ix++) {
+        for (let iy = cellOf(Math.min(y0, y1)); iy <= cellOf(Math.max(y0, y1)); iy++) {
+          const listed = cells.get(key(ix, iy))
+          // A segment's pieces come one after another, so it can only be listed twice at the end.
+          if (listed === undefined) cells.set(key(ix, iy), [i])
+          else if (listed.at(-1) !== i) listed.push(i)
+          else continue
+          if (meter !== undefined) meter.gridEntries++
+        }
       }
     }
-    return false
+  }
+  // Which segments this query has measured already (a segment can be listed in several of its cells).
+  const seen = new Int32Array(line.length)
+  let query = 0
+  return {
+    distanceWithin: (p, enoughM) => {
+      query++
+      let best = Infinity
+      for (let ix = cellOf(p[0] - cellM); ix <= cellOf(p[0] + cellM); ix++) {
+        for (let iy = cellOf(p[1] - cellM); iy <= cellOf(p[1] + cellM); iy++) {
+          for (const i of cells.get(key(ix, iy)) ?? []) {
+            if (seen[i] === query) continue
+            seen[i] = query
+            if (meter !== undefined) meter.segmentChecks++
+            best = Math.min(best, pointToSegment(p, line[i - 1]!, line[i]!).distanceM)
+            if (best <= enoughM) return best
+          }
+        }
+      }
+      return best <= cellM ? best : Infinity
+    },
   }
 }
 
 /** A stretch of a line, in meters from its start. */
 type Stretch = readonly [fromM: number, toM: number]
 
+/** What stretchesApart found: the stretches apart, their total and longest, and how far the farthest point of them is (Infinity: beyond the grid's reach). */
+interface Apart {
+  readonly stretches: readonly Stretch[]
+  readonly totalM: number
+  readonly longestM: number
+  readonly farthestM: number
+}
+
+/** The limits under which a comparison can still be "the same route": past any of them, stretchesApart may stop. */
+interface ApartLimits {
+  readonly totalM: number
+  readonly longestM: number
+  readonly farthestM: number
+}
+
 /**
  * Walks `line` from `fromM` meters after its start to its end in steps of
  * half the tolerance, and reports the stretches that are farther than the
  * tolerance from `other`. Works on length, not on vertices, so two drawings
  * of one road with different numbers of points measure the same.
+ *
+ * With `limits`, it gives up (null) as soon as the stretches apart break one
+ * of them: the answer is "not the same route" then, whatever comes after.
  */
-function stretchesApart(line: readonly XY[], other: readonly XY[], fromM: number, toleranceM: number): Stretch[] {
+function stretchesApart(
+  line: readonly XY[],
+  other: SegmentGrid,
+  fromM: number,
+  toleranceM: number,
+  limits: ApartLimits | null = null,
+): Apart | null {
   const stepM = Math.max(1, toleranceM / 2)
-  const near = nearWalker(other, toleranceM)
   const stretches: Stretch[] = []
   let open: [number, number] | null = null
-  const visit = (p: XY, atM: number, weighsM: number) => {
-    if (near(p)) {
-      if (open !== null) stretches.push(open)
+  let closedM = 0
+  let longestM = 0
+  let farthestM = 0
+  /** False when a limit is broken. */
+  const visit = (p: XY, atM: number, weighsM: number): boolean => {
+    const distanceM = other.distanceWithin(p, toleranceM)
+    if (distanceM <= toleranceM) {
+      if (open !== null) {
+        stretches.push(open)
+        closedM += open[1] - open[0]
+      }
       open = null
-    } else if (open === null) open = [atM, atM + weighsM]
+      return true
+    }
+    if (open === null) open = [atM, atM + weighsM]
     else open[1] = atM + weighsM
+    const openM = open[1] - open[0]
+    longestM = Math.max(longestM, openM)
+    farthestM = Math.max(farthestM, distanceM)
+    return limits === null || (closedM + openM <= limits.totalM && openM <= limits.longestM && farthestM <= limits.farthestM)
   }
   let doneM = 0
   let nextM = fromM
@@ -424,17 +518,25 @@ function stretchesApart(line: readonly XY[], other: readonly XY[], fromM: number
     const lengthM = apart(a, b)
     while (lengthM > 0 && doneM + lengthM >= nextM) {
       const t = (nextM - doneM) / lengthM
-      visit([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], nextM, stepM)
+      if (!visit([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], nextM, stepM)) return null
       nextM += stepM
     }
     doneM += lengthM
   }
-  if (open !== null) stretches.push(open)
-  return stretches
+  // TypeScript cannot see the assignments made inside the closure.
+  const last = open as [number, number] | null
+  if (last !== null) {
+    stretches.push(last)
+    closedM += last[1] - last[0]
+  }
+  return { stretches, totalM: closedM, longestM, farthestM }
 }
 
 /** The thresholds of compareRest: the match* part of RerouteOptions. */
-type MatchOptions = Pick<RerouteOptions, 'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchIgnoreStartM'>
+type MatchOptions = Pick<
+  RerouteOptions,
+  'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchMaxDivergenceM' | 'matchIgnoreStartM'
+>
 
 /** How a fresh route compares with the rest of a path. */
 interface RestComparison {
@@ -448,6 +550,56 @@ interface RestComparison {
   readonly rest: readonly XY[]
 }
 
+/** `line` from the point `at` (of nearestOnLine) on. */
+function fromNearest(line: readonly XY[], at: { index: number; t: number }): XY[] {
+  const a = line[at.index]!
+  const b = line[at.index + 1]!
+  return [[a[0] + (b[0] - a[0]) * at.t, a[1] + (b[1] - a[1]) * at.t], ...line.slice(at.index + 1)]
+}
+
+/** What both ways of comparing (compareRest, matchRest) measure first. Null when either line cannot be driven. */
+function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions, meter: MatchMeter | undefined) {
+  const start = given[0]
+  if (start === undefined || given.length < 2 || path.length < 2) return null
+  const at = nearestOnLine(start, path, meter)
+  const rest = fromNearest(path, at)
+  // A fresh route that starts behind the path (fetched a moment before the position was
+  // taken: see RerouteObservation.positionAlongM) is compared from where it reaches the
+  // path's start, when it does: the part behind runs along the road already driven, which
+  // is not a way apart, however far behind it begins. Only a straight approach is cut (no
+  // longer than the way from its start to the path's, give or take the tolerance): a route
+  // that first drives off the other way and turns back is not shortened into a match.
+  let fresh = given
+  if (at.index === 0 && at.t === 0) {
+    const back = nearestOnLine(path[0]!, given, meter)
+    const cutM = lengthOf(given.slice(0, back.index + 1)) + back.t * apart(given[back.index]!, given[back.index + 1]!)
+    if (back.distanceM <= options.matchToleranceM && cutM <= apart(start, path[0]!) + options.matchToleranceM) {
+      fresh = fromNearest(given, back)
+    }
+  }
+  const freshM = lengthOf(fresh)
+  const restM = lengthOf(rest)
+  const shorterM = Math.min(freshM, restM)
+  if (!(shorterM > 0)) return null
+  // A line shorter than twice the ignored start is still compared over its second half.
+  const ignoreM = Math.min(options.matchIgnoreStartM, shorterM / 2)
+  const limits: ApartLimits = {
+    totalM: (1 - options.matchMinOverlap) * (shorterM - ignoreM),
+    longestM: options.matchMaxGapM,
+    farthestM: options.matchMaxDivergenceM,
+  }
+  const reachM = Math.max(options.matchToleranceM, options.matchMaxDivergenceM)
+  return {
+    fresh,
+    rest,
+    ignoreM,
+    limits,
+    lengthsApartM: Math.abs(freshM - restM),
+    endsTogether: apart(fresh.at(-1)!, rest.at(-1)!) <= options.matchToleranceM,
+    grids: () => ({ ofRest: segmentGrid(rest, reachM, meter), ofFresh: segmentGrid(fresh, reachM, meter) }),
+  }
+}
+
 /**
  * Compares `fresh` (a route from the driver's position to the destination)
  * with the rest of `path` (the route being driven, from about where the
@@ -459,44 +611,49 @@ interface RestComparison {
  *   the other line (the allowance is that share of the SHORTER line);
  * - no single stretch apart is longer than `matchMaxGapM`, and the two
  *   lengths differ by no more than that (a route that overshoots and comes
- *   back along the same road is longer, though never apart).
+ *   back along the same road is longer, though never apart);
+ * - no point of a stretch apart is farther than `matchMaxDivergenceM` from
+ *   the other line (a block around is another road, however short).
  *
  * Measured by length along the lines, not vertex by vertex: the same road
  * drawn with more or fewer points is the same road. Null when either line
- * cannot be driven (fewer than two points, no length).
+ * cannot be driven (fewer than two points, no length). This one measures
+ * everything (baselineProbe needs every stretch apart); matchRest decides
+ * `same` the same way and stops as soon as it is decided.
  */
-function compareRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions): RestComparison | null {
-  const start = fresh[0]
-  if (start === undefined || fresh.length < 2 || path.length < 2) return null
-  const at = nearestOnLine(start, path)
-  const a = path[at.index]!
-  const b = path[at.index + 1]!
-  const joined: XY = [a[0] + (b[0] - a[0]) * at.t, a[1] + (b[1] - a[1]) * at.t]
-  const rest = [joined, ...path.slice(at.index + 1)]
-  const freshM = lengthOf(fresh)
-  const restM = lengthOf(rest)
-  const shorterM = Math.min(freshM, restM)
-  if (!(shorterM > 0)) return null
-  // A line shorter than twice the ignored start is still compared over its second half.
-  const ignoreM = Math.min(options.matchIgnoreStartM, shorterM / 2)
-  const freshApart = stretchesApart(fresh, rest, ignoreM, options.matchToleranceM)
-  const restApart = stretchesApart(rest, fresh, ignoreM, options.matchToleranceM)
-  const total = (stretches: readonly Stretch[]) => stretches.reduce((sum, [from, to]) => sum + (to - from), 0)
-  const longest = (stretches: readonly Stretch[]) => stretches.reduce((max, [from, to]) => Math.max(max, to - from), 0)
-  const allowanceM = (1 - options.matchMinOverlap) * (shorterM - ignoreM)
-  const lengthsApartM = Math.abs(freshM - restM)
-  const same =
-    apart(fresh.at(-1)!, rest.at(-1)!) <= options.matchToleranceM &&
-    total(freshApart) <= allowanceM &&
-    total(restApart) <= allowanceM &&
-    Math.max(longest(freshApart), longest(restApart)) <= options.matchMaxGapM &&
-    lengthsApartM <= options.matchMaxGapM
-  return { same, differenceM: total(freshApart) + total(restApart) + lengthsApartM, restApart, rest }
+function compareRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions, meter?: MatchMeter): RestComparison | null {
+  const s = setUp(path, fresh, options, meter)
+  if (s === null) return null
+  const { ofRest, ofFresh } = s.grids()
+  const freshApart = stretchesApart(s.fresh, ofRest, s.ignoreM, options.matchToleranceM)!
+  const restApart = stretchesApart(s.rest, ofFresh, s.ignoreM, options.matchToleranceM)!
+  const within = (found: Apart) =>
+    found.totalM <= s.limits.totalM && found.longestM <= s.limits.longestM && found.farthestM <= s.limits.farthestM
+  const same = s.endsTogether && s.lengthsApartM <= options.matchMaxGapM && within(freshApart) && within(restApart)
+  return { same, differenceM: freshApart.totalM + restApart.totalM + s.lengthsApartM, restApart: restApart.stretches, rest: s.rest }
+}
+
+/**
+ * compareRest's `differenceM` when `fresh` is the rest of `path`, null when
+ * it is not. The cheap way (#51): the ends and the lengths are checked before
+ * any walking, and each walk stops at the first stretch that rules the match
+ * out, so a route that parts from the path costs about as much as the shared
+ * part up to where it leaves.
+ */
+function matchRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions, meter?: MatchMeter): number | null {
+  const s = setUp(path, fresh, options, meter)
+  if (s === null || !s.endsTogether || s.lengthsApartM > options.matchMaxGapM) return null
+  const { ofRest, ofFresh } = s.grids()
+  const freshApart = stretchesApart(s.fresh, ofRest, s.ignoreM, options.matchToleranceM, s.limits)
+  if (freshApart === null) return null
+  const restApart = stretchesApart(s.rest, ofFresh, s.ignoreM, options.matchToleranceM, s.limits)
+  if (restApart === null) return null
+  return freshApart.totalM + restApart.totalM + s.lengthsApartM
 }
 
 /** True when `fresh` is the rest of `path` (see compareRest). */
 function continuesPath(path: readonly XY[], fresh: readonly XY[], options: MatchOptions): boolean {
-  return compareRest(path, fresh, options)?.same ?? false
+  return matchRest(path, fresh, options) !== null
 }
 
 /**
@@ -509,12 +666,13 @@ function closestToPath(
   routes: readonly RouteCandidate[],
   project: (p: LngLat) => XY,
   options: MatchOptions,
+  meter?: MatchMeter,
 ): RouteCandidate | null {
   let best: { route: RouteCandidate; differenceM: number } | null = null
   for (const route of routes) {
-    const compared = compareRest(path, route.geometry.filter(isValidLngLat).map(project), options)
-    if (compared === null || !compared.same) continue
-    if (best === null || compared.differenceM < best.differenceM) best = { route, differenceM: compared.differenceM }
+    const differenceM = matchRest(path, route.geometry.filter(isValidLngLat).map(project), options, meter)
+    if (differenceM === null) continue
+    if (best === null || differenceM < best.differenceM) best = { route, differenceM }
   }
   return best?.route ?? null
 }
@@ -552,19 +710,23 @@ function planeOf(observation: RerouteObservation, toleranceM: number, slackM: nu
  * small to be another route. When more than one matches, the closest. Null
  * when none does: the current route is not among the fresh routes (which
  * does not make it a bad route: see decideReroute, rule 5).
+ *
+ * `meter`, when given, is counted up with the work done (see MatchMeter); the
+ * answer is the same with or without it.
  */
 export function findCurrentRoute(
   route: Pick<RouteCandidate, 'geometry'>,
   positionAlongM: number,
   candidates: readonly RouteCandidate[],
   options: Partial<RerouteOptions> = {},
+  meter?: MatchMeter,
 ): RouteCandidate | null {
   const opts = resolveOptions(options)
   const ahead = aheadOf(route.geometry, positionAlongM, opts.offRouteM)
   const origin = ahead[0]
   if (origin === undefined) return null
   const project = localProjector(origin)
-  return closestToPath(ahead.map(project), candidates, project, opts)
+  return closestToPath(ahead.map(project), candidates, project, opts, meter)
 }
 
 /** A point for the provider to route through, with the direction of travel there. */
@@ -783,7 +945,8 @@ function usableEta(route: RouteCandidate): boolean {
  * 4. **Like-for-like baseline.** The fresh candidate that IS the rest of the
  *    current route (findCurrentRoute: the same roads from the driver to the
  *    destination, by overlap: `matchMinOverlap` of the length within
- *    `matchToleranceM`, no stretch apart longer than `matchMaxGapM`, the
+ *    `matchToleranceM`, no stretch apart longer than `matchMaxGapM` or
+ *    farther than `matchMaxDivergenceM` from the current line, the
  *    first `matchIgnoreStartM` not compared) gives the current route's fresh
  *    ETA. A fresh route that is the same road with a small variation (the
  *    other lane group at an exit, a corner drawn differently) is the current
@@ -798,10 +961,13 @@ function usableEta(route: RouteCandidate): boolean {
  *    - The answer is the current path: that is the baseline, and rules 6 to
  *      12 apply as always. A switch then is an ordinary 'faster-route' one,
  *      with a real saving of at least the minimum.
- *    - No answer (not asked, or the request failed), or the answer is some
- *      other path (the via points did not pin it): nothing is known; stay.
+ *    - No answer (not asked, the request failed, or a via point would not
+ *      snap to a road), or the answer is some other path (the via points did
+ *      not pin it): nothing is known; stay. The count of the next case is
+ *      kept as it is, neither added to nor started over.
  *    - The provider found NO route through the points on the road ahead.
- *      Once that has happened `routeLostPolls` polls in a row the road ahead
+ *      Once that has happened `routeLostPolls` times, with no poll between
+ *      that found the current route, the road ahead
  *      is taken to be closed, and the best-ranked fresh route that still
  *      passes the too-late guard is taken, once the cooldown is over. Until
  *      then: stay. (The no-return rule cannot be applied here, there being
@@ -943,9 +1109,11 @@ export function decideReroute(
   const current = offered ?? (baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts))
 
   if (current === null) {
-    // Only "no route that way" is evidence against the road ahead. Not asked: nothing new.
-    // Answered with another path: the points can be reached, so the count starts again.
-    const lostPolls = baseline === null ? base.lostPolls : baseline.length === 0 ? base.lostPolls + 1 : 0
+    // Only "no route that way" is evidence against the road ahead, and adds to the count.
+    // Not asked, or answered with another path (the via points did not pin it, which says
+    // nothing about the road between them, #41): no evidence either way, and the count is
+    // kept. Only a poll that finds the current route again starts it over.
+    const lostPolls = baseline !== null && baseline.length === 0 ? base.lostPolls + 1 : base.lostPolls
     const lost: RerouteState = { ...noWinner, lostPolls }
     if (baseline === null || baseline.length > 0) {
       return stay(

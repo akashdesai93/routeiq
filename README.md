@@ -516,8 +516,10 @@ The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order
    current route's fresh ETA, and everything is compared with that. "Is" means the same
    roads from the car to the destination, measured by overlap and not point by point:
    at least 95% of the length of each line within 20 m of the other, no single stretch
-   apart longer than 400 m (nor the two lengths differing by more), both ending at the
-   same place, and the first 150 m after the car not compared. Route ids are never
+   apart longer than 400 m (nor the two lengths differing by more), no point of a
+   stretch apart more than 50 m from the other line, both ending at the same place, and
+   the first 150 m after the car not compared (nor, for an answer fetched a moment
+   before the position was taken, the part behind the car). Route ids are never
    compared between checks. A fresh route that is the same road with a small variation
    (the other lane group at an exit, a corner drawn differently) is the current route
    for this purpose and is never an alternative to it.
@@ -526,9 +528,11 @@ The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order
    Its ETA is asked for by one more request, for the current path itself through via
    points along it (see "The request"). If the answer is the current path with traffic
    data, it is the baseline and rules 5 to 10 apply as always: a switch then is an
-   ordinary "faster route" with a real saving. If there is no usable answer: stay. Only
-   when Mapbox finds no route at all along the road ahead, three checks in a row, is
-   the road taken to be closed and the best fresh route taken (if its turn-off is far
+   ordinary "faster route" with a real saving. If there is no usable answer (the
+   request failed, a via point would not snap to a road, or the answer is some other
+   road): stay, and the count below is kept as it is. Only when Mapbox finds no route at
+   all along the road ahead three times, with no check between them that found the
+   current route, is the road taken to be closed and the best fresh route taken (if its turn-off is far
    enough ahead and the cooldown is over), announced as "The road ahead on your route
    looks closed". Off the route (rule 2) is the tracker's verdict and stays as it was.
 5. Missing data (no alternative, no travel time, no typical duration to show the time
@@ -557,11 +561,12 @@ faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 
 | `noReturnSec`, `returnSavingFactor` | 600 s, 2x |
 | `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
 | `freewayLeadDistanceM` | 1200 m |
-| `routeLostPolls` (checks in a row with no route along the road ahead) | 3 |
+| `routeLostPolls` (checks with no route along the road ahead, none between them finding the current route) | 3 |
 | `offRouteM` | 50 m |
 | `sameRouteToleranceM` (a point is on the current route: where an alternative turns off) | 10 m |
 | `matchToleranceM`, `matchMinOverlap` (a fresh route IS the current one) | 20 m, 0.95 |
 | `matchMaxGapM` (longest stretch apart, and largest difference in length) | 400 m |
+| `matchMaxDivergenceM` (farthest a point of a stretch apart may be from the other line) | 50 m |
 | `matchIgnoreStartM` (not compared after the query point) | 150 m |
 | `baselineViaSpacingM`, `baselineMaxViaPoints` (asking for the current path) | 3000 m, 6 |
 | `returnOverlapFraction` | 0.5 |
@@ -656,15 +661,33 @@ faster route. Saves 2 minutes. Turn in 3.5 miles." The current route was genuine
 missing from an answer only after that what-if switch, on a route Mapbox itself
 ranked slower: that is the case rule 4 now handles by asking.
 
-**Known limit of the overlap rule.** It measures how long two lines run apart, not how
-far apart. A fresh route that leaves the current one for a single stretch under 400 m
-that also fits in the 5% allowance (about one city block around, on a trip with more
-than some 7 km left) counts as the current route: its time is taken as the current
-route's, it is never offered as an alternative, and the line and guidance being driven
-stay as they were. If Mapbox routes around one closed block, the engine therefore does
-not see it; the driver finds out at the block, and the off-route rule takes over from
-there. Two blocks, or one block on a short trip, are a different route.
-`tests/reroute.test.ts` pins both sides.
+**How far apart counts (#41).** The overlap rule measured how long two lines run apart,
+not how far apart, so a fresh route that left the current one for a single stretch
+under 400 m that also fit in the 5% allowance (one city block around, on a trip with
+more than some 7 km left) counted as the current route. No point of a stretch apart may
+now be more than 50 m (`matchMaxDivergenceM`) from the other line: above the farthest
+drawing difference measured (39 m, the other lane group at an exit), below a street one
+block over. So when Mapbox routes round one closed block, that answer is another route,
+the current path is asked for with a via point on the block itself, and three "no route"
+answers take the detour.
+
+**Known limit: closures between via points.** The via points sit on the stretches the
+fresh routes leave, one every 3 km. When the fresh routes leave the current path for a
+long way and the closure is short, the points can miss it, and Mapbox routes through them
+and around the closure: "another road". That says nothing either way, so the engine stays
+(no ETA shown), and the count of "no route" answers is kept, not started over (it used to
+be, so such a closure never added up). The closure is taken only once three checks in all
+have put a point on it; until then, or if none does, the driver finds out at the closure
+and the off-route rule takes over from there. `tests/reroute.test.ts` pins these cases.
+
+**Matching cost (#51).** The comparison walks both lines in 10 m steps. Each step looks
+only at the segments of the other line in the 3 x 3 grid cells (50 m wide, a bounding-box
+index built per comparison) around it, and the match stops at the first stretch that
+rules it out. On a synthetic 100 km route (5000 vertices, three alternatives 2 to 4 km
+apart for 45% of the way) `findCurrentRoute` went from about 730 ms to 3 ms on desktop
+Node. The test counts the work (segment checks and grid entries) and pins it at no more
+than twice the old vertex-by-vertex matcher's; measured, it is 2% of it (0.5% when the
+current route is among the answers).
 
 ## Route hand-off (Google Maps and Waze)
 

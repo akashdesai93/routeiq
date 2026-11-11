@@ -81,8 +81,10 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
     requests = 2
     const own = await fetchDirections({ ...shared, via: probe.via })
     if (!own.ok && own.kind === 'aborted') return { ok: false, aborted: true, message: own.message }
-    // "No route through these points" is an answer; any other failure is not.
-    asked = own.ok ? own.routes : own.kind === 'no-route' || own.kind === 'no-segment' ? [] : null
+    // "No route through these points" is an answer; any other failure is not. That includes
+    // NoSegment (a via point would not snap to a road): the via points are fixed places, so
+    // it would come back every check and say nothing about the road ahead (#52).
+    asked = own.ok ? own.routes : own.kind === 'no-route' ? [] : null
   }
 
   // A check never retries failed signal tiles: only the "Retry signals" button does.
