@@ -77,12 +77,25 @@ describe('parseOverpassSignals', () => {
   it('keeps each usable node once and skips everything else', () => {
     const parsed = parseOverpassSignals(TILE_BODY)
     if (!parsed.ok) throw new Error('expected nodes')
-    // The fixture also holds a repeated node, a way, a text id, a latitude of 95, a node with no latitude and junk.
+    // The fixture also holds a repeated node, a way, a text id, a latitude of 95, a node with no latitude, junk
+    // and four nodes with an excluded signal subtype.
     expect(parsed.nodes).toEqual([
       { id: 9000001, lng: -80.8502, lat: 35.2501 },
       { id: 9000002, lng: -80.8504, lat: 35.2503 },
       { id: 9000003, lng: -80.8301, lat: 35.2702 },
+      { id: 9000012, lng: -80.8516, lat: 35.2515 },
+      { id: 9000013, lng: -80.8517, lat: 35.2516 },
     ])
+  })
+
+  it('leaves out excluded signal subtypes, as bundled tiles do', () => {
+    const parsed = parseOverpassSignals(TILE_BODY)
+    if (!parsed.ok) throw new Error('expected nodes')
+    const ids = parsed.nodes.map((node) => node.id)
+    // blinker, emergency, pedestrian_crossing (any case) and a list of only excluded kinds are dropped.
+    for (const dropped of [9000008, 9000009, 9000010, 9000011]) expect(ids).not.toContain(dropped)
+    // An ordinary subtype, and a list with at least one ordinary kind, are kept.
+    expect(ids).toEqual(expect.arrayContaining([9000012, 9000013]))
   })
 
   it('reads a tile without signals as empty, not as a failure', () => {
@@ -179,7 +192,7 @@ describe('fetchSignalTile', () => {
 
   it('reads a real-shaped answer, and an empty tile as empty', async () => {
     const answer = (body: unknown) => (() => Promise.resolve(new Response(JSON.stringify(body)))) as typeof fetch
-    expect(tileOf(await fetchSignalTile(UPTOWN, { fetchImpl: answer(TILE_BODY) })).nodes).toHaveLength(3)
+    expect(tileOf(await fetchSignalTile(UPTOWN, { fetchImpl: answer(TILE_BODY) })).nodes).toHaveLength(5)
     expect(tileOf(await fetchSignalTile(UPTOWN, { fetchImpl: answer(overpassBody([])) })).nodes).toEqual([])
   })
 

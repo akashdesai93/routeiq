@@ -74,8 +74,20 @@ export function classifySignalTags(tags: Readonly<Record<string, string>>): Sign
   }
   const subtype = tags.traffic_signals?.trim().toLowerCase() ?? ''
   if (subtype === '') return { keep: true, kind: 'unspecified' }
-  const kinds = subtype.split(';').map((kind) => kind.trim())
-  return { keep: !kinds.every((kind) => EXCLUDED_SIGNAL_SUBTYPES.has(kind)), kind: subtype }
+  return { keep: !isExcludedSignalSubtype(subtype), kind: subtype }
+}
+
+/**
+ * True when a `traffic_signals=*` value says the node is not an intersection
+ * signal: every kind it lists (";" separated, any case) is in
+ * EXCLUDED_SIGNAL_SUBTYPES. A missing or empty value is not excluded. Shared
+ * by classifySignalTags (bundled tiles) and the Overpass adapter, so both
+ * sources drop the same nodes.
+ */
+export function isExcludedSignalSubtype(value: string | undefined): boolean {
+  const subtype = value?.trim().toLowerCase() ?? ''
+  if (subtype === '') return false
+  return subtype.split(';').every((kind) => EXCLUDED_SIGNAL_SUBTYPES.has(kind.trim()))
 }
 
 function xyOf(tileId: string): [number, number] {

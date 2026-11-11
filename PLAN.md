@@ -69,8 +69,8 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    it tile by tile); 60 m single-linkage grouping merges two pairs of Charlotte
    intersections 54 and 56 m apart; a slip-lane turn beside a signal and a ramp fork
    on a `trunk` expressway can each add a signal; decide whether the city gap-fill is
-   worth its non-commercial license; Overpass tiles are not filtered by signal
-   subtype as bundled tiles are.
+   worth its non-commercial license. (Done: Overpass tiles are now filtered by
+   signal subtype with the same rule and list as bundled tiles, #11.)
 5. **Done: ranking** (`src/core/rank.ts`). Best traffic-aware ETA first; signal count
    only breaks ties (ETAs within 30 s of the fastest, `DEFAULT_ETA_TIE_WINDOW_SEC`)
    until there is evidence for per-signal wait times. No per-signal time penalty.

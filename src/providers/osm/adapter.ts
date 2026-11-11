@@ -1,4 +1,5 @@
 import { isValidLngLat, tileBounds, type SignalPoint } from '../../core/index.ts'
+import { isExcludedSignalSubtype } from './bundle.ts'
 
 /**
  * OpenStreetMap traffic signals, by tile. OpenStreetMap data is licensed
@@ -76,8 +77,20 @@ export function buildOverpassQuery(tileId: string): string | null {
   return `[out:json][timeout:25];node[highway=traffic_signals](${south},${west},${north},${east});out;`
 }
 
+/**
+ * True for a node whose `traffic_signals=*` tag marks it as a kind of signal
+ * RouteIQ does not count (a flasher, a fire-station signal, a mid-block
+ * crossing...), by the same rule and list as bundled tiles (see bundle.ts).
+ */
+function hasExcludedSubtype(element: Record<string, unknown>): boolean {
+  const tags = element.tags
+  if (!isRecord(tags) || typeof tags.traffic_signals !== 'string') return false
+  return isExcludedSignalSubtype(tags.traffic_signals)
+}
+
 function toNode(element: unknown): OsmSignalNode | null {
   if (!isRecord(element) || element.type !== 'node') return null
+  if (hasExcludedSubtype(element)) return null
   const { id, lon: lng, lat } = element
   if (typeof id !== 'number' || !Number.isSafeInteger(id)) return null
   if (typeof lng !== 'number' || typeof lat !== 'number' || !isValidLngLat([lng, lat])) return null
@@ -87,7 +100,8 @@ function toNode(element: unknown): OsmSignalNode | null {
 /**
  * Turns an Overpass API JSON answer into signal nodes. Pure, and never
  * throws. Elements that are not usable nodes are skipped; a node listed twice
- * is kept once. Overpass reports a query that ran out of time or memory with
+ * is kept once. Nodes whose `traffic_signals=*` subtype is excluded (see
+ * EXCLUDED_SIGNAL_SUBTYPES in bundle.ts) are left out, as in bundled tiles. Overpass reports a query that ran out of time or memory with
  * HTTP 200 and a `remark`, possibly next to a cut-off list of elements: that
  * is a failure, never a short tile.
  */

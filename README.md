@@ -364,9 +364,9 @@ check-prereqs.ps1  Windows prerequisite check.
   of Charlotte list is filtered. In the two states that removed 288 of 22,939 nodes
   (105 emergency, 94 blinker, 82 pedestrian_crossing, 7 others). Pedestrian signals
   tagged `highway=crossing` + `crossing=traffic_signals` (10,067 of them) are not
-  `highway=traffic_signals` and were never included. Overpass tiles are not filtered by
-  subtype (the query has no room for it), a small difference that only shows outside
-  the bundle.
+  `highway=traffic_signals` and were never included. Overpass tiles (outside the
+  bundle) are filtered by the same rule and list after parsing, so both sources drop
+  the same nodes.
 
   **Rebuilding the tiles** (do it when the date in the panel gets old; monthly is plenty):
 

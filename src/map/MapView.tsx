@@ -102,6 +102,7 @@ export function MapView({
     } catch (e) {
       // Most often: WebGL is off or unavailable in this browser.
       console.error(e)
+      // oxlint-disable-next-line react/set-state-in-effect -- the external Mapbox constructor threw while this effect syncs with it; there is nothing to derive in render.
       setError(`The map could not start: ${e instanceof Error ? e.message : String(e)}`)
       return
     }
