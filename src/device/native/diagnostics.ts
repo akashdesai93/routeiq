@@ -1,0 +1,169 @@
+/**
+ * Drive diagnostics for the iPhone shell: what iOS let the app do during a
+ * drive, to be read (and copied out) afterwards. In memory only, gone when
+ * the app is closed.
+ *
+ * Privacy, by construction: this holds counts, times of day, whole
+ * milliseconds, HTTP status codes and words from fixed lists. No method takes
+ * a position, a URL, a token or any free text, and every number is rounded to
+ * a whole one before it is kept, so a coordinate cannot be stored even by
+ * mistake (tests/shellHttp.test.ts checks the output by pattern).
+ */
+
+/** How many events are kept; older ones are dropped and counted. */
+export const DIAGNOSTICS_EVENT_LIMIT = 200
+/** A wait this long between two ticks while the GPS is on is logged as an event, in milliseconds. */
+export const TICK_GAP_EVENT_MS = 5_000
+/** The same for position fixes (a tunnel does this too). */
+export const FIX_GAP_EVENT_MS = 10_000
+
+export type DiagnosticsAppState = 'active' | 'inactive' | 'background' | 'unknown'
+/** 'answered': Mapbox answered, with any HTTP status. The others: no answer. */
+export type RequestOutcome = 'answered' | 'network' | 'timeout' | 'cancelled' | 'not-allowed'
+
+const APP_STATES: readonly DiagnosticsAppState[] = ['active', 'inactive', 'background']
+const OUTCOMES: readonly RequestOutcome[] = ['answered', 'network', 'timeout', 'cancelled', 'not-allowed']
+
+export interface DriveDiagnostics {
+  /** The location stream was switched on or off. Gaps are measured only while it is on. */
+  gps(on: boolean): void
+  /** A position arrived. Nothing about the position is passed in. */
+  fix(): void
+  /** The live session was asked "is anything due?". */
+  tick(): void
+  /** A route request went out. Returns its number, for requestEnded. */
+  requestSent(): number
+  /** A route request ended. `status`: the HTTP status. `nativeMs`: how long the native side says it took. */
+  requestEnded(n: number, outcome: RequestOutcome, status?: number, nativeMs?: number): void
+  speechStarted(): void
+  /** `finished` false: the line was cut off or failed. */
+  speechEnded(finished: boolean): void
+  /** From the native side: 'active', 'inactive' or 'background'. Anything else is kept as 'unknown'. */
+  appState(state: unknown): void
+  /** The whole log as text, for the panel and the Copy button. */
+  text(): string
+}
+
+interface Entry {
+  readonly atMs: number
+  readonly what: string
+}
+
+/** A whole number that is at least 0; anything else is 0. */
+const whole = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : 0)
+
+const two = (n: number) => String(n).padStart(2, '0')
+
+/** Time of day on the phone's clock, to the second. */
+function clock(ms: number): string {
+  const d = new Date(ms)
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`
+}
+
+const seconds = (ms: number) => `${Math.round(ms / 1000)} s`
+
+export function createDriveDiagnostics(now: () => number = Date.now, limit: number = DIAGNOSTICS_EVENT_LIMIT): DriveDiagnostics {
+  const startedAt = now()
+  const events: Entry[] = []
+  let dropped = 0
+  let state: DiagnosticsAppState = 'active'
+  let gpsOn = false
+
+  const stream = () => ({ count: 0, away: 0, lastAt: null as number | null, longestGapMs: 0 })
+  const fixes = stream()
+  const ticks = stream()
+  const requests = { sent: 0, answered: 0, failed: 0, cancelled: 0, away: 0, totalMs: 0, longestMs: 0 }
+  const sentAt = new Map<number, number>()
+  const speech = { started: 0, finished: 0, cutOff: 0 }
+
+  const log = (what: string) => {
+    events.push({ atMs: now(), what: `${what} [${state}]` })
+    if (events.length > limit) {
+      events.shift()
+      dropped++
+    }
+  }
+
+  const beat = (s: ReturnType<typeof stream>, name: string, eventGapMs: number) => {
+    const at = now()
+    s.count++
+    if (state !== 'active') s.away++
+    if (gpsOn && s.lastAt !== null) {
+      const gap = whole(at - s.lastAt)
+      if (gap > s.longestGapMs) s.longestGapMs = gap
+      if (gap >= eventGapMs) log(`no ${name} for ${seconds(gap)}`)
+    }
+    s.lastAt = at
+  }
+
+  return {
+    gps(on) {
+      if (on === gpsOn) return
+      gpsOn = on
+      // A gap is time between two beats of one drive, never the time between two drives.
+      fixes.lastAt = ticks.lastAt = null
+      log(on ? 'gps on' : 'gps off')
+    },
+    fix: () => beat(fixes, 'fix', FIX_GAP_EVENT_MS),
+    tick: () => beat(ticks, 'tick', TICK_GAP_EVENT_MS),
+    requestSent() {
+      const n = ++requests.sent
+      if (state !== 'active') requests.away++
+      sentAt.set(n, now())
+      log(`request ${n} sent`)
+      return n
+    },
+    requestEnded(n, outcome, status, nativeMs) {
+      const began = sentAt.get(n)
+      if (began === undefined) return
+      sentAt.delete(n)
+      const ms = whole(now() - began)
+      const kind: RequestOutcome = OUTCOMES.includes(outcome) ? outcome : 'network'
+      if (kind === 'answered') {
+        requests.answered++
+        requests.totalMs += ms
+        if (ms > requests.longestMs) requests.longestMs = ms
+        const native = nativeMs === undefined ? '' : `, native ${whole(nativeMs)} ms`
+        log(`request ${whole(n)} answered, HTTP ${Math.min(whole(status), 999)}, ${ms} ms${native}`)
+      } else {
+        if (kind === 'cancelled') requests.cancelled++
+        else requests.failed++
+        log(`request ${whole(n)} ${kind} after ${ms} ms`)
+      }
+    },
+    speechStarted() {
+      speech.started++
+    },
+    speechEnded(finished) {
+      if (finished) speech.finished++
+      else {
+        speech.cutOff++
+        log('speech line cut off or failed')
+      }
+    },
+    appState(next) {
+      const known = APP_STATES.find((s) => s === next) ?? 'unknown'
+      if (known === state) return
+      state = known
+      log(`app ${known}`)
+    },
+    text() {
+      const average = requests.answered === 0 ? 0 : Math.round(requests.totalMs / requests.answered)
+      const lines = [
+        'RouteIQ drive diagnostics',
+        `log started ${clock(startedAt)}, now ${clock(now())}, app ${state}, gps ${gpsOn ? 'on' : 'off'}`,
+        `fixes: ${fixes.count} (${fixes.away} while not active), longest gap ${seconds(fixes.longestGapMs)}`,
+        `ticks: ${ticks.count} (${ticks.away} while not active), longest gap ${seconds(ticks.longestGapMs)}`,
+        `requests: ${requests.sent} sent (${requests.away} while not active), ${requests.answered} answered, ${requests.failed} failed, ${requests.cancelled} cancelled, ${sentAt.size} waiting`,
+        `request time: average ${average} ms, longest ${requests.longestMs} ms`,
+        `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
+        `events (oldest first${dropped > 0 ? `, ${dropped} earlier ones dropped` : ''}):`,
+        ...events.map((e) => `${clock(e.atMs)} ${e.what}`),
+      ]
+      return lines.join('\n')
+    },
+  }
+}
+
+/** The one log of the running app: the shell's adapters write to it, the panel shows it. */
+export const shellDiagnostics: DriveDiagnostics = createDriveDiagnostics()

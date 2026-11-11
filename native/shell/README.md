@@ -10,17 +10,48 @@ This folder has its own `package.json`. It adds no dependency to the web app.
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Swift plugin `RouteIQNative` | `shell-native/ios/Sources/RouteIQNativePlugin/` | `CLLocationManager` with background updates, `AVSpeechSynthesizer` with a ducking audio session, `isIdleTimerDisabled`. Adapted from the probe (`native/probe` on branch `native-probe`). Positions are handed to the page and never logged or stored. |
+| Swift plugin `RouteIQNative` | `shell-native/ios/Sources/RouteIQNativePlugin/` | `CLLocationManager` with background updates, `AVSpeechSynthesizer` with a ducking audio session, `isIdleTimerDisabled`, and `URLSession` for route requests. Adapted from the probe (`native/probe` on branch `native-probe`). Positions are handed to the page and never logged or stored. |
 | Bridge script | `src/bridge.js` | Loaded before the web app; puts the plugin on `window.RouteIQNative`. |
-| Web adapters | `../../src/device/native/` | Position source, speaker, screen lock, "never hidden" and the tick source for the live runner, used when the plugin is present. Tested with a fake plugin in `../../tests/nativeShell.test.tsx` and `../../e2e/shell.spec.ts`. |
+| Web adapters | `../../src/device/native/` | Position source, speaker, screen lock, "never hidden", the tick source for the live runner, the Directions transport and the drive diagnostics, used when the plugin is present. Tested with a fake plugin in `../../tests/nativeShell.test.tsx`, `../../tests/shellHttp.test.ts` and `../../e2e/shell.spec.ts`. |
 | Token screen | `../../src/ShellRoot.tsx` | The build has no Mapbox token; the app asks for a `pk.` token on the phone. |
 | Build scripts | `scripts/` | `build-web.mjs` builds the web app into `www/` with no token and searches the output for tokens; `generate-ios.mjs` creates and patches the Xcode project. |
 | Cloud build | `../../.github/workflows/shell-ios.yml` | Unsigned `RouteIQ-unsigned.ipa`. |
 
 Plugin methods: `startLocation`, `stopLocation`, `getCurrentPosition`, `speak({ text })` (resolves
-when the line ends), `cancelSpeech`, `keepAwake({ on })`. Events: `fix` (`lng`, `lat`, `accuracy`,
-and `speed`, `course`, `timestamp` when known), `locationError` (`kind`), `tick` (once a second
-while the location stream is on).
+when the line ends), `cancelSpeech`, `keepAwake({ on })`, `httpGet({ id, url, timeoutMs })`,
+`httpCancel({ id })`. Events: `fix` (`lng`, `lat`, `accuracy`, and `speed`, `course`, `timestamp`
+when known), `locationError` (`kind`), `tick` (once a second while the location stream is on),
+`appState` (`state`: `active`, `inactive` or `background`).
+
+### Route requests while locked
+
+A web view's own `fetch` may be held back by iOS while the phone is locked, so inside the shell the
+Mapbox Directions client does not use it. `../../src/main.tsx` swaps the client's transport
+(`setDirectionsTransport` in `../../src/providers/mapbox/client.ts`) for
+`../../src/device/native/http.ts`, which calls the plugin's `httpGet`: a `URLSession` data task in
+`RouteIQHttp.swift`. Search and map tiles stay on the web view (they are used with the app in
+front); the signal tiles are files inside the app.
+
+- **Only Mapbox.** `httpGet` takes `https://api.mapbox.com/` addresses and rejects anything else
+  with `not-allowed` (checked on the web side and again in Swift, as text and as a parsed URL).
+  Redirects are not followed.
+- **Time limit and cancel.** The whole request has `timeoutMs` (20 s; 1 to 60 s accepted). Aborting
+  on the web side calls `httpCancel` with the request's id, which cancels the `URLSession` task.
+  The web side also gives up 5 s after the limit if the native side never answers.
+- **Answers.** Any HTTP status resolves with `{ status, body, ms }`, so 401, 403 and 429 read the
+  same as in a browser. No answer rejects with `cancelled`, `timeout` or `network`.
+- **Nothing is logged.** The address holds the token and the position. No Swift file logs or
+  stores it, and an error is passed on as its kind only (`tests/shell.test.mjs` checks the source).
+
+### Drive diagnostics
+
+**Drive diagnostics** in the app's top bar opens a small log with a **Copy** button
+(`../../src/DriveDiagnosticsPanel.tsx`, `../../src/device/native/diagnostics.ts`): fixes and ticks
+received and the longest wait between them, route requests sent and answered with their times,
+spoken lines started and finished, and when the app went to the background and came back. It is
+in memory only, and holds counts, times of day and whole milliseconds: no position, no address, no
+token (`../../tests/shellHttp.test.ts` checks that by pattern). A long wait between ticks while in
+the background means iOS did not run the web code.
 
 ### Ticks while locked
 

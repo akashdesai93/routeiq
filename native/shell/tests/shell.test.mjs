@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import plist from 'plist';
 import { checkInfoPlist, patchInfoPlist } from '../scripts/info-plist.mjs';
 import { findTokens, injectBridge, usesRootPaths } from '../scripts/web-checks.mjs';
@@ -74,14 +74,40 @@ test('the Swift files follow the rule the Capacitor CLI relies on', () => {
   // The CLI registers the first Objective-C name annotation of each file as a plugin class.
   assert.equal(plugin.match(/@objc\(([A-Za-z]+)\)/)?.[1], 'RouteIQNativePlugin');
   assert.equal(/@objc\(/.test(engine), false);
+  assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8')), false);
 });
 
-test('positions are never logged or stored by the native code', () => {
+test('positions and request addresses are never logged or stored by the native code', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
-  for (const name of ['RouteIQNativePlugin.swift', 'RouteIQEngine.swift']) {
+  const names = readdirSync(dir).filter((name) => name.endsWith('.swift'));
+  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQNativePlugin.swift']);
+  for (const name of names) {
     const swift = readFileSync(new URL(name, dir), 'utf8');
-    for (const banned of ['print(', 'NSLog(', 'os_log', 'Logger(', 'FileManager', 'write(to']) {
+    for (const banned of ['print(', 'NSLog(', 'os_log', 'Logger(', 'FileManager', 'write(to', 'debugPrint', 'dump(']) {
       assert.equal(swift.includes(banned), false, `${name} uses ${banned}`);
     }
   }
+});
+
+test('native route requests go to Mapbox only, are not redirected, and say nothing about the address', () => {
+  const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
+  const http = readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8');
+  const plugin = readFileSync(new URL('RouteIQNativePlugin.swift', dir), 'utf8');
+  // The one allowed address, checked as text and again as a parsed URL.
+  assert.match(http, /static let allowedPrefix = "https:\/\/api\.mapbox\.com\/"/);
+  assert.match(http, /text\.hasPrefix\(allowedPrefix\)/);
+  assert.match(http, /parts\.host == allowedHost/);
+  assert.equal([...http.matchAll(/https?:\/\/[^"\s]+/g)].every((m) => m[0].startsWith('https://api.mapbox.com/')), true);
+  // A redirect is answered with "do not follow".
+  assert.match(http, /willPerformHTTPRedirection[\s\S]*?completionHandler\(nil\)/);
+  // Cancelling really cancels the URLSession task.
+  assert.match(http, /entry\.task\?\.cancel\(\)/);
+  // An error's own text can hold the URL: only fixed words and the failure's kind are passed on.
+  // The request file builds no text at all; the plugin never puts the URL into one.
+  assert.equal(http.includes('\\('), false);
+  assert.equal(/\\\((url|text|request)\b/.test(plugin), false);
+  for (const swift of [http, plugin]) assert.equal(swift.includes('localizedDescription'), false);
+  // Both methods are registered with Capacitor.
+  assert.match(plugin, /CAPPluginMethod\(name: "httpGet"/);
+  assert.match(plugin, /CAPPluginMethod\(name: "httpCancel"/);
 });

@@ -44,10 +44,22 @@ export interface RouteIQNativePlugin {
   /** True: the screen does not dim or lock by itself. */
   keepAwake(options: { on: boolean }): Promise<unknown>
   /**
+   * A GET made by iOS (URLSession) instead of the web view, to
+   * https://api.mapbox.com/ only. Resolves with the HTTP status (any status),
+   * the body as text and the milliseconds it took. Rejects with code
+   * 'not-allowed' (another address), 'cancelled', 'timeout' or 'network'.
+   * `id` names the request for httpCancel.
+   */
+  httpGet(options: { id: string; url: string; timeoutMs: number }): Promise<{ status?: number; body?: string; ms?: number }>
+  /** Stops the request with this id, if it is still out. */
+  httpCancel(options: { id: string }): Promise<unknown>
+  /**
    * 'fix': a position. 'locationError': the GPS failed or was refused.
    * 'tick': about once a second while the location stream is on, from a
    * native timer, so the web side has a clock that iOS does not throttle.
+   * 'appState': the app became 'active', 'inactive' or went to the 'background'.
    */
+  addListener(event: 'appState', listener: (change: { state?: string }) => void): Promise<NativeListenerHandle>
   addListener(event: 'fix', listener: (fix: NativeFix) => void): Promise<NativeListenerHandle>
   addListener(event: 'locationError', listener: (error: NativeLocationError) => void): Promise<NativeListenerHandle>
   addListener(event: 'tick', listener: () => void): Promise<NativeListenerHandle>

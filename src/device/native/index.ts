@@ -2,6 +2,9 @@ import { currentPosition, type LocationResult, type PositionSource } from '../ge
 import type { Speaker } from '../speech.ts'
 import type { PageVisibility } from '../visibility.ts'
 import type { ScreenWakeLock } from '../wakeLock.ts'
+import type { DirectionsTransport } from '../../providers/mapbox/client.ts'
+import { shellDiagnostics, type DriveDiagnostics } from './diagnostics.ts'
+import { nativeTransport } from './http.ts'
 import { nativePlugin, type RouteIQNativePlugin } from './plugin.ts'
 import { nativeGeolocation, nativePositionSource } from './position.ts'
 import { nativeEvery } from './pulse.ts'
@@ -20,14 +23,53 @@ export interface NativeDevice {
   readonly every: (ms: number, fn: () => void) => () => void
 }
 
-export function nativeDeviceFor(plugin: RouteIQNativePlugin): NativeDevice {
+/**
+ * `log`: the drive diagnostics. It is told that a fix or a tick came, that a
+ * line was spoken and that the GPS went on or off; never what or where.
+ */
+export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnostics = shellDiagnostics): NativeDevice {
+  const source = nativePositionSource(plugin)
+  const every = nativeEvery(plugin)
   return {
-    source: nativePositionSource(plugin),
-    speaker: createNativeSpeaker(plugin),
+    source: {
+      start(onFix, onError) {
+        log.gps(true)
+        const stop = source.start((fix) => {
+          log.fix()
+          onFix(fix)
+        }, onError)
+        return () => {
+          log.gps(false)
+          stop()
+        }
+      },
+    },
+    speaker: createNativeSpeaker(plugin, { log }),
     wakeLock: nativeWakeLock(plugin),
     visibility: ALWAYS_IN_FRONT,
-    every: nativeEvery(plugin),
+    every: (ms, fn) =>
+      every(ms, () => {
+        log.tick()
+        fn()
+      }),
   }
+}
+
+/**
+ * Call once at startup. Inside the shell it starts the drive diagnostics'
+ * record of the app going to the background and coming back, and returns
+ * the transport that sends Directions requests through native networking
+ * (for setDirectionsTransport). Null in a browser, where nothing changes.
+ */
+export function startNativeShell(log: DriveDiagnostics = shellDiagnostics): DirectionsTransport | null {
+  const plugin = nativePlugin()
+  if (plugin === null) return null
+  try {
+    void plugin.addListener('appState', (change) => log.appState(change?.state)).catch(() => {})
+  } catch {
+    // Diagnostics only: the drive does not depend on it.
+  }
+  return nativeTransport(plugin, { log })
 }
 
 /** The shell's device, or null in a browser: the caller then uses the browser's own. */
