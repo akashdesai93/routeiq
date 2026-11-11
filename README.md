@@ -19,6 +19,9 @@ route by itself when a faster one holds up (see Rerouting). "Start drive" does t
 for real: it drives the route you picked (a side-street route too), follows the device's position to the destination, checks for faster routes
 as you go, switches by itself and says so out loud, with turn prompts (see Live drive).
 What comes next is in [PLAN.md](PLAN.md).
+To try it on a phone, the same app is published to GitHub Pages at
+https://akashdesai93.github.io/routeiq/: setup and a test checklist are in
+[docs/phone-testing.md](docs/phone-testing.md).
 
 ## Run it on Windows
 
@@ -173,6 +176,11 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
   tokens on localhost unless localhost is on the list, and it does not accept IP
   addresses, so use `localhost`, not `127.0.0.1`.
 - `.env.local` is git-ignored. Only `.env.example` (a placeholder) is meant for git.
+- The GitHub Pages build (`.github/workflows/pages.yml`) uses its own public token, the
+  repo secret `VITE_MAPBOX_TOKEN_PAGES`, URL-restricted to `https://akashdesai93.github.io`.
+  It is passed to the build step only and never printed; the build stops if it is missing
+  or not a `pk.` token. The site is served under `/routeiq/` (`PAGES_BASE`); local dev,
+  preview and e2e keep `/`. See [docs/phone-testing.md](docs/phone-testing.md).
 
 ## Layout
 
@@ -993,7 +1001,8 @@ current route).
 
 **Not verified on a real phone.** Everything above was tested with scripted and replayed
 positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audio over
-CarPlay or Bluetooth, and battery use have not been tried.
+CarPlay or Bluetooth, and battery use have not been tried. The checklist for the first
+real-phone test is [docs/phone-testing.md](docs/phone-testing.md).
 
 ## Pinned versions (checked Nov 11, 2026)
 
@@ -1012,6 +1021,12 @@ CarPlay or Bluetooth, and battery use have not been tried.
 TypeScript), so `npm ci` installs the same tree that was tested.
 
 ## Privacy
+
+**The hosted test site** (GitHub Pages, https://akashdesai93.github.io/routeiq/) sends
+Mapbox exactly what local development sends, described below; nothing else is added.
+GitHub Pages serves static files only: it receives no trip data, and the app sends
+nothing to GitHub. Like any web server it sees the visitor's IP address when the page
+and its files (the bundled signal tiles among them) are loaded.
 
 **Your location.** Outside a live drive (next paragraph) the device's location is read
 only when you press "Use my location": once, never on page load and never in the

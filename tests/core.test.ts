@@ -47,6 +47,7 @@ describe('token check', () => {
   it('explains a token Mapbox rejects at runtime', () => {
     expect(tokenErrorHelp(401)).toContain('rejected the token')
     expect(tokenErrorHelp(403)).toContain('http://localhost:5173')
+    expect(tokenErrorHelp(403, 'https://akashdesai93.github.io')).toContain('add https://akashdesai93.github.io to its allowed URLs')
     expect(tokenErrorHelp(404)).toBeNull()
     expect(tokenErrorHelp(undefined)).toBeNull()
   })

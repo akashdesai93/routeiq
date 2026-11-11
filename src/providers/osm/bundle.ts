@@ -16,6 +16,15 @@ import type { OsmSignalNode, OsmSignalTile } from './adapter.ts'
 /** Where the bundled files are served from, under the site root. */
 export const OSM_BUNDLE_PATH = 'seed/osm-signals'
 
+/**
+ * The folder the bundled files are served from, for a site served under
+ * `base` (Vite's BASE_URL: "/" locally, "/routeiq/" on GitHub Pages). No
+ * trailing slash: "/routeiq/seed/osm-signals".
+ */
+export function osmBundleUrl(base: string): string {
+  return `${base.endsWith('/') ? base : `${base}/`}${OSM_BUNDLE_PATH}`
+}
+
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors'
 export const OSM_LICENSE = 'ODbL 1.0, https://www.openstreetmap.org/copyright'
 

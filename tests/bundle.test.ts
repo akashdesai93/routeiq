@@ -17,6 +17,7 @@ import {
   groupIntoTiles,
   isOsmBundleIndex,
   OSM_BUNDLE_PATH,
+  osmBundleUrl,
   tileRowsHas,
 } from '../src/providers/osm/bundle.ts'
 import { createBundleLayer, memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
@@ -300,6 +301,19 @@ describe('the bundle layer', () => {
     [-80.81, 35.25],
     [-80.79, 35.25],
   ]
+
+  it('serves the bundle under the site base: "/" locally, "/routeiq/" on GitHub Pages', async () => {
+    expect(osmBundleUrl('/')).toBe('/seed/osm-signals')
+    expect(osmBundleUrl('/routeiq/')).toBe('/routeiq/seed/osm-signals')
+    expect(osmBundleUrl('/routeiq')).toBe('/routeiq/seed/osm-signals')
+    const pagesBase = osmBundleUrl('/routeiq/')
+    const files = staticFiles(
+      Object.fromEntries(Object.entries(bundleFiles()).map(([path, body]) => [path.replace(BASE, pagesBase), body])),
+    )
+    const layer = createBundleLayer({ baseUrl: pagesBase, fetchImpl: files.fetchImpl })
+    expect((await layer.get(WEST))!.nodes).toHaveLength(1)
+    expect(files.requested).toEqual([`/routeiq/seed/osm-signals/index.json`, `/routeiq/seed/osm-signals/${WEST}.json`])
+  })
 
   it('says how the bundle stands on a tile, reading the index once', async () => {
     const files = staticFiles(bundleFiles())
