@@ -80,7 +80,16 @@ export interface RouteCandidate {
    * runs without turn prompts.
    */
   readonly guidance?: readonly GuidanceStep[]
+  /**
+   * Where the route came from. 'probe': asked for through a via point beside
+   * the fastest route (side-street probing, see probe.ts), not one of the
+   * provider's own alternatives. Left out, or 'provider': the provider offered it.
+   */
+  readonly source?: RouteSource
 }
+
+/** See RouteCandidate.source. */
+export type RouteSource = 'provider' | 'probe'
 
 /** Something to say before a maneuver, and where along the route to say it. */
 export interface GuidanceAnnouncement {

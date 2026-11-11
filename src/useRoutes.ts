@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  DEFAULT_PROBE_BUDGET,
+  mergeProbeRoutes,
+  planProbes,
   rankRoutes,
   resolveSelectedId,
   withSignalCounts,
@@ -9,7 +12,7 @@ import {
   type RouteSignal,
 } from './core/index.ts'
 import type { DirectionsResult } from './providers/mapbox/adapter.ts'
-import { fetchDirections } from './providers/mapbox/client.ts'
+import { fetchDirections, fetchProbeRoute } from './providers/mapbox/client.ts'
 import { loadSignalData, signalSources, type LoadedSignalData } from './signalData.ts'
 
 /**
@@ -20,7 +23,10 @@ import { loadSignalData, signalSources, type LoadedSignalData } from './signalDa
 export type SignalsStatus = 'loading' | 'ready' | 'partial'
 
 export interface RoutesState {
-  /** In the provider's order. signalCount and signalCoverage are filled once the signal data is in. */
+  /**
+   * In the provider's order, then any probed routes (source 'probe') as they
+   * come back. signalCount and signalCoverage are filled once the signal data is in.
+   */
   routes: readonly RouteCandidate[]
   /**
    * The same routes, best first, each with its reasons (see rankRoutes). The
@@ -92,9 +98,62 @@ function useSignalData(routes: readonly RouteCandidate[]) {
 }
 
 /**
+ * Side-street probes for the main routes on screen (PLAN step 11b): the via
+ * points planProbes picks, each asked for as origin → via → destination once
+ * the main routes have stayed put for the budget's debounce. A new set of
+ * main routes (a pin moved, a retry) cancels the wait and aborts the requests
+ * in flight. A probe that fails is simply missing. Returns the probed routes
+ * that came back, as they arrive; empty until then.
+ */
+function useProbeRoutes(token: string | null, routes: readonly RouteCandidate[]) {
+  const [settled, setSettled] = useState<{
+    routes: readonly RouteCandidate[]
+    /** One slot per via point, in planProbes order; null until (or unless) its probe came back. */
+    slots: readonly (RouteCandidate | null)[]
+  } | null>(null)
+
+  useEffect(() => {
+    if (token === null || routes.length === 0) return
+    const vias = planProbes(routes, DEFAULT_PROBE_BUDGET)
+    if (vias.length === 0) return
+    const origin = routes[0]!.geometry[0]!
+    const destination = routes[0]!.geometry.at(-1)!
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      vias.forEach((via, i) => {
+        void fetchProbeRoute({ origin, via: via.position, destination, token, signal: controller.signal }).then((probe) => {
+          if (controller.signal.aborted || probe === null) return
+          // Kept in via order, not arrival order, so the same answers always merge the same way.
+          setSettled((prev) => {
+            const slots = prev?.routes === routes ? [...prev.slots] : vias.map(() => null)
+            slots[i] = probe
+            return { routes, slots }
+          })
+        })
+      })
+    }, DEFAULT_PROBE_BUDGET.debounceMs)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [token, routes])
+
+  return useMemo(
+    () =>
+      settled !== null && settled.routes === routes
+        ? settled.slots.filter((r): r is RouteCandidate => r !== null)
+        : NO_ROUTES,
+    [settled, routes],
+  )
+}
+
+/**
  * Fetches routes whenever the origin or destination changes and aborts the
  * request it replaces. One fetch per change, no polling here (the simulated drive polls: useDriveSim.ts).
  * A null token means "do not fetch".
+ *
+ * Side-street probes (useProbeRoutes) join the routes once they come back,
+ * tagged source 'probe', and are ranked with them by the same rules.
  *
  * Signal counts are added on top when the signal data arrives: routes show
  * first, and a failed signal download never touches them. The routes are
@@ -130,7 +189,14 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
   }, [token, oLng, oLat, dLng, dLat, key])
 
   const result = token !== null && settled?.key === key ? settled.result : null
-  const fetched = result?.ok ? result.routes : NO_ROUTES
+  const provided = result?.ok ? result.routes : NO_ROUTES
+  // Probes go out after the main routes are on screen; the main routes never wait for them.
+  const probed = useProbeRoutes(token, provided)
+  // The same array while nothing new is added: a new one would load (and blank) the signal counts again.
+  const fetched = useMemo(() => {
+    const merged = mergeProbeRoutes(provided, probed)
+    return merged.length === provided.length ? provided : merged
+  }, [provided, probed])
   const signals = useSignalData(fetched)
   const signalData = signals.loaded?.data ?? null
   const counted = useMemo(() => withSignalCounts(fetched, signalData), [fetched, signalData])

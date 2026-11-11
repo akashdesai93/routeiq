@@ -67,7 +67,8 @@ sentence: "I start a drive and it speaks the turns in order, then says I have ar
 "when a faster route holds up, it switches by itself and tells me once", "when nothing is
 faster, it never switches", "a wrong turn: it says I am off the route, finds a new one and
 gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
-and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix".
+and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix",
+"when a side street saves time, it is offered and wins".
 
 ```powershell
 npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
@@ -84,6 +85,8 @@ start e2e-report\index.html                    # the one-page report
   (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a
   made-up road network between the trip's two points (`e2e/world/roads.ts`): three routes
   that share their start and end, answered from wherever the car is, as Mapbox does.
+  Some scenarios add a side street Mapbox never offers, reachable only by a request with
+  a via point, which is answered along the road nearest the via (as Mapbox snaps it).
   Traffic is a script (`e2e/world/traffic.ts`: "a jam on A from the second check on").
   Search answers from the hand-written fixtures in `tests/fixtures`, the map style is a
   blank one, and Overpass answers as each scenario says.
@@ -713,13 +716,52 @@ the destination and Waze picks the whole route. Source:
 | `maxUrlLength` | 2048 | Google Maps URL length cap |
 | `coordinateDecimals` | 6 | Decimals in URL coordinates (about 0.1 m) |
 
-## Side-street probing (planned)
+## Side-street probing
 
 Mapbox Directions returns at most three routes, so a faster cut-through outside them is
-never seen. Step 11 widens the search with via points: `selectViaPoints` (src/core/probe.ts,
-step 11a, pure) picks a few points just off the fastest route, and step 11b will ask
-Mapbox for origin → via → destination and rank the results like any other route, so a
-side street wins only by ETA. Nothing in the app calls it yet.
+never seen. The plan screen widens the search with via points: `selectViaPoints`
+(src/core/probe.ts, pure) picks a few points just off the fastest route, and once the
+three routes are on screen the app asks Mapbox for origin → via → destination for each,
+then ranks what comes back with the other routes, by the same rules
+(ETA first, signals only inside 30 s), so a side street wins only on ETA. A probed route
+is marked "via side streets" in the route list.
+
+- **When.** Probes go out 800 ms after the main routes arrive (`debounceMs`). The main
+  routes never wait for them: they show, rank and get their signal counts first, and a
+  probed route joins the list (and the ranking) when it comes back. A pin move, a picked
+  place or a retry cancels the wait and aborts any probe in flight.
+- **How many.** At most `requestsPerPlan` (2) probe requests per plan, cut from
+  `selectViaPoints`' order. A trip with nothing to probe (freeway-only, or under 3 km)
+  makes none. Probes are not made during a drive yet (the reroute engine, #5).
+- **The request.** `fetchProbeRoute` (src/providers/mapbox/client.ts): `driving-traffic`,
+  the three coordinates, `waypoints=0;2` and no alternatives. With `waypoints` naming only
+  the origin and the destination, the via is a silent waypoint: Mapbox's docs say the
+  parameter can "guide the path of the route without introducing additional legs"
+  ([Directions API, `waypoints`](https://docs.mapbox.com/api/navigation/directions/),
+  checked Nov 11, 2026), so the answer is one leg, with no stop or "arrive" at the via,
+  and its ETA is a drive straight through.
+- **Failures are dropped.** A via too far from a road (`NoSegment`, HTTP 200 per the
+  docs' error table), no route, rate limiting, an HTTP or network error or an abort makes
+  that probe come back empty. Nothing is shown and the plan is untouched.
+- **Repeats are dropped.** Mapbox snaps a via onto the nearest road, and that is often a
+  route already on screen. `mergeProbeRoutes` (src/core/probe.ts) keeps a probed route
+  only when its path differs from every route in the list (`sameRouteGeometry`, 10 m, the
+  same test that keeps a picked route selected; ids are not compared), and tags it
+  `source: 'probe'`.
+
+| `DEFAULT_PROBE_BUDGET` | Default | Meaning |
+| --- | --- | --- |
+| `requestsPerPlan` | 2 | Most probe requests per plan (never more than `maxPoints`; under 1 turns probing off) |
+| `debounceMs` | 800 ms | How long the main routes must stay put before the probes go out |
+
+What a plan costs in Directions requests (100,000 free a month, then $2.00 per 1,000; see
+Planning a trip):
+
+| | Requests |
+| --- | --- |
+| Main routes (Mapbox's up to three) | 1 |
+| Side-street probes | 0 to 2 (0 for freeway-only trips, trips under 3 km, or when the pins move again within 800 ms) |
+| A whole plan | at most 3 |
 
 How the points are chosen: the fastest candidate's surface-street stretches (everything
 outside its freeway spans, with the first and last kilometer cut off) are taken longest
@@ -910,6 +952,10 @@ places and history" removes them, as does clearing the site's data. Where localS
 is full or blocked the panel says so and they last until the page is closed.
 
 Pin positions go to Mapbox, which is how routes are found. They go nowhere else.
+Side-street probes (up to two per plan) send Mapbox the same trip again with one point
+in between: a point 500 or 800 m beside the fastest route Mapbox itself returned, made on
+the device from that route. It says nothing new about you and goes to Mapbox only, in a
+Directions request like the plan's own; it is not stored or logged.
 During a simulated drive the simulated car's position and heading go to Mapbox the same
 way, once per check; that position is a point on the route already on screen, not
 anyone's location. The drive, its log and the reroute settings are kept in memory only.

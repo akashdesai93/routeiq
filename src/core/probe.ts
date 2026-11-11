@@ -1,4 +1,5 @@
 import { alongRouteM, distanceM, isValidLngLat, localProjector, pointAtDistance, pointToSegment } from './geo.ts'
+import { SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
 import type { DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
 
 /**
@@ -199,4 +200,73 @@ export function selectViaPoints(
     found.sort((a, b) => (b.roomM > a.roomM ? 1 : b.roomM < a.roomM ? -1 : 0)).forEach(({ point }, i) => rounds[i]!.push(point))
   }
   return rounds.flat().slice(0, options.maxPoints)
+}
+
+/**
+ * How many probe requests a plan may make, and when (PLAN step 11b). Each
+ * probe is one Directions request on top of the plan's own, so the budget is
+ * small and fixed.
+ */
+export interface ProbeBudget {
+  /**
+   * Most probe requests per plan (one trip, from the moment its main routes
+   * arrive until a pin moves).
+   * A fraction is rounded down; under 1, or not a finite number, turns probing
+   * off. Never more than ProbeOptions.maxPoints.
+   */
+  readonly requestsPerPlan: number
+  /**
+   * How long the main routes must stay on screen before the probes go out, in
+   * milliseconds. A pin moved within this time cancels them, so a run of pin
+   * moves costs no probes until it stops.
+   */
+  readonly debounceMs: number
+}
+
+export const DEFAULT_PROBE_BUDGET: ProbeBudget = {
+  requestsPerPlan: 2,
+  debounceMs: 800,
+}
+
+/**
+ * The via points to probe for one plan: selectViaPoints, cut to the budget.
+ * Empty when the budget is off, there is no usable route, or the trip has
+ * nothing to probe (shorter than minTripM, or freeway-only: no surface-street
+ * stretch of minStretchM away from its ends). Pure: the same routes give the
+ * same points in the same order.
+ */
+export function planProbes(
+  candidates: readonly RouteCandidate[],
+  budget: ProbeBudget = DEFAULT_PROBE_BUDGET,
+  options: ProbeOptions = DEFAULT_PROBE_OPTIONS,
+): ViaPoint[] {
+  const allowed = Number.isFinite(budget.requestsPerPlan) ? Math.floor(budget.requestsPerPlan) : 0
+  const maxPoints = Math.min(allowed, Number.isFinite(options.maxPoints) ? options.maxPoints : 0)
+  if (maxPoints <= 0) return []
+  return selectViaPoints(candidates, { ...options, maxPoints })
+}
+
+/**
+ * The provider's routes with the probed ones added (PLAN step 11b). A probed
+ * route is tagged `source: 'probe'` and kept only when it is a new path. One
+ * that follows the same roads as a route already in the set (sameRouteGeometry
+ * in select.ts; ids are not compared) is dropped: that is what happens when
+ * Mapbox snaps a via point back onto a known route. Probes are deduplicated
+ * among themselves too, the earlier one kept, and a probed route with no
+ * usable travel time or line is dropped. The provider's routes come first, as
+ * they came. Ranking is left to rankRoutes, unchanged, so a probed route wins
+ * only on ETA.
+ */
+export function mergeProbeRoutes(
+  candidates: readonly RouteCandidate[],
+  probed: readonly RouteCandidate[],
+  toleranceM: number = SAME_ROUTE_TOLERANCE_M,
+): RouteCandidate[] {
+  const merged = [...candidates]
+  for (const route of probed) {
+    if (!usable(route)) continue
+    if (merged.some((known) => sameRouteGeometry(known.geometry, route.geometry, toleranceM))) continue
+    merged.push({ ...route, source: 'probe' })
+  }
+  return merged
 }

@@ -1,7 +1,8 @@
 // Traffic scripts for the made-up road network: who is slow, where, and from when.
 // `n` counts the scenario's Directions requests: 1 is the trip planned on the
 // first screen, 2 the first route of the drive, 3 and on the checks for faster
-// routes, about one a minute.
+// routes, about one a minute. A side-street probe (a request with a via point)
+// does not count: it is answered with the traffic of the plan it belongs to.
 
 import { FREE_FLOW, type Traffic } from './roads.ts'
 
@@ -22,4 +23,15 @@ export const NOISY_BUT_NOTHING_FASTER: Traffic = (route, at, n) => {
   if (n <= 2) return FREE_FLOW(route, at, n)
   const phase = route === 'A' ? 0 : route === 'B' ? 2.1 : 4.2
   return FREE_FLOW(route, at, n) * (1 + 0.06 * Math.sin(n * 1.7 + phase))
+}
+
+/**
+ * A jam on Main Corridor just after it jogs east (from a quarter to 40 % of the
+ * trip), the stretch A, B and C all share: Mapbox's three routes all sit in it,
+ * and A stays the fastest of them. Parallel Street (S) keeps straight on there
+ * and misses the jam, so the side street is the fastest way through.
+ */
+export const JAM_WHERE_ALL_THREE_SHARE: Traffic = (route, at, n) => {
+  const jammed = Math.abs(at.side - 300) < 50 && at.f > 0.25 && at.f < 0.4
+  return FREE_FLOW(route, at, n) * (jammed ? 2 : 1)
 }
