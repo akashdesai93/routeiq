@@ -643,6 +643,16 @@ faster route. Saves 2 minutes. Turn in 3.5 miles." The current route was genuine
 missing from an answer only after that what-if switch, on a route Mapbox itself
 ranked slower: that is the case rule 4 now handles by asking.
 
+**Known limit of the overlap rule.** It measures how long two lines run apart, not how
+far apart. A fresh route that leaves the current one for a single stretch under 400 m
+that also fits in the 5% allowance (about one city block around, on a trip with more
+than some 7 km left) counts as the current route: its time is taken as the current
+route's, it is never offered as an alternative, and the line and guidance being driven
+stay as they were. If Mapbox routes around one closed block, the engine therefore does
+not see it; the driver finds out at the block, and the off-route rule takes over from
+there. Two blocks, or one block on a short trip, are a different route.
+`tests/reroute.test.ts` pins both sides.
+
 ## Side-street probing (planned)
 
 Mapbox Directions returns at most three routes, so a faster cut-through outside them is

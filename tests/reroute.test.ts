@@ -258,6 +258,65 @@ describe('the same route, drawn differently (patterns measured on real answers)'
     expect(decision.considered!.turnInM).toBeCloseTo(7000, -2)
   })
 
+  // Review of the overlap rule: where its loose side ends. A stretch apart shorter than
+  // matchMaxGapM that also fits in the 5% allowance is NOT told from the current route,
+  // however far to the side it runs. One city block around is such a stretch.
+  it('known limit: one block around counts as the current route on a long trip, two blocks or a short trip do not', () => {
+    /** North one 125 m block at xM, east `blocks` blocks, and back down to the main road. */
+    const around = (xM: number, blocks: number): Corner[] => [[xM, 0], [xM, 125], [xM + 125 * blocks, 125], [xM + 125 * blocks, 0]]
+    // 17 km to go, about 340 m of the fresh line apart: inside both limits.
+    const oneBlock: Corner[] = [[HERE, 0], ...around(10000, 1), [20000, 0]]
+    expect(isCurrent(oneBlock)).toBe(true)
+    // So it is never weighed as an alternative, whatever time it claims; the exact drawing gives the ETA.
+    const both = decideReroute(INITIAL_REROUTE_STATE, {
+      nowSec: 0,
+      route: onA,
+      positionAlongM: HERE,
+      speedMps: 20,
+      candidates: [fresh(oneBlock, 1700), candidate('A', at(HERE, 0), 2000)!],
+    })
+    expect(both).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 2000, asked: false } })
+    // Offered alone (the provider routes round that block), the driven line and its guidance are
+    // kept and only the time is taken from it: the engine does not see the block as left.
+    const alone = decideReroute(INITIAL_REROUTE_STATE, { nowSec: 0, route: onA, positionAlongM: HERE, speedMps: 20, candidates: [fresh(oneBlock, 1700)] })
+    expect(alone).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 1700 } })
+    // Two blocks: the stretch apart is longer than matchMaxGapM.
+    expect(isCurrent([[HERE, 0], ...around(10000, 2), [20000, 0]])).toBe(false)
+    // One block with 5 km to go: more than 5% of what is left.
+    expect(findCurrentRoute(onA, 15000, [fresh([[15000, 0], ...around(17000, 1), [20000, 0]])])).toBeNull()
+  })
+
+  it('a confirmation carries on when the same alternative comes back drawn a little differently', () => {
+    const first = decideReroute(INITIAL_REROUTE_STATE, {
+      nowSec: 0,
+      route: onA,
+      positionAlongM: 1000,
+      speedMps: 15,
+      candidates: [candidate('A', at(1000, 0), 2000)!, candidate('B', at(1000, 0), 1700)!],
+    })
+    expect(first).toMatchObject({ action: 'stay', code: 'confirming' })
+    // B again a minute later, its corner at 5 km cut 14 m inside: still the route being confirmed.
+    const redrawn = fresh([[1900, 0], [4980, 0], [5000, 20], [5000, 1000], [15000, 1000], [15000, 0], [20000, 0]], 1650)
+    const second = decideReroute(first.nextState, {
+      nowSec: 60,
+      route: onA,
+      positionAlongM: 1900,
+      speedMps: 15,
+      candidates: [candidate('A', at(1900, 0), 1950)!, redrawn],
+    })
+    expect(second).toMatchObject({ action: 'switch', code: 'faster-route', toRouteId: redrawn.id })
+    // Another road in its place starts the count again.
+    const other = decideReroute(first.nextState, {
+      nowSec: 60,
+      route: onA,
+      positionAlongM: 1900,
+      speedMps: 15,
+      candidates: [candidate('A', at(1900, 0), 1950)!, candidate('C', at(1900, 0), 1650)!],
+    })
+    expect(other).toMatchObject({ action: 'stay', code: 'confirming' })
+    expect(other.nextState.pending?.polls).toBe(1)
+  })
+
   it('route gone from the answers while the driver is on the road: stays; gone and off the road: a new route at once', () => {
     const others = [candidate('B', at(HERE, 0), 1500)!, candidate('C', at(HERE, 0), 1600)!]
     const observation = { nowSec: 0, route: onA, positionAlongM: HERE, speedMps: 15, candidates: others }
