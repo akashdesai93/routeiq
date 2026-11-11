@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\02-web-architecture.architecture.json",
+    "sha256": "333b275d99100424664ff8060b76c5dd4c0609707012747767622a74aa5b6f44",
+    "bytes": 10358
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\02-web-architecture.html",
+    "sha256": "804d4f5c10d74f9a2b4b94e68c86b1b92e8c9d948abd95759ddbfa24fb5d31d0",
+    "bytes": 875598
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\receipts\\02-r2\\02-web-architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\receipts\\02-r2\\02-web-architecture.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\receipts\\02-r2\\02-web-architecture.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3846,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "routesOverSuggestedBends": 2
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [],
+      "detours": [
+        {
+          "relationship": {
+            "id": "osm-storage",
+            "from": "osm",
+            "to": "storage",
+            "label": "2. device cache",
+            "collectionIndex": 18,
+            "artifactIndex": 19
+          },
+          "bends": 3,
+          "stretch": 1
+        },
+        {
+          "relationship": {
+            "id": "clt-storage",
+            "from": "clt",
+            "to": "storage",
+            "label": "cached monthly",
+            "collectionIndex": 19,
+            "artifactIndex": 20
+          },
+          "bends": 3,
+          "stretch": 1.142,
+          "directCorridorBlockers": [
+            {
+              "id": "arcgis",
+              "label": "City of Charlotte",
+              "box": [
+                840,
+                490,
+                160,
+                60
+              ]
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "osm → storage needs 3 bends: move node osm or storage so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

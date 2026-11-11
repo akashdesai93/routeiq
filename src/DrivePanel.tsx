@@ -78,7 +78,7 @@ export function DrivePanel({ sim, showWhatIf = false }: DrivePanelProps) {
         <div className="drive-row">
           {!active && (
             <button type="button" onClick={sim.start} disabled={!sim.canStart}>
-              Start drive
+              Start simulated drive
             </button>
           )}
           {status === 'running' && (

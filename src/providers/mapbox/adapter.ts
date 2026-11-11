@@ -3,7 +3,10 @@ import {
   distanceM as distanceBetweenM,
   isValidLngLat,
   routeIdFromGeometry,
+  synthesizeAnnouncements,
   type DistanceSpanM,
+  type GuidanceAnnouncement,
+  type GuidanceStep,
   type LngLat,
   type Maneuver,
   type RouteCandidate,
@@ -239,6 +242,91 @@ function toLimitedAccessSpans(legs: unknown, geometry: readonly LngLat[]): Dista
   return spans
 }
 
+function text(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+}
+
+/** The first usable banner of a step: the one shown from farthest away. */
+function firstBanner(step: Record<string, unknown>): Record<string, unknown> | null {
+  if (!Array.isArray(step.bannerInstructions)) return null
+  for (const banner of step.bannerInstructions as unknown[]) {
+    if (isRecord(banner) && isRecord(banner.primary) && text(banner.primary.text) !== null) return banner
+  }
+  return null
+}
+
+/**
+ * A step's voice instructions as announcements for the maneuver at its END.
+ * `distanceAlongGeometry` is how far before that maneuver the line is to be
+ * spoken, in meters (Directions docs, "voice instruction object"), so it is
+ * due at `endM` minus that, and never before the step begins. The plain
+ * `announcement` text is used; `ssmlAnnouncement` is markup for one
+ * particular speech engine and is ignored.
+ */
+function voiceAnnouncements(step: Record<string, unknown>, startM: number, endM: number): GuidanceAnnouncement[] {
+  if (!Array.isArray(step.voiceInstructions)) return []
+  const out: GuidanceAnnouncement[] = []
+  for (const voice of step.voiceInstructions as unknown[]) {
+    if (!isRecord(voice)) continue
+    const said = text(voice.announcement)
+    const before = nonNegative(voice.distanceAlongGeometry)
+    if (said === null || before === null) continue
+    out.push({ atDistanceM: Math.max(startM, endM - before), text: said })
+  }
+  return out.sort((a, b) => a.atDistanceM - b.atDistanceM)
+}
+
+/**
+ * Turn-by-turn guidance: one entry per step maneuver, in driving order (see
+ * GuidanceStep). Mapbox hangs what is shown and said on the way to a
+ * maneuver on the step BEFORE it (`bannerInstructions`, `voiceInstructions`,
+ * sent with banner_instructions=true and voice_instructions=true), so each
+ * maneuver takes its banner and announcements from the step that leads to it.
+ * Where either is missing, the entry is built from the maneuver itself (its
+ * type, modifier and `instruction`, and the name of the road it leads onto)
+ * and marked `synthesized`. A step without a usable maneuver location is
+ * skipped, as in toManeuvers.
+ */
+function toGuidance(legs: unknown): GuidanceStep[] {
+  const guidance: GuidanceStep[] = []
+  if (!Array.isArray(legs)) return guidance
+  let atDistanceM = 0
+  let approach: { step: Record<string, unknown>; startM: number } | null = null
+  for (const leg of legs as unknown[]) {
+    if (!isRecord(leg) || !Array.isArray(leg.steps)) continue
+    for (const step of leg.steps as unknown[]) {
+      if (!isRecord(step)) continue
+      const maneuver = isRecord(step.maneuver) ? step.maneuver : null
+      const location = maneuver === null ? null : toLngLat(maneuver.location)
+      if (maneuver !== null && location !== null) {
+        const banner = approach === null ? null : firstBanner(approach.step)
+        const primary = banner !== null && isRecord(banner.primary) ? banner.primary : null
+        const secondary = banner !== null && isRecord(banner.secondary) ? text(banner.secondary.text) : null
+        const instruction = text(maneuver.instruction)
+        const voiced = approach === null ? [] : voiceAnnouncements(approach.step, approach.startM, atDistanceM)
+        const type = text(primary?.type) ?? text(maneuver.type) ?? 'unknown'
+        const isDepart = approach === null
+        guidance.push({
+          atDistanceM,
+          location,
+          type,
+          modifier: (primary !== null && text(primary.type) !== null ? text(primary.modifier) : text(maneuver.modifier)) ?? null,
+          primaryText: text(primary?.text) ?? text(step.name) ?? instruction ?? type,
+          secondaryText: secondary,
+          announcements:
+            voiced.length > 0 || isDepart || instruction === null
+              ? voiced
+              : synthesizeAnnouncements(instruction, approach!.startM, atDistanceM),
+          synthesized: !isDepart && (primary === null || voiced.length === 0),
+        })
+      }
+      approach = { step, startM: atDistanceM }
+      atDistanceM += nonNegative(step.distance) ?? 0
+    }
+  }
+  return guidance
+}
+
 /** Null when the route lacks what the app cannot do without: a line, a time, a length. */
 function toCandidate(route: unknown): RouteCandidate | null {
   if (!isRecord(route)) return null
@@ -265,11 +353,13 @@ function toCandidate(route: unknown): RouteCandidate | null {
     limitedAccessSpansM:
       geometry.length === coordinates.length ? toLimitedAccessSpans(route.legs, geometry) : null,
     maneuvers: toManeuvers(route.legs),
+    guidance: toGuidance(route.legs),
   }
 }
 
 /**
- * Turns a Mapbox Directions API v5 JSON body (geometries=geojson, steps=true)
+ * Turns a Mapbox Directions API v5 JSON body (geometries=geojson, steps=true,
+ * and for turn guidance banner_instructions=true and voice_instructions=true)
  * into RouteCandidates. Pure, and never throws: anything unexpected comes back
  * as a typed failure. Route ids come from the geometry (core/hash.ts), so the
  * same route keeps its id from one response to the next; if two routes in one

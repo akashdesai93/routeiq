@@ -99,6 +99,12 @@ export interface RerouteState {
   readonly failedPolls: number
   /** Polls in a row in which no fresh route was the rest of the current one. */
   readonly lostPolls: number
+  /**
+   * Routes the driver turned down ("Keep previous route"), each as the path
+   * that was ahead at that moment and the time until which it is not to be
+   * offered again (see declineRoute). Left out or empty when there are none.
+   */
+  readonly declined?: readonly { readonly geometry: readonly LngLat[]; readonly untilSec: number }[]
 }
 
 /** The state to start a drive with. */
@@ -154,6 +160,7 @@ export type RerouteCode =
   | 'saving-too-small'
   | 'saving-share-too-small'
   | 'recently-abandoned'
+  | 'driver-declined'
   | 'too-late'
   | 'confirming'
   | 'cooldown'
@@ -215,7 +222,7 @@ function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
 }
 
 /** "40 seconds", "1.9 minutes", "3 minutes". Rounded down, so a saving is never overstated. */
-function spokenDuration(sec: number): string {
+export function spokenDuration(sec: number): string {
   const s = Number.isFinite(sec) ? Math.max(0, sec) : 0
   if (s < 90) {
     const whole = Math.floor(s)
@@ -230,7 +237,7 @@ const M_PER_MILE = 1609.344
 const FT_PER_M = 3.28084
 
 /** "300 feet", "0.8 miles", "1 mile". Rounded down, so a turn is never said to be farther than it is. */
-function spokenDistance(meters: number): string {
+export function spokenDistance(meters: number): string {
   const m = Number.isFinite(meters) ? Math.max(0, meters) : 0
   const tenths = Math.floor((m / M_PER_MILE) * 10) / 10
   if (tenths < 0.1) return `${Math.floor((m * FT_PER_M) / 50) * 50} feet`
@@ -501,6 +508,8 @@ function usableEta(route: RouteCandidate): boolean {
  * 9. **No return**: an alternative that goes back to a route left less than
  *    `noReturnSec` ago (see returnOverlapFraction) needs `returnSavingFactor`
  *    times both minimums.
+ *    A route the driver turned down (declineRoute) is not offered again
+ *    at all until its time is up, whatever it saves.
  * 10. **Too late**: the turn-off is where the alternative's line leaves the
  *    current route's line ahead of the driver, or the alternative's first
  *    maneuver that the current route does not share, whichever is sooner.
@@ -544,6 +553,7 @@ export function decideReroute(
     ...state,
     failedPolls: 0,
     abandoned: state.abandoned.filter((a) => nowSec - a.atSec < opts.noReturnSec),
+    declined: (state.declined ?? []).filter((d) => d.untilSec > nowSec),
   }
   const noWinner: RerouteState = { ...base, pending: null }
 
@@ -571,6 +581,7 @@ export function decideReroute(
       abandoned: [...base.abandoned, { geometry: lineFrom(observation.route.geometry, observation.positionAlongM), atSec: nowSec }],
       failedPolls: 0,
       lostPolls: 0,
+      declined: base.declined,
     },
   })
 
@@ -597,6 +608,10 @@ export function decideReroute(
     abandonedLines
       .filter((a) => shareAlong(m.xy, m.divergedAtIndex, plane, a.xy) >= opts.returnOverlapFraction)
       .sort((a, b) => b.atSec - a.atSec)[0] ?? null
+  const declinedLines = (base.declined ?? []).map((d) => d.geometry.filter(isValidLngLat).map(plane.project))
+  /** True when this alternative is a route the driver turned down a moment ago (see declineRoute). */
+  const wasDeclined = (m: Measured) =>
+    declinedLines.some((xy) => shareAlong(m.xy, m.divergedAtIndex, plane, xy) >= opts.returnOverlapFraction)
   const tooLate = (a: RerouteAlternative) => a.turnInM < a.requiredLeadM
   const tooLateReason = (a: RerouteAlternative, what: string) =>
     `${what} turns off in ${spokenDistance(a.turnInM)}, too late to take safely`
@@ -625,7 +640,7 @@ export function decideReroute(
     let closest: RerouteAlternative | null = null
     for (const candidate of ranked.filter(usableEta)) {
       const m = measure(candidate, null, observation.route.maneuvers, spans, observation.speedMps, plane, opts)
-      if (m === null) continue
+      if (m === null || wasDeclined(m)) continue
       closest ??= m.alternative
       if (tooLate(m.alternative)) continue
       return switchTo(
@@ -678,6 +693,10 @@ export function decideReroute(
       )
       continue
     }
+    if (wasDeclined(m)) {
+      refuse('driver-declined', `faster route saves ${spokenDuration(savingSec)}, but you chose to keep this route`)
+      continue
+    }
     const left = returnsTo(m)
     if (
       left !== null &&
@@ -722,4 +741,24 @@ export function decideReroute(
     return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a)
   }
   return switchTo('faster-route', `${saves}, ${turnPhrase(a)}`, winner.candidate, a)
+}
+
+/**
+ * The driver said no to a switch ("Keep previous route"): returns the state
+ * to carry on with, in which `geometryAhead` (the turned-down route, from the
+ * driver on) is not switched to again before `untilSec`. Pass the state from
+ * BEFORE the switch, so the cooldown and the abandoned list are as if the
+ * switch had not been made; a confirmation in progress is dropped. Entries
+ * whose time is up are removed by the next answered poll.
+ */
+export function declineRoute(
+  state: RerouteState,
+  geometryAhead: readonly LngLat[],
+  untilSec: number,
+): RerouteState {
+  return {
+    ...state,
+    pending: null,
+    declined: [...(state.declined ?? []), { geometry: geometryAhead, untilSec }],
+  }
 }

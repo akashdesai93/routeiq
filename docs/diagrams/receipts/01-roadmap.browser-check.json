@@ -1,0 +1,1681 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "browser-check",
+  "evidenceKind": "automated-browser",
+  "status": "pass",
+  "visualReview": "not-requested",
+  "provenance": "current",
+  "deliveryReceiptId": "759d4b3b-099d-4206-9aa3-450179e5ef2c",
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.html",
+    "sha256": "e680ef33e967f394f4883eb0747a2c614a5769e64f003ab4cb74839ee6335990",
+    "bytes": 864403
+  },
+  "state": {
+    "detail": "read",
+    "motion": "still"
+  },
+  "chrome": {
+    "status": "available",
+    "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  },
+  "diagnostics": [],
+  "containment": {
+    "status": "pass",
+    "policy": "fit-or-reader-declared-readable-vertical-scroll",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900,
+        "theme": "light",
+        "innerWidth": 1440,
+        "innerHeight": 900,
+        "scrollWidth": 1440,
+        "scrollHeight": 1284,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1376,
+        "diagramWidth": 1346,
+        "pageComposition": {
+          "bodyPaddingPx": 12,
+          "headerPx": 52,
+          "diagramChromePx": 78,
+          "svgPx": 1141,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 133,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 133,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1600,
+        "height": 1000,
+        "theme": "light",
+        "innerWidth": 1600,
+        "innerHeight": 1000,
+        "scrollWidth": 1600,
+        "scrollHeight": 1485,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1536,
+        "diagramWidth": 1506,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1276,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 148,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 148,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "theme": "light",
+        "innerWidth": 1920,
+        "innerHeight": 1080,
+        "scrollWidth": 1920,
+        "scrollHeight": 1576,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1856,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "theme": "light",
+        "innerWidth": 2048,
+        "innerHeight": 1320,
+        "scrollWidth": 2048,
+        "scrollHeight": 1594,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1920,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 68,
+          "diagramChromePx": 94,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 44,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      }
+    ]
+  },
+  "themeStates": {
+    "status": "pass",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900,
+        "requestedTheme": "light",
+        "resolvedTheme": "light",
+        "ok": true
+      },
+      {
+        "width": 1600,
+        "height": 1000,
+        "requestedTheme": "light",
+        "resolvedTheme": "light",
+        "ok": true
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "requestedTheme": "light",
+        "resolvedTheme": "light",
+        "ok": true
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "requestedTheme": "light",
+        "resolvedTheme": "light",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "requestedTheme": "dark",
+        "resolvedTheme": "dark",
+        "ok": true
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "requestedTheme": "dark",
+        "resolvedTheme": "dark",
+        "ok": true
+      }
+    ]
+  },
+  "readability": {
+    "status": "pass",
+    "minimumProjectedNodeTextPx": 6,
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900,
+        "theme": "light",
+        "innerWidth": 1440,
+        "innerHeight": 900,
+        "scrollWidth": 1440,
+        "scrollHeight": 1284,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1376,
+        "diagramWidth": 1346,
+        "pageComposition": {
+          "bodyPaddingPx": 12,
+          "headerPx": 52,
+          "diagramChromePx": 78,
+          "svgPx": 1141,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 133,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 133,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1600,
+        "height": 1000,
+        "theme": "light",
+        "innerWidth": 1600,
+        "innerHeight": 1000,
+        "scrollWidth": 1600,
+        "scrollHeight": 1485,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1536,
+        "diagramWidth": 1506,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1276,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 148,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 148,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "theme": "light",
+        "innerWidth": 1920,
+        "innerHeight": 1080,
+        "scrollWidth": 1920,
+        "scrollHeight": 1576,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1856,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "theme": "light",
+        "innerWidth": 2048,
+        "innerHeight": 1320,
+        "scrollWidth": 2048,
+        "scrollHeight": 1594,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1920,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 68,
+          "diagramChromePx": 94,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 44,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      }
+    ]
+  },
+  "viewerChrome": {
+    "status": "pass",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900,
+        "theme": "light",
+        "innerWidth": 1440,
+        "innerHeight": 900,
+        "scrollWidth": 1440,
+        "scrollHeight": 1284,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1376,
+        "diagramWidth": 1346,
+        "pageComposition": {
+          "bodyPaddingPx": 12,
+          "headerPx": 52,
+          "diagramChromePx": 78,
+          "svgPx": 1141,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 133,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 133,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 133,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 133,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 85,
+            "spaceAboveNodesPx": 43,
+            "spaceBelowNodesPx": 5
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1600,
+        "height": 1000,
+        "theme": "light",
+        "innerWidth": 1600,
+        "innerHeight": 1000,
+        "scrollWidth": 1600,
+        "scrollHeight": 1485,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1536,
+        "diagramWidth": 1506,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1276,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 148,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 148,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 148,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 148,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 95,
+            "spaceAboveNodesPx": 48,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "theme": "light",
+        "innerWidth": 1920,
+        "innerHeight": 1080,
+        "scrollWidth": 1920,
+        "scrollHeight": 1576,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1856,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 60,
+          "diagramChromePx": 84,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 54,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "theme": "light",
+        "innerWidth": 2048,
+        "innerHeight": 1320,
+        "scrollWidth": 2048,
+        "scrollHeight": 1594,
+        "overflowX": false,
+        "overflowY": true,
+        "verticalScrollAccepted": true,
+        "overflowDisposition": "readable-vertical-scroll",
+        "readerLayout": "adaptive",
+        "readerOverflow": "authored",
+        "readerFit": "width-first",
+        "ok": true,
+        "readerWidth": 1920,
+        "diagramWidth": 1614,
+        "pageComposition": {
+          "bodyPaddingPx": 64,
+          "headerPx": 68,
+          "diagramChromePx": 94,
+          "svgPx": 1368,
+          "cardsPx": 0,
+          "viewBoxHeight": 912
+        },
+        "viewBoxWidth": 1076,
+        "workflowLanes": [
+          {
+            "frameId": "lane-0",
+            "heightPx": 159,
+            "nodeCount": 5,
+            "nodeIds": [
+              "web_routes",
+              "web_brain",
+              "web_live",
+              "web_handoff",
+              "web_freeze"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-1",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "sig_rules",
+              "sig_tiles",
+              "sig_pack",
+              "sig_host"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-2",
+            "heightPx": 159,
+            "nodeCount": 4,
+            "nodeIds": [
+              "probe",
+              "native_start",
+              "core_port",
+              "testflight"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-3",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "strip",
+              "final_ui"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-4",
+            "heightPx": 159,
+            "nodeCount": 3,
+            "nodeIds": [
+              "enrol",
+              "decide",
+              "commute"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          },
+          {
+            "frameId": "lane-5",
+            "heightPx": 159,
+            "nodeCount": 2,
+            "nodeIds": [
+              "apple_dev",
+              "carplay"
+            ],
+            "nodeSpanPx": 102,
+            "spaceAboveNodesPx": 51,
+            "spaceBelowNodesPx": 6
+          }
+        ],
+        "minimumProjectedNodeTextPx": 7.2,
+        "minimumProjectedNonEdgeTextPx": 7.2,
+        "minimumProjectedEdgeTextPx": 8,
+        "minimumProjectedNodeText": "vs Google Maps and Waze",
+        "minimumProjectedNodeTextDetail": "context",
+        "minimumProjectedNodeTextOwner": {
+          "kind": "node",
+          "id": "commute"
+        },
+        "minimumRequiredNodeTextPx": 6,
+        "readabilityOk": true,
+        "hasLegend": true,
+        "hasNavigationDock": true,
+        "legendDockIntersectionArea": 0,
+        "dockStageIntersectionArea": 0,
+        "dockStageGap": 10,
+        "requiredDockStageGap": 10,
+        "viewerChromeStageOk": true,
+        "viewerChromeReserve": 44,
+        "viewerChromeActive": true,
+        "viewerChromeOk": true,
+        "resolvedTheme": "light"
+      }
+    ]
+  },
+  "captures": {
+    "status": "not-requested",
+    "screenshots": [],
+    "contactSheet": null
+  },
+  "sidecars": {
+    "receipt": "01-roadmap.browser-check.json",
+    "files": []
+  }
+}

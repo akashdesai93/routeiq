@@ -15,6 +15,7 @@ import {
   type RouteCandidate,
   type SignalCoverage,
 } from '../src/core/index.ts'
+import { LIVE_IDLE, liveStep, liveView, type LiveEvent, type LiveState } from '../src/core/index.ts'
 import { DEFAULT_DRIVE_SETTINGS } from '../src/drive/simulation.ts'
 import { memoryTextStore } from '../src/storage/local.ts'
 import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
@@ -30,6 +31,7 @@ const { default: App } = await import('../src/App.tsx')
 const { RoutePanel } = await import('../src/RoutePanel.tsx')
 const { DrivePanel } = await import('../src/DrivePanel.tsx')
 const { PlanPanel } = await import('../src/PlanPanel.tsx')
+const { LiveDriveView } = await import('../src/LiveDriveView.tsx')
 
 // Public landmarks only.
 const STADIUM: Place = { id: 'mapbox:stadium', label: 'Bank of America Stadium', position: [-80.8528, 35.2258] }
@@ -97,7 +99,7 @@ describe('App smoke test', () => {
   it('offers the simulated drive in the panel, not startable before there is a route', () => {
     const html = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} />)
     expect(html).toContain('Simulate drive')
-    expect(html).toMatch(/<button type="button" disabled="">Start drive<\/button>/)
+    expect(html).toMatch(/<button type="button" disabled="">Start simulated drive<\/button>/)
     expect(html).toContain('Reroute settings')
     expect(renderToString(<App status={{ kind: 'missing' }} />)).not.toContain('Simulate drive')
   })
@@ -232,7 +234,7 @@ describe('DrivePanel', () => {
     expect(html).toContain('>1×<')
     expect(html).toContain('>20×<')
     expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
-    expect(html).toContain('<button type="button">Start drive</button>')
+    expect(html).toContain('<button type="button">Start simulated drive</button>')
     expect(html).toContain('at most one request per 5 real seconds and 60 per drive')
     expect(html).not.toContain('Pause')
     expect(html).not.toContain('Stop')
@@ -243,14 +245,14 @@ describe('DrivePanel', () => {
     for (const value of [60, 120, 5, 2, 300, 600, 400, 20, 1200, 3]) expect(html).toContain(`value="${value}"`)
     // The what-if control is a development aid and off unless asked for.
     expect(html).not.toContain('What-if')
-    expect(renderToString(<DrivePanel sim={{ ...idle, canStart: false }} />)).toContain('disabled="">Start drive')
+    expect(renderToString(<DrivePanel sim={{ ...idle, canStart: false }} />)).toContain('disabled="">Start simulated drive')
   })
 
   it('running: pause and stop, simulated time, requests used of the cap, and the log newest first', () => {
     const html = renderToString(<DrivePanel sim={{ ...idle, status: 'running', view }} />).replace(/<!-- -->/g, '')
     expect(html).toContain('Pause')
     expect(html).toContain('Stop')
-    expect(html).not.toContain('Start drive')
+    expect(html).not.toContain('Start simulated drive')
     expect(html).toContain('simulated time 3:05')
     expect(html).toContain('15 mi to go')
     expect(html).toContain('Directions requests: 3 of 60 (at most one per 5 s)')
@@ -276,6 +278,136 @@ describe('DrivePanel', () => {
     expect(on).toContain('Clear')
     // Nothing to delay before a drive is on.
     expect(renderToString(<DrivePanel sim={idle} showWhatIf />)).toContain('disabled="">Add delay from the next check')
+  })
+})
+
+describe('Start drive and the live drive view', () => {
+  const nothing = () => {}
+  const T0 = 1_800_000_000_000
+  // Public landmarks only: from Bank of America Stadium towards the airport.
+  const route: RouteCandidate = {
+    id: 'live',
+    geometry: [STADIUM.position, [-80.9, 35.22], AIRPORT.position],
+    durationSec: 900,
+    typicalDurationSec: 840,
+    distanceM: 8600,
+    signalCount: null,
+    signalCoverage: 'none',
+    providerSignalCount: null,
+    intersections: null,
+    limitedAccessSpansM: null,
+    maneuvers: [],
+    guidance: [
+      { atDistanceM: 0, location: STADIUM.position, type: 'depart', modifier: null, primaryText: 'South Mint Street', secondaryText: null, announcements: [], synthesized: false },
+      { atDistanceM: 4300, location: [-80.9, 35.22], type: 'turn', modifier: 'right', primaryText: 'Wilkinson Boulevard', secondaryText: 'US 74 West', announcements: [], synthesized: false },
+    ],
+  }
+  const fixAt = (sec: number) => ({ lng: STADIUM.position[0], lat: STADIUM.position[1], accuracyM: 8, speedMps: 0, headingDeg: null, timeMs: T0 + sec * 1000 })
+  const play = (events: LiveEvent[]): LiveState => events.reduce((state, event) => liveStep(state, event).state, LIVE_IDLE)
+  const started: LiveEvent[] = [
+    { type: 'start', nowMs: T0, destination: AIRPORT.position },
+    { type: 'fix', nowMs: T0, fix: fixAt(0) },
+  ]
+  const driving = play([...started, { type: 'routes', nowMs: T0 + 1000, requestId: 1, routes: [route] }])
+  const render = (state: LiveState, nowMs: number, extra: { replaying?: boolean; speechSupported?: boolean } = {}) =>
+    renderToString(
+      <LiveDriveView
+        state={state}
+        view={liveView(state, nowMs)}
+        destinationLabel="Charlotte Douglas International Airport"
+        onKeepPrevious={nothing}
+        onMute={nothing}
+        onEnd={nothing}
+        onRestart={nothing}
+        {...extra}
+      />,
+    ).replace(/<!-- -->/g, '')
+
+  it('the route panel leads with a large Start drive button and says what it does with the location', () => {
+    const idle = { loading: false, error: null, onSelect: nothing, onRetry: nothing, signalsStatus: 'ready' as const, signalsError: null, onRetrySignals: nothing }
+    const html = renderToString(<RoutePanel {...idle} ranked={[]} selectedId={null} onStartDrive={nothing} />)
+    expect(html).toContain('<button type="button" class="start-drive-button">Start drive</button>')
+    expect(html).toContain('Works while this page stays in front with the screen on')
+    expect(html).toContain('Your location is not stored')
+    expect(renderToString(<RoutePanel {...idle} ranked={[]} selectedId={null} onStartDrive={nothing} canStartDrive={false} />)).toContain('disabled="">Start drive')
+    // Without a handler there is no button.
+    expect(renderToString(<RoutePanel {...idle} ranked={[]} selectedId={null} />)).not.toContain('Start drive')
+    // The app offers it, in the planning layout.
+    const app = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} />)
+    expect(app).toContain('class="start-drive-button">Start drive</button>')
+    expect(app).not.toContain('class="app live"')
+  })
+
+  it('before the first route it says what it is waiting for, with Mute and End already there', () => {
+    const html = render(play(started), T0)
+    expect(html).toContain('Finding a route…')
+    expect(html).toContain('>Mute</button>')
+    expect(html).toContain('>End</button>')
+    expect(html).not.toContain('Keep previous route')
+    expect(render(play([started[0]!]), T0)).toContain('Finding your position…')
+  })
+
+  it('driving: the next turn with its arrow, distance and road, the arrival time, and a quiet status line', () => {
+    const html = render(driving, T0 + 13_000)
+    expect(html).toContain('data-arrow="right"')
+    expect(html).toContain('<span class="live-turn-distance">2.7 mi</span>')
+    expect(html).toContain('Turn right: </span>Wilkinson Boulevard')
+    expect(html).toContain('US 74 West')
+    // Arrival time, minutes left, distance left.
+    expect(html).toMatch(/<p class="live-eta"><strong>\d{1,2}:\d{2}[^<]*<\/strong><span>1[45] min<\/span><span>\d\.\d mi<\/span><\/p>/)
+    expect(html).toContain('Watching for a faster route. · checked 12 s ago · 1 of 60 requests')
+    expect(html).toContain('aria-pressed="false">Mute</button>')
+    expect(html).not.toContain('GPS replay')
+    expect(render(driving, T0 + 13_000, { replaying: true })).toContain('GPS replay (simulated position)')
+    expect(render({ ...driving, muted: true }, T0 + 13_000)).toContain('aria-pressed="true">Unmute</button>')
+  })
+
+  it('shows a switch with one large way to undo it, and warnings in one line each', () => {
+    const switched: LiveState = {
+      ...driving,
+      switchBanner: { untilMs: T0 + 30_000, text: 'Switched to a faster route: saves 3 minutes', canKeep: true },
+      wakeLock: 'unavailable',
+      pausedNote: { seconds: 42, untilMs: T0 + 30_000 },
+    }
+    const html = render(switched, T0 + 20_000)
+    expect(html).toContain('<strong>Switched to a faster route: saves 3 minutes</strong>')
+    expect(html).toContain('class="live-button live-keep">Keep previous route</button>')
+    expect(html).toContain('RouteIQ was paused for 42 s while in the background.')
+    expect(html).toContain('Keep the screen on yourself')
+    // After leaving the route there is nothing to keep.
+    const replanned = render({ ...switched, switchBanner: { untilMs: T0 + 30_000, text: 'New route from here', canKeep: false } }, T0 + 20_000)
+    expect(replanned).toContain('New route from here')
+    expect(replanned).not.toContain('Keep previous route')
+    expect(render(driving, T0, { speechSupported: false })).toContain('This browser cannot speak')
+  })
+
+  it('a failure says why and offers to try again; arrival sums the trip up', () => {
+    const denied = play([started[0]!, { type: 'position-error', nowMs: T0, kind: 'denied' }])
+    const failed = render(denied, T0)
+    expect(failed).toContain('role="alert">Location permission was denied.')
+    expect(failed).toContain('>Try again</button>')
+    expect(failed).toContain('>Close</button>')
+
+    const arrived: LiveState = {
+      ...driving,
+      status: 'arrived',
+      summary: {
+        tripSec: 1500,
+        switches: [{ atMs: T0 + 600_000, code: 'faster-route', reason: 'Switching: saves 3 minutes, turn in 0.8 miles' }],
+        declined: 1,
+        requestsUsed: 26,
+      },
+    }
+    const html = render(arrived, T0 + 1_500_000)
+    expect(html).toContain('You have arrived')
+    expect(html).toContain('Charlotte Douglas International Airport')
+    expect(html).toContain('Trip time 25 min')
+    expect(html).toContain('RouteIQ changed route once:')
+    expect(html).toMatch(/<li>\d{1,2}:\d{2}[^<]*: saves 3 minutes, turn in 0\.8 miles<\/li>/)
+    expect(html).toContain('You kept the previous route once.')
+    expect(html).toContain('Route requests used: 26.')
+    expect(html).toContain('>Done</button>')
+    expect(render({ ...arrived, summary: { ...arrived.summary!, switches: [], declined: 0 } }, T0)).toContain('stayed on the first route')
   })
 })
 

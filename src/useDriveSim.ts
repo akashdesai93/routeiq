@@ -10,7 +10,6 @@ import {
   lineFrom,
   pointAtDistance,
   rankRoutes,
-  withSignalCounts,
   type LngLat,
   type RankedRoute,
   type RerouteOptions,
@@ -18,6 +17,7 @@ import {
   type RouteCandidate,
   type RouteSignal,
 } from './core/index.ts'
+import { fetchFreshRoutes } from './drive/freshRoutes.ts'
 import {
   advance,
   afterRequest,
@@ -27,14 +27,11 @@ import {
   DRIVE_START,
   MIN_REQUEST_GAP_MS,
   pollGate,
-  withWhatIfDelay,
   type DriveClock,
   type DriveLogEntry,
   type DriveSettings,
   type SpeedMultiplier,
 } from './drive/simulation.ts'
-import { fetchDirections } from './providers/mapbox/client.ts'
-import { driveSignalSources, loadSignalData } from './signalData.ts'
 
 export type DriveStatus = 'idle' | 'running' | 'paused' | 'arrived'
 
@@ -167,36 +164,27 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
     const controller = new AbortController()
     run.inFlight = controller
     run.clock = afterRequest(run.clock, performance.now())
-    const result = await fetchDirections({
+    const result = await fetchFreshRoutes({
+      token,
       origin: here.point,
       destination,
-      token,
-      originHeadingDeg: here.bearingDeg,
+      headingDeg: here.bearingDeg,
       signal: controller.signal,
+      whatIf: { route: run.route, alongM: run.clock.alongM, delaySec },
     })
-    // Stopped, or replaced by a new drive, while the request was out.
+    // Stopped, or replaced by a new drive, while the request was out. (The clock waits
+    // for the signal counts too: the engine must be asked about the place the routes
+    // were fetched from, not one further on.)
     if (runRef.current !== run) return
-    if (!result.ok && result.kind === 'aborted') {
+    if (!result.ok && result.aborted) {
       run.inFlight = null
       return
     }
-
-    let fresh: readonly RouteCandidate[] | null = null
-    let candidates: readonly RouteCandidate[] | null = null
-    let signalsById: ReadonlyMap<string, readonly RouteSignal[]> = new Map()
-    if (result.ok) {
-      // A poll never retries failed signal tiles: only the "Retry signals" button does.
-      // The clock keeps waiting meanwhile (inFlight is still set): the engine must be
-      // asked about the place the routes were fetched from, not one further on.
-      const loaded = await loadSignalData(result.routes, driveSignalSources)
-      if (runRef.current !== run) return
-      const counted = withSignalCounts(result.routes, loaded.data)
-      fresh = counted.routes
-      signalsById = counted.signalsByRouteId
-      candidates = withWhatIfDelay(fresh, run.route, run.clock.alongM, delaySec)
-    }
+    const fresh = result.ok ? result.fresh : null
+    const candidates = result.ok ? result.candidates : null
+    const signalsById: ReadonlyMap<string, readonly RouteSignal[]> = result.ok ? result.signalsByRouteId : new Map()
     run.inFlight = null
-    const simulated = candidates !== fresh
+    const simulated = result.ok && result.simulated
     const decision = decideReroute(
       run.engine,
       {

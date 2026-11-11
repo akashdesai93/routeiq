@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b7fa444f-36ba-4d31-be28-f87296750383",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\03-route-choice.sequence.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\03-route-choice.html",
+  "specification": {
+    "sha256": "435ea04a8b8aeae6b685f1b39bc162a0f5107b51ce7eea1833dbbfd85bcd4487",
+    "bytes": 4176
+  },
+  "artifact": {
+    "sha256": "a36af3822b2a52e401958b61c67db32c63c6ac3404e4a750f1cbc6f465f3ee32",
+    "bytes": 842144
+  }
+}

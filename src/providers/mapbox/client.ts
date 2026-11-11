@@ -29,7 +29,7 @@ export interface DirectionsUrlOptions {
 
 /**
  * Directions request URL: traffic-aware driving, with alternatives, full GeoJSON
- * geometry and steps. Coordinates go longitude,latitude, joined by an encoded
+ * geometry, steps, and the banner and voice instructions of each step. Coordinates go longitude,latitude, joined by an encoded
  * semicolon as the Mapbox docs show. Null when a coordinate is not valid.
  *
  * No `depart_at`: without it driving-traffic routes for "now" on live traffic,
@@ -47,6 +47,12 @@ export function buildDirectionsUrl(
     geometries: 'geojson',
     overview: 'full',
     steps: 'true',
+    // Turn guidance for a live drive (Directions docs, checked Nov 2026: both need
+    // steps=true and are available on every profile). voice_units is the unit of the
+    // distances in the spoken text; imperial is also the API's default.
+    banner_instructions: 'true',
+    voice_instructions: 'true',
+    voice_units: 'imperial',
   })
   const heading = options.originHeadingDeg
   if (heading !== undefined && Number.isFinite(heading)) {

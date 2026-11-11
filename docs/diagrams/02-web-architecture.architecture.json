@@ -1,0 +1,526 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RouteIQ web prototype: what is built today",
+    "locale": "en",
+    "output": "02-web-architecture.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "backend": {
+          "label": "Built (in the repo today)"
+        },
+        "cloud": {
+          "label": "In progress now"
+        },
+        "messagebus": {
+          "label": "Data files / on-device storage"
+        },
+        "external": {
+          "label": "Outside service"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "geo",
+      "type": "backend",
+      "label": "src/device",
+      "sublabel": "geolocation.ts: one fix",
+      "tag": "built",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "src/core: pure TypeScript, portable",
+      "sublabel": "types, geo, signals, tiles, rank, select, reroute, places, search. No React, DOM, Mapbox or network",
+      "tag": "built: ports to Swift RouteIQCore",
+      "pos": [
+        240,
+        40
+      ],
+      "size": [
+        560,
+        70
+      ]
+    },
+    {
+      "id": "live",
+      "type": "cloud",
+      "label": "Live drive mode",
+      "sublabel": "core: tracking, guidance, speechQueue, live. device: speech, wakeLock",
+      "tag": "in progress",
+      "pos": [
+        840,
+        40
+      ],
+      "size": [
+        360,
+        70
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "backend",
+      "label": "App.tsx + panels",
+      "sublabel": "Plan, Route, DrivePanel",
+      "tag": "built",
+      "pos": [
+        40,
+        190
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "hooks",
+      "type": "backend",
+      "label": "useRoutes.ts + useDriveSim.ts",
+      "sublabel": "fetch, count, rank, poll, apply switch. Uses src/drive/simulation.ts",
+      "tag": "built",
+      "pos": [
+        240,
+        190
+      ],
+      "size": [
+        360,
+        70
+      ]
+    },
+    {
+      "id": "sigdata",
+      "type": "backend",
+      "label": "src/signalData.ts",
+      "sublabel": "loads tiles a route needs",
+      "tag": "built",
+      "pos": [
+        640,
+        190
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "placehooks",
+      "type": "backend",
+      "label": "Place hooks",
+      "sublabel": "usePlaceSearch, PlaceBook",
+      "tag": "built",
+      "pos": [
+        1040,
+        190
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "map",
+      "type": "backend",
+      "label": "src/map",
+      "sublabel": "MapView: draws only",
+      "tag": "built",
+      "pos": [
+        40,
+        340
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "mbdir",
+      "type": "backend",
+      "label": "providers/mapbox",
+      "sublabel": "adapter.ts + client.ts",
+      "tag": "built",
+      "pos": [
+        240,
+        340
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "osm",
+      "type": "backend",
+      "label": "providers/osm",
+      "sublabel": "tileSource.ts chain",
+      "tag": "built",
+      "pos": [
+        640,
+        340
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "clt",
+      "type": "backend",
+      "label": "providers/charlotte",
+      "sublabel": "optional gap-fill",
+      "tag": "built, may be dropped",
+      "pos": [
+        840,
+        340
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "mbsearch",
+      "type": "backend",
+      "label": "mapbox search",
+      "sublabel": "searchAdapter + Client",
+      "tag": "built",
+      "pos": [
+        1040,
+        340
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "mbgl",
+      "type": "external",
+      "label": "Mapbox GL JS",
+      "sublabel": "map tiles",
+      "pos": [
+        40,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "dirapi",
+      "type": "external",
+      "label": "Mapbox Directions",
+      "sublabel": "driving-traffic, max 3",
+      "pos": [
+        240,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "script",
+      "type": "backend",
+      "label": "scripts/",
+      "sublabel": "build-signal-tiles.mjs",
+      "tag": "built, run by hand",
+      "pos": [
+        440,
+        640
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "messagebus",
+      "label": "public/seed/",
+      "sublabel": "902 tile files + index",
+      "pos": [
+        640,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "arcgis",
+      "type": "external",
+      "label": "City of Charlotte",
+      "sublabel": "ArcGIS signal list",
+      "pos": [
+        840,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "searchapi",
+      "type": "external",
+      "label": "Mapbox Search Box",
+      "sublabel": "/suggest + /retrieve",
+      "pos": [
+        1040,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "geofabrik",
+      "type": "external",
+      "label": "Geofabrik extracts",
+      "sublabel": "NC + SC, build time only",
+      "pos": [
+        40,
+        640
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "overpass",
+      "type": "external",
+      "label": "Overpass API",
+      "sublabel": "backup, outside NC/SC",
+      "pos": [
+        440,
+        490
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "messagebus",
+      "label": "src/storage",
+      "sublabel": "kv.ts: IndexedDB (tiles, city list). local.ts + placeBook.ts: localStorage",
+      "pos": [
+        640,
+        640
+      ],
+      "size": [
+        560,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Orchestration (React hooks + loaders)",
+      "wraps": [
+        "hooks",
+        "sigdata",
+        "placehooks"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "src/providers: adapters + clients",
+      "wraps": [
+        "mbdir",
+        "osm",
+        "clt",
+        "mbsearch"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-geo",
+      "from": "ui",
+      "to": "geo",
+      "label": "Use my location"
+    },
+    {
+      "id": "ui-map",
+      "from": "ui",
+      "to": "map",
+      "label": "pins, lines, dots"
+    },
+    {
+      "id": "map-gl",
+      "from": "map",
+      "to": "mbgl",
+      "label": "draws with"
+    },
+    {
+      "id": "hooks-core",
+      "from": "hooks",
+      "to": "core",
+      "label": "rank, count, decideReroute",
+      "variant": "emphasis"
+    },
+    {
+      "id": "core-live",
+      "from": "core",
+      "to": "live",
+      "variant": "dashed"
+    },
+    {
+      "id": "hooks-sig",
+      "from": "hooks",
+      "to": "sigdata"
+    },
+    {
+      "id": "mbdir-api",
+      "from": "mbdir",
+      "to": "dirapi",
+      "label": "HTTPS"
+    },
+    {
+      "id": "sig-osm",
+      "from": "sigdata",
+      "to": "osm",
+      "label": "tiles by id"
+    },
+    {
+      "id": "sig-clt",
+      "from": "sigdata",
+      "to": "clt",
+      "label": "city list",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "osm-seed",
+      "from": "osm",
+      "to": "seed",
+      "label": "1. bundle"
+    },
+    {
+      "id": "clt-arcgis",
+      "from": "clt",
+      "to": "arcgis",
+      "label": "whole list"
+    },
+    {
+      "id": "script-seed",
+      "from": "script",
+      "to": "seed",
+      "label": "writes tiles"
+    },
+    {
+      "id": "geo-script",
+      "from": "geofabrik",
+      "to": "script",
+      "label": "extracts on disk"
+    },
+    {
+      "id": "place-search",
+      "from": "placehooks",
+      "to": "mbsearch",
+      "label": "typed text"
+    },
+    {
+      "id": "search-api",
+      "from": "mbsearch",
+      "to": "searchapi",
+      "label": "HTTPS"
+    },
+    {
+      "id": "ui-hooks",
+      "from": "ui",
+      "to": "hooks"
+    },
+    {
+      "id": "hooks-mbdir",
+      "from": "hooks",
+      "to": "mbdir",
+      "label": "get routes",
+      "variant": "emphasis"
+    },
+    {
+      "id": "osm-overpass",
+      "from": "osm",
+      "to": "overpass",
+      "label": "3. backup",
+      "fromSide": "left",
+      "toSide": "top"
+    },
+    {
+      "id": "osm-storage",
+      "from": "osm",
+      "to": "storage",
+      "label": "2. device cache",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "clt-storage",
+      "from": "clt",
+      "to": "storage",
+      "label": "cached monthly",
+      "fromSide": "right",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "The portable part",
+      "items": [
+        "src/core is pure TypeScript: same inputs, same answer",
+        "Everything else imports it through src/core/index.ts",
+        "It is the part that gets ported to the Swift package RouteIQCore"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Signal tile chain (providers/osm)",
+      "items": [
+        "1. Bundled tiles in public/seed/osm-signals (NC + SC)",
+        "2. Device cache in IndexedDB via src/storage/kv.ts, refreshed after 30 days",
+        "3. Overpass API, only for tiles the bundle does not fully cover",
+        "Place book lives in localStorage (storage/local.ts, placeBook.ts)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "In progress, not committed yet",
+      "items": [
+        "Live drive mode: real GPS + voice, foreground only",
+        "New core files: tracking.ts, guidance.ts, speechQueue.ts, live.ts",
+        "New device wrappers: speech.ts, wakeLock.ts, visibility.ts"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Outside services",
+      "items": [
+        "Mapbox: Directions, Search Box, GL JS map (public token)",
+        "Overpass: backup only. Geofabrik: build time only",
+        "City of Charlotte list: optional gap-fill, likely to be dropped",
+        "scripts/seed-charlotte.mjs saves the city snapshot into public/seed"
+      ]
+    }
+  ]
+}

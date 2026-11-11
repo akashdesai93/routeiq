@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.architecture.json",
+    "sha256": "d435e5da1931901d338d4a4aad076bb72b9628d7c73510fe4f717dd449110ae3",
+    "bytes": 4798
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.html",
+    "sha256": "8af0fcbcc98fc2d00f32983fab27fbffa30cff52b7b79c6935a054fa4760d72e",
+    "bytes": 854244
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3253,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

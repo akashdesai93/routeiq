@@ -26,6 +26,12 @@ interface RoutePanelProps {
   onRetrySignals: () => void
   /** How old the OpenStreetMap signal data is, in milliseconds since 1970. Null or left out when unknown. */
   signalDataDate?: number | null
+  /** Starts a live drive to the destination, from the device's position. Left out: no button. */
+  onStartDrive?: () => void
+  /** False while a live drive cannot start (no token). */
+  canStartDrive?: boolean
+  /** Shown under the Start drive button: the development replay controls. */
+  startDriveExtra?: ReactNode
   /** Shown under the route list: the simulated drive controls. */
   children?: ReactNode
 }
@@ -61,12 +67,27 @@ export function RoutePanel({
   signalsError,
   onRetrySignals,
   signalDataDate = null,
+  onStartDrive,
+  canStartDrive = true,
+  startDriveExtra,
   children,
 }: RoutePanelProps) {
   const dataMonth = formatDataMonth(signalDataDate)
   return (
     <aside className="panel" aria-label="Routes">
       <h2>Routes</h2>
+      {onStartDrive !== undefined && (
+        <div className="start-drive">
+          <button type="button" className="start-drive-button" onClick={onStartDrive} disabled={!canStartDrive}>
+            Start drive
+          </button>
+          <p className="hint">
+            Follows your location to the destination, checks for faster routes as you go and switches by itself, out
+            loud. Works while this page stays in front with the screen on. Your location is not stored.
+          </p>
+          {startDriveExtra}
+        </div>
+      )}
       {loading && <p role="status">Finding routes…</p>}
       {error && (
         <div className="notice" role="alert">

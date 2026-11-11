@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "4a1c26b7-abcd-4c44-ad49-508e2380425f",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+  "specification": {
+    "sha256": "af8ea34150d318be7e40e84adc16f511a36d8ec548c798cb73b7f3cdef8dbcb5",
+    "bytes": 4838
+  },
+  "artifact": {
+    "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+    "bytes": 849840
+  }
+}

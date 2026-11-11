@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "e16cb9d2-a452-41f4-91e5-960df6aa85cf",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.dataflow.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.html",
+  "specification": {
+    "sha256": "fcc0c2c867447548c1fcd42630c52f70138dec961a19ce9c523c28ceb47ed9b3",
+    "bytes": 5126
+  },
+  "artifact": {
+    "sha256": "90a723e5c3d6c3a0cd3b93b95d396532251256ff8870d06d8873aa85bf7262a5",
+    "bytes": 847989
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "PLANNED: RouteIQ native iOS app (target architecture)",
+    "locale": "en",
+    "output": "05-native-target.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "backend": { "label": "Built (web prototype)" },
+        "cloud": { "label": "In progress now" },
+        "frontend": { "label": "Planned" },
+        "security": { "label": "Needs Apple approval" },
+        "external": { "label": "Outside service / part of iOS" }
+      }
+    }
+  },
+  "components": [
+    { "id": "tscore", "type": "backend", "label": "src/core", "sublabel": "pure TypeScript", "tag": "built", "pos": [290, 40], "size": [160, 64] },
+    { "id": "seed", "type": "backend", "label": "public/seed tiles", "sublabel": "NC + SC, OSM", "tag": "built", "pos": [540, 40], "size": [160, 64] },
+    { "id": "swcore", "type": "frontend", "label": "RouteIQCore", "sublabel": "Swift package", "tag": "planned", "pos": [290, 190], "size": [160, 64] },
+    { "id": "pack", "type": "frontend", "label": "Signal tile pack", "sublabel": "bundled, hosted renewal", "tag": "planned", "pos": [540, 190], "size": [160, 64] },
+    { "id": "ios", "type": "external", "label": "iOS services", "sublabel": "Core Location, speech", "pos": [40, 340], "size": [160, 64] },
+    { "id": "app", "type": "cloud", "label": "RouteIQ app: Swift + SwiftUI", "sublabel": "zero-tap switching to faster routes, spoken reason", "tag": "started: branch native-app", "pos": [290, 340], "size": [410, 64] },
+    { "id": "sdk", "type": "external", "label": "Navigation SDK v3", "sublabel": "Mapbox, on device", "pos": [790, 340], "size": [160, 64] },
+    { "id": "mbapi", "type": "external", "label": "Mapbox APIs", "sublabel": "traffic routes, search", "pos": [1040, 340], "size": [160, 64] },
+    { "id": "carplay", "type": "security", "label": "CarPlay scene", "sublabel": "car screen", "tag": "needs Apple approval", "pos": [290, 490], "size": [160, 64] },
+    { "id": "testflight", "type": "frontend", "label": "TestFlight", "sublabel": "after Apple enrolment", "tag": "planned", "pos": [540, 490], "size": [160, 64] },
+    { "id": "ci", "type": "frontend", "label": "GitHub Actions", "sublabel": "macOS runners", "tag": "planned", "pos": [790, 490], "size": [160, 64] },
+    { "id": "repo", "type": "external", "label": "GitHub repo", "sublabel": "no local Mac needed", "pos": [1040, 490], "size": [160, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "On the iPhone (planned native app)", "wraps": ["swcore", "pack", "ios", "app", "sdk"] }
+  ],
+  "connections": [
+    { "id": "port", "from": "tscore", "to": "swcore", "label": "port to Swift", "variant": "dashed" },
+    { "id": "packit", "from": "seed", "to": "pack", "label": "pack into one file", "variant": "dashed" },
+    { "id": "app-core", "from": "app", "to": "swcore", "label": "count, rank, decide", "variant": "emphasis" },
+    { "id": "app-pack", "from": "app", "to": "pack", "label": "reads tiles" },
+    { "id": "app-ios", "from": "app", "to": "ios", "label": "GPS, voice" },
+    { "id": "app-sdk", "from": "app", "to": "sdk", "label": "navigate", "variant": "emphasis" },
+    { "id": "sdk-api", "from": "sdk", "to": "mbapi", "label": "HTTPS" },
+    { "id": "app-carplay", "from": "app", "to": "carplay", "label": "after entitlement", "variant": "security" },
+    { "id": "tf-app", "from": "testflight", "to": "app", "label": "install build" },
+    { "id": "ci-tf", "from": "ci", "to": "testflight", "label": "upload" },
+    { "id": "repo-ci", "from": "repo", "to": "ci", "label": "push" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "This is the plan, not what exists", "items": ["Decided direction: native Swift/SwiftUI on Mapbox Navigation SDK v3", "The web prototype stays the lab where logic is proven first", "src/core is ported to the Swift package RouteIQCore", "Navigation SDK current version 3.34.2 needs Xcode 16.2+"] },
+    { "dot": "amber", "title": "In progress now", "items": ["Native app started in a separate session (branch native-app)", "iOS probe app with a cloud build (branch native-probe)", "The probe proves GPS and speech with the phone locked"] },
+    { "dot": "rose", "title": "Gates outside our control", "items": ["TestFlight needs Apple Developer Program enrolment ($99/yr)", "CarPlay needs Apple to grant com.apple.developer.carplay-maps", "The grant is not guaranteed; nothing CarPlay can be tested before it", "CI needs a Mapbox secret download token as a GitHub secret"] },
+    { "dot": "slate", "title": "Open decisions", "items": ["Where renewed signal tiles are hosted between app releases", "Whether to drop City of Charlotte data (non-commercial license)", "Final look: the strip design is still being explored"] }
+  ]
+}

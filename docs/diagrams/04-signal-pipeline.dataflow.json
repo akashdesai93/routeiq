@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Signal data pipeline: from map extracts to a count",
+    "locale": "en",
+    "output": "04-signal-pipeline.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "default": { "label": "Data moves" },
+        "emphasis": { "label": "Main path" },
+        "dashed": { "label": "Backup or optional" },
+        "database": { "label": "Stored data" }
+      }
+    }
+  },
+  "stages": [
+    { "label": "Outside sources" },
+    { "label": "Build + store" },
+    { "label": "Load per route" },
+    { "label": "Count rules" },
+    { "label": "Result" }
+  ],
+  "nodes": [
+    { "id": "geofabrik", "type": "external", "label": "Geofabrik", "sublabel": "NC + SC extracts", "stage": 0, "row": 0, "tag": "build time only" },
+    { "id": "overpass", "type": "external", "label": "Overpass API", "sublabel": "outside NC/SC", "stage": 0, "row": 2, "tag": "backup" },
+    { "id": "city", "type": "external", "label": "City of Charlotte", "sublabel": "909 signals", "stage": 0, "row": 3, "tag": "optional" },
+    { "id": "script", "type": "backend", "label": "Build script", "sublabel": "build-signal-tiles", "stage": 1, "row": 0, "tag": "built" },
+    { "id": "bundle", "type": "database", "label": "Bundled tiles", "sublabel": "902 files + index", "stage": 1, "row": 1, "tag": "0.1 degree" },
+    { "id": "cache", "type": "database", "label": "Device cache", "sublabel": "IndexedDB, 30 days", "stage": 1, "row": 2, "tag": "built" },
+    { "id": "chain", "type": "backend", "label": "tileSource.ts", "sublabel": "tiles a route touches", "stage": 2, "row": 1, "tag": "built" },
+    { "id": "loader", "type": "backend", "label": "signalData.ts", "sublabel": "sources kept apart", "stage": 2, "row": 2, "tag": "built" },
+    { "id": "route", "type": "external", "label": "Mapbox route", "sublabel": "line + intersections", "stage": 2, "row": 4 },
+    { "id": "cluster", "type": "backend", "label": "1. Group: 60 m", "sublabel": "one intersection", "stage": 3, "row": 2, "tag": "built" },
+    { "id": "near", "type": "backend", "label": "2. On route: 30 m", "sublabel": "of the route line", "stage": 3, "row": 3, "tag": "built" },
+    { "id": "cross", "type": "backend", "label": "3. Crossing: 40 m", "sublabel": "of a route intersection", "stage": 3, "row": 4, "tag": "built" },
+    { "id": "count", "type": "backend", "label": "Signal count", "sublabel": "full, partial or none", "stage": 4, "row": 4, "tag": "built" }
+  ],
+  "flows": [
+    { "id": "f1", "from": "geofabrik", "to": "script", "label": ".osm.pbf + .poly", "variant": "emphasis" },
+    { "id": "f2", "from": "script", "to": "bundle", "label": "22,613 signals", "variant": "emphasis" },
+    { "id": "f3", "from": "bundle", "to": "chain", "label": "1. bundled tile", "variant": "emphasis" },
+    { "id": "f4", "from": "overpass", "to": "cache", "label": "3. fetched once", "variant": "dashed" },
+    { "id": "f5", "from": "cache", "to": "chain", "label": "2. cached tile", "variant": "dashed" },
+    { "id": "f6", "from": "chain", "to": "loader", "label": "OSM tiles", "variant": "emphasis" },
+    { "id": "f7", "from": "city", "to": "loader", "label": "gap-fill list", "variant": "dashed", "toSide": "bottom" },
+    { "id": "f8", "from": "loader", "to": "cluster", "label": "signal points", "variant": "emphasis" },
+    { "id": "f9", "from": "cluster", "to": "near", "label": "intersections", "variant": "emphasis" },
+    { "id": "f10", "from": "near", "to": "cross", "label": "near the line", "variant": "emphasis" },
+    { "id": "f11", "from": "route", "to": "cross", "label": "its intersections" },
+    { "id": "f12", "from": "cross", "to": "count", "label": "kept signals", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Build (by hand, about monthly)", "items": ["npm run build:signals reads Geofabrik extracts on disk, no network", "Keeps highway=traffic_signals, drops 288 non-intersection subtypes", "Writes 22,613 signals into 902 tile files (1.2 MB)", "index.json lists the 2,500 tiles fully inside NC + SC"] },
+    { "dot": "violet", "title": "Load chain", "items": ["1. Bundle: a covered tile never touches cache or network", "2. Device cache: tiles outside the bundle, refreshed after 30 days", "3. Overpass: 2 requests at a time, 30 s pause doubling to 8 min", "City list only adds a point with no OSM signal within 60 m"] },
+    { "dot": "cyan", "title": "Count rules (DEFAULT_SIGNAL_MATCH)", "items": ["Points within 60 m of each other are one intersection", "It must lie within 30 m of the route line", "The route must have an intersection within 40 m of it", "Counted signals within 40 m along the route count once", "Freeway stretches: signals over 30 m inside are left out"] },
+    { "dot": "amber", "title": "Coverage, and limits", "items": ["Full: every tile loaded, the number is the answer", "Partial: a tile is missing, shown as a lower bound, not ranked", "None: shown as Signals: unknown, never as zero", "Counts are about 1-2 off on some routes", "Location of lights only: no public live signal-colour data"] }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "How a route gets chosen and switched (one check)",
+    "locale": "en",
+    "output": "03-route-choice.html",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    { "id": "car", "type": "external", "label": "Car position", "sublabel": "simulated today" },
+    { "id": "orch", "type": "backend", "label": "useDriveSim.ts", "sublabel": "orchestrates only" },
+    { "id": "mapbox", "type": "external", "label": "Mapbox Directions", "sublabel": "client.ts + adapter.ts" },
+    { "id": "sig", "type": "messagebus", "label": "Signal data", "sublabel": "signalData.ts + tiles" },
+    { "id": "rank", "type": "backend", "label": "core: count + rank", "sublabel": "signals.ts, rank.ts" },
+    { "id": "brain", "type": "backend", "label": "core: reroute.ts", "sublabel": "decideReroute" },
+    { "id": "driver", "type": "frontend", "label": "Driver", "sublabel": "map, log, voice" }
+  ],
+  "segments": [
+    { "from": 150, "to": 376, "label": "1. Fresh routes" },
+    { "from": 386, "to": 596, "label": "2. Count signals, rank" },
+    { "from": 606, "to": 706, "label": "3. Decide" },
+    { "from": 716, "to": 800, "label": "4. Act" }
+  ],
+  "messages": [
+    { "id": "m1", "from": "car", "to": "orch", "y": 170, "label": "position + heading", "note": "Every 60 s of drive time. Real GPS (live drive mode) is in progress." },
+    { "id": "m2", "from": "orch", "to": "mapbox", "y": 240, "label": "driving-traffic request", "variant": "emphasis", "note": "From the car position, heading with 45 degrees either side." },
+    { "id": "m3", "from": "mapbox", "to": "orch", "y": 310, "label": "up to 3 RouteCandidates", "variant": "return", "note": "adapter.ts: ETA, typical time, intersections, freeway stretches." },
+    { "id": "m4", "from": "orch", "to": "sig", "y": 400, "label": "tiles these routes touch" },
+    { "id": "m5", "from": "sig", "to": "orch", "y": 432, "label": "signal points + missing tiles", "variant": "return", "note": "Chain: bundled tiles, device cache, Overpass backup." },
+    { "id": "m6", "from": "orch", "to": "rank", "y": 504, "label": "withSignalCounts, rankRoutes", "note": "Best ETA first. Signals only break ties of 30 s or less." },
+    { "id": "m7", "from": "rank", "to": "orch", "y": 580, "label": "ranked routes", "variant": "return" },
+    { "id": "m8", "from": "orch", "to": "brain", "y": 622, "label": "state + this check + thresholds", "variant": "emphasis", "note": "Pure: same inputs, same answer. Rules in the card below." },
+    { "id": "m9", "from": "brain", "to": "orch", "y": 692, "label": "stay or switch + a sentence", "variant": "return" },
+    { "id": "m10", "from": "orch", "to": "driver", "y": 732, "label": "new route + spoken reason", "variant": "emphasis", "note": "Example: Switching: saves 3 minutes, turn in 0.8 miles. Voice is in progress." }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "A switch needs ALL of these (DEFAULT_REROUTE_OPTIONS)", "items": ["Saves at least 120 s AND at least 5% of the time left", "Turn-off at least 400 m and 20 s ahead (1200 m for a freeway exit)", "The same alternative wins 2 checks in a row", "No switch within 300 s of the last one", "Going back to a route left under 600 s ago needs 2x the saving"] },
+    { "dot": "amber", "title": "Special cases", "items": ["Off route (fresh routes start over 50 m from the line): take the best route at once", "Current route no longer offered: wait 3 checks, then take the best", "Failed check or missing traffic data: stay", "Same-route test is by path within 10 m, never by route id"] },
+    { "dot": "violet", "title": "Where signals come in", "items": ["Alternatives are tried in ranking order", "Signal count only breaks ETA ties of 30 s or less", "A partial or unknown count has no say", "Signals never justify a switch on their own"] },
+    { "dot": "slate", "title": "Status", "items": ["Built: this whole loop with a simulated car (1x, 5x, 20x)", "In progress: real GPS tracking and voice on the web, foreground only", "Planned: the same engine as RouteIQCore in the native app", "Budget today: 1 request per 5 real seconds, 60 per drive"] }
+  ]
+}

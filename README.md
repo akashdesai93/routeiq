@@ -16,8 +16,10 @@ OpenStreetMap extracts, so a trip inside the two states asks no signal server at
 signal data cannot be loaded the count is marked partial, never shown as zero. The routes are ranked: best ETA first, with the signal count breaking
 ties of 30 seconds or less, and the top one is marked "Recommended". A simulated drive
 moves a car along the selected route, asks Mapbox for fresh routes as it goes and changes
-route by itself when a faster one holds up (see Rerouting). What comes next is in
-[PLAN.md](PLAN.md).
+route by itself when a faster one holds up (see Rerouting). "Start drive" does the same
+for real: it follows the device's position to the destination, checks for faster routes
+as you go, switches by itself and says so out loud, with turn prompts (see Live drive).
+What comes next is in [PLAN.md](PLAN.md).
 
 ## Run it on Windows
 
@@ -158,6 +160,12 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 removing, telling two places apart, the caps, and reading a stored
                 book back without trusting it. search.ts says when typed text is
                 worth a request and how requests are grouped into billing sessions.
+                tracking.ts turns raw position fixes into a place on the route, with
+                an off-route verdict that takes patience. guidance.ts picks the turn
+                to show and the announcement that is due. speechQueue.ts is what is
+                said when. live.ts is the live drive as a state machine: events in
+                (a fix, an answer, a tick, the page hidden), next state and effects
+                out (see Live drive).
                 No React, Mapbox, DOM or network, so all of it can be ported to Swift
                 or served.
 src/providers/mapbox/
@@ -177,8 +185,16 @@ src/providers/mapbox/
 src/search/     searchRunner.ts: the typing-to-request logic of a search field, with
                 the timer passed in: debounce, the three-character minimum, and each
                 keystroke aborting the request before it.
-src/device/     geolocation.ts: the one-shot wrapper around the browser's Geolocation
-                API (never rejects; the implementation can be swapped in tests).
+src/device/     The browser behind thin wrappers that never throw and can be swapped in
+                tests; a native shell replaces the first three.
+                geolocation.ts: one fix (currentPosition) and the stream of fixes a
+                live drive follows (geolocationSource, on watchPosition).
+                speech.ts: the voice, on speechSynthesis.
+                wakeLock.ts: the Screen Wake Lock.
+                visibility.ts: whether the page is in front.
+src/live/       runner.ts: runs a live drive without React or any browser API of its
+                own: feeds core/live.ts with fixes, ticks and answers, and carries
+                out the effects it returns through whatever it is handed.
 src/providers/charlotte/
                 adapter.ts: pure ArcGIS GeoJSON page -> SignalPoint[] (operating traffic
                 signals only; typed failures).
@@ -220,6 +236,10 @@ src/signalData.ts  Loads the signal data a set of routes needs (the tiles they t
 src/drive/      simulation.ts: the pure parts of the simulated drive: the simulated
                 clock, when a poll is due, the budget of real Directions requests
                 and the what-if delay. Decides no route.
+                freshRoutes.ts: one check for fresh routes (Directions, signal
+                counts, what-if), shared by the simulated and the live drive.
+                replay.ts, replaySetup.ts: the development GPS replay, a made-up
+                driver that is a position source like the device's GPS.
 src/map/        Mapbox GL JS wrapper (draws only, decides nothing): draggable pins,
                 route lines, signal dots, and for a simulated drive the car, the route
                 being driven and the turn-off of a switch (driveFeatures.ts). pins.ts
@@ -244,6 +264,9 @@ src/useDriveSim.ts Runs a simulated drive on a timer: moves the car, polls Mapbo
                 its position inside the request budget, loads signal counts for the
                 fresh routes (never with retryFailed), asks core/reroute.ts and
                 applies a switch. Orchestrates only.
+src/useLiveDrive.ts  The live drive as React state: builds a runner per drive with the
+                device's GPS (or the development replay) and mirrors its state.
+src/LiveDriveView.tsx  The full-screen drive view. ReplayPanel.tsx: the replay control.
 src/usePlaceBook.ts  The place book as React state, written to the device on change.
 src/usePlaceSearch.ts  Search for one field: the runner, the session token, the pick.
 src/PlanPanel.tsx  The trip input: the two search fields (comboboxes), "Use my location",
@@ -281,7 +304,14 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 signals, determinism, and seeded random ETAs. drive.test.ts covers the
                 simulated clock, the request budget at 1x, 5x and 20x, the what-if
                 delay, a whole simulated drive offline, and the once-only signal
-                sources.
+                sources. tracking.test.ts (noise, a U-turn, a route that crosses
+                itself, poor fixes, off-route patience, arrival), guidance.test.ts
+                (banner and voice fields, missing ones, what is due and when),
+                live.test.ts (the session: cadence, standing still, off route,
+                switching, "Keep previous route", budget, background, failures),
+                device.test.ts (the wrappers and the voice's queue) and
+                liveReplay.test.ts (whole replayed drives through the runner: a
+                traffic change gives exactly one switch and the spoken lines in order).
 check-prereqs.ps1  Windows prerequisite check.
 ```
 
@@ -450,7 +480,7 @@ per signal, because a traffic-aware ETA already includes the usual wait at signa
 
 ## Rerouting (simulated drive)
 
-"Simulate drive" in the panel puts a car on the selected route and drives it on a
+"Simulate drive" in the panel ("Start simulated drive") puts a car on the selected route and drives it on a
 simulated clock at 1x, 5x or 20x. Every 60 seconds of simulated time the app asks
 Mapbox for routes from the car's position to the destination, hands them to the reroute
 engine, and applies a switch by itself. The event log lists every decision with its
@@ -543,9 +573,114 @@ own rules (after the cooldown and for twice the saving, or after three checks if
 no longer offers the slower route it was moved to).
 
 **Not covered by the simulation.** The car sits exactly on the route line at a steady
-speed. Real GPS needs more before this engine: positions matched to the road, an
-off-route test with some patience, a speed that is smoothed, and the position the
-directions query was sent from (not a later one) passed with its answer.
+speed. What real GPS needs before this engine (positions matched to the route, an
+off-route test with patience, a smoothed speed, and the position the directions query
+was sent from passed with its answer) is the live drive's job: see Live drive.
+
+**Seen with live traffic (Nov 11, 2026, mid-afternoon), in the simulated and the live
+drive alike:** on the first miles out of Uptown the fresh routes often did not contain
+the route being driven (rule 4), so after three checks the engine moved to the best
+fresh route ("current route is no longer offered"); further on the same road the match
+was exact at every check. Whether Mapbox really drops the route there or the 10 m
+path match is too strict for that stretch has not been established.
+
+## Live drive
+
+"Start drive" at the top of the route list is the one tap. After it nothing needs
+touching: RouteIQ asks for the location permission, plans a route from the first good
+position fix to the destination, follows the car, checks Mapbox for faster routes,
+changes route by itself and announces it, speaks the turn prompts, and at the
+destination stops and shows a short summary (trip time, the switches and why).
+
+**The limit of the web version.** A browser only runs a page while it is in front with
+the screen on. Lock the phone or switch to another app and the position, the checks and
+the voice stop. RouteIQ holds the screen awake where the browser allows it, and when the
+page comes back it says "RouteIQ was paused for N s while in the background" and
+rechecks the routes at once; it cannot do more than that. Driving with a locked phone
+needs the native app (PLAN.md). It also needs HTTPS (or localhost) to be given a
+position at all.
+
+**The drive view** replaces the planning layout, full screen: the next turn (arrow,
+distance, road) on top; the map following the car, heading up, with the route being
+driven, the car and the turn-off of a switch; below it the arrival time, the minutes
+and miles left, one quiet line with the engine's latest reason, "checked N s ago" and
+the request count; and two large buttons, Mute and End. Every control is 56 px or more.
+After a switch a banner stays for 8 seconds with one large button, "Keep previous
+route". Doing nothing accepts the switch. Pressing it goes back to the route just left
+and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
+
+**Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):
+
+| Rule | Default |
+| --- | --- |
+| A fix with a worse accuracy is ignored | `maxAccuracyM` 50 m |
+| Off the line: farther from the route than | `offRouteM` 50 m |
+| Off the route: off the line for this long, or this many good fixes in a row, never on one fix | `offRoutePatienceSec` 8 s, `offRouteFixes` 3 |
+| Arrived: this close to the destination, along the route or (on its last 400 m) in a straight line | `arrivalRadiusM` 40 m |
+| A fix that snaps up to this far behind is noise: the car stays put | `backwardToleranceM` 30 m |
+| A fix farther back (a U-turn), or farther ahead than 50 m/s allows, is believed after this many in a row | `jumpFixes` 3 |
+
+A fix is matched to a pass of the route within 50 m of it; where the route comes by the
+same spot twice (a loop ramp, an out-and-back), the pass that fits the progress so far
+is taken, not the globally nearest point. Speed is the device's when it gives one,
+otherwise the progress between fixes, smoothed either way. Heading is the device's
+while moving, otherwise the route's own direction at the car.
+
+**When it checks** (`src/core/live.ts`, `DEFAULT_LIVE_OPTIONS`): every 60 seconds of
+real time (`pollIntervalSec`), never two requests within 10 seconds, not while the car
+has stood still for more than 2 minutes (the first check goes out when it moves again),
+not while the page is hidden, not from a position older than 10 seconds (a tunnel) or
+one that is off the route line, and at most 60 requests per drive (the count is on
+screen; the same setting as the simulated drive). A check is asked from the car's point
+on the route with its heading as `bearings` (left out below 2 m/s, where a heading
+means nothing), and the answer goes to the same `decideReroute` as the simulated drive,
+together with the place the request was sent from. Off the route (the tracker's
+verdict, never one fix) a new route is asked for at once from the device's own
+position, whatever was asked a moment ago; if the car is still off after that (a car
+park), again only every 30 seconds and not while it stands still. Five requests are
+kept in reserve for that. Signal counts come through the drive's once-only sources
+(`askOnce`): bundled tiles, never an Overpass retry on a check.
+
+**Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
+`voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
+Nov 11, 2026: both instruction parameters need `steps=true`, no profile is excluded,
+`voice_units` is `imperial` (default), `british_imperial` or `metric`). In the response
+each step has `bannerInstructions[]` (`distanceAlongGeometry`, `primary` with `text`,
+`type`, `modifier`, `components`; `secondary`; `sub`) and `voiceInstructions[]`
+(`distanceAlongGeometry`, `announcement`, `ssmlAnnouncement`). `distanceAlongGeometry`
+is meters BEFORE the maneuver at the end of that step. The adapter turns this into one
+entry per maneuver (`RouteCandidate.guidance`): banner text, type and modifier, and the
+announcements with the distance along the route at which each is due. The plain
+`announcement` is spoken; the SSML is for another speech engine and is ignored. Where a
+step has no banner or voice instruction, simple ones are made from the step's own
+`instruction` ("In 0.4 miles, turn left onto ...", then the instruction 90 m before)
+and the entry is marked `synthesized`. `src/core/guidance.ts` picks the turn to show
+and the announcement that is due; each is spoken once, a backlog after a gap is dropped
+except for its newest line, and a new route starts with a fresh cursor.
+
+**Voice** (`src/device/speech.ts`, rules in `src/core/speechQueue.ts`): the browser's
+speech synthesis. Spoken: the turn prompts, every decision that changes the route
+("Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles."), "You are off the
+route. Finding a new one.", the new route after that, and the arrival. Decisions to
+stay are never spoken. One line is spoken and at most one waits: a route change cuts
+off a turn prompt that is still more than 200 m from its turn, and waits behind one
+that is not; of two lines waiting, the more important stays, and of equals the newer.
+Phone browsers only speak after a tap, so the Start tap itself says "RouteIQ started"
+(silently when muted, so that unmuting works later).
+
+**GPS replay (development builds only).** The browser on a PC has no GPS worth the name,
+so `npm run dev` shows a boxed control under Start drive, labelled as simulated: a
+made-up car starts at the origin pin and drives whatever route the session is on,
+through the SAME code path as the device's GPS (`src/drive/replay.ts` is a position
+source like any other), at 1x, 5x or 20x, with optional noise, dropouts, a stop, a
+tunnel and a wrong turn. During a replay the whole session runs on the replay's clock,
+real requests stay 5 real seconds apart, the clock stands still while a request is out,
+and the drive view shows the speed buttons and a what-if button (+10 minutes on the
+current route).
+
+**Not verified on a real phone.** Everything above was tested with scripted and replayed
+positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audio over
+CarPlay or Bluetooth, and battery use have not been tried.
 
 ## Pinned versions (checked Nov 11, 2026)
 
@@ -564,13 +699,24 @@ TypeScript), so `npm ci` installs the same tree that was tested.
 
 ## Privacy
 
-**Your location.** The device's location is read only when you press "Use my
-location": once, never on page load and never in the background. It becomes the origin
+**Your location.** Outside a live drive (next paragraph) the device's location is read
+only when you press "Use my location": once, never on page load and never in the
+background. It becomes the origin
 pin, so it goes to Mapbox as the origin of the route request, like any pin. It is not
 written to the device: the stored last trip leaves out an origin that came from the
 device's location, and such a place never enters the recent list. The one exception is
 your own doing: saving that origin as Home, Work or a named place stores its
 coordinates like any saved place.
+
+**During a live drive** ("Start drive") the device's position is read continuously,
+from the tap until End or arrival, and only while the page is in front. It is held in
+memory and nowhere else: it never becomes a pin, never enters the place book, the
+recents or the last trip, is never logged, and is gone when the drive ends. What leaves
+the device is what a route needs: the position (snapped to the route when on it) and
+the heading go to Mapbox as the origin of each route request, at most 60 times a drive
+plus a few when off the route. Spoken text is made on the device by the browser's own
+speech engine; RouteIQ sends it nowhere. The development replay uses a made-up position
+that starts at the origin pin, not the device's.
 
 **What you type.** The text typed into a search field is sent to Mapbox (Search Box
 API) to find places, once typing pauses and there are three characters or more, together

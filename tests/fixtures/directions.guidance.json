@@ -1,0 +1,91 @@
+{
+  "code": "Ok",
+  "uuid": "hand-written-guidance",
+  "waypoints": [],
+  "routes": [
+    {
+      "weight_name": "auto",
+      "weight": 400,
+      "duration": 360,
+      "duration_typical": 340,
+      "distance": 2000,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.847, 35.2238],
+          [-80.86, 35.2315]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "South Tryon Street, West Morehead Street",
+          "steps": [
+            {
+              "name": "South Tryon Street",
+              "mode": "driving",
+              "distance": 500,
+              "duration": 90,
+              "maneuver": {
+                "type": "depart",
+                "instruction": "Drive southwest on South Tryon Street.",
+                "location": [-80.8431, 35.2271]
+              },
+              "voiceInstructions": [
+                {
+                  "distanceAlongGeometry": 80,
+                  "announcement": "Turn right onto West Morehead Street.",
+                  "ssmlAnnouncement": "<speak>Turn right onto West Morehead Street.</speak>"
+                },
+                {
+                  "distanceAlongGeometry": 500,
+                  "announcement": "Drive southwest on South Tryon Street. Then, in a quarter mile, turn right onto West Morehead Street.",
+                  "ssmlAnnouncement": "<speak>Drive southwest on South Tryon Street.</speak>"
+                },
+                { "distanceAlongGeometry": "soon", "announcement": "Not usable." },
+                { "distanceAlongGeometry": 40, "announcement": "  " }
+              ],
+              "bannerInstructions": [
+                {
+                  "distanceAlongGeometry": 500,
+                  "primary": {
+                    "text": "West Morehead Street",
+                    "type": "turn",
+                    "modifier": "right",
+                    "components": [{ "text": "West Morehead Street", "type": "text" }]
+                  },
+                  "secondary": { "text": "US 29", "components": [{ "text": "US 29", "type": "text" }] },
+                  "sub": null
+                }
+              ]
+            },
+            {
+              "name": "West Morehead Street",
+              "mode": "driving",
+              "distance": 1500,
+              "duration": 270,
+              "maneuver": {
+                "type": "turn",
+                "modifier": "right",
+                "instruction": "Turn right onto West Morehead Street.",
+                "location": [-80.847, 35.2238]
+              }
+            },
+            {
+              "name": "West Morehead Street",
+              "mode": "driving",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "modifier": "left",
+                "instruction": "You have arrived at your destination, on the left.",
+                "location": [-80.86, 35.2315]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "dataflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.dataflow.json",
+    "sha256": "c595bfbfd822a43f951fb2694670031d00570766048514cf8ec4917ae01f672f",
+    "bytes": 5106
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.html",
+    "sha256": "607b979eb71cc5daf6faf0385e016bf6b626579e06a0b215aad5cb07525740ae",
+    "bytes": 848013
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\04-signal-pipeline.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3397,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

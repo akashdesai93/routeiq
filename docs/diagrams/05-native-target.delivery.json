@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "f5b40ce2-4547-4306-8da3-3ffae501a20b",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.architecture.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\05-native-target.html",
+  "specification": {
+    "sha256": "d435e5da1931901d338d4a4aad076bb72b9628d7c73510fe4f717dd449110ae3",
+    "bytes": 4798
+  },
+  "artifact": {
+    "sha256": "8af0fcbcc98fc2d00f32983fab27fbffa30cff52b7b79c6935a054fa4760d72e",
+    "bytes": 854244
+  }
+}

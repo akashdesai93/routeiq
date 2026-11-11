@@ -1,4 +1,4 @@
-import { isValidLngLat, type LngLat } from '../core/index.ts'
+import { isValidLngLat, type LngLat, type PositionFix } from '../core/index.ts'
 
 export type LocationErrorKind =
   /** The user, or the browser's settings, said no. */
@@ -31,13 +31,31 @@ function fail(kind: LocationErrorKind): LocationResult {
   return { ok: false, kind, message: MESSAGES[kind] }
 }
 
-/** The one method of the browser's Geolocation API that is used, so a test can hand in a stand-in. */
+/** The coordinates of a browser position, as far as they are read here. */
+export interface CoordsLike {
+  longitude: number
+  latitude: number
+  accuracy?: number
+  /** Meters per second; null or NaN when the device does not know. */
+  speed?: number | null
+  /** Degrees clockwise from true north; null or NaN when the device does not know (standing still). */
+  heading?: number | null
+}
+
+/** The methods of the browser's Geolocation API that are used, so a test can hand in a stand-in. */
 export interface GeolocationLike {
   getCurrentPosition(
-    success: (position: { coords: { longitude: number; latitude: number; accuracy?: number } }) => void,
+    success: (position: { coords: CoordsLike }) => void,
     error?: (error: { code: number }) => void,
     options?: { enableHighAccuracy?: boolean; timeout?: number; maximumAge?: number },
   ): void
+  /** Left out by a stand-in that only answers once: watching is then "unsupported". */
+  watchPosition?(
+    success: (position: { coords: CoordsLike }) => void,
+    error?: (error: { code: number }) => void,
+    options?: { enableHighAccuracy?: boolean; timeout?: number; maximumAge?: number },
+  ): number
+  clearWatch?(id: number): void
 }
 
 export interface CurrentPositionOptions {
@@ -96,4 +114,95 @@ export function currentPosition(options: CurrentPositionOptions = {}): Promise<L
       resolve(fail('unavailable'))
     }
   })
+}
+
+/**
+ * Where a live drive gets its positions from. The browser's GPS is one
+ * (geolocationSource); the development replay is another; a native shell
+ * brings its own. `start` begins a stream of fixes and errors and returns
+ * the function that ends it; it never throws.
+ */
+export interface PositionSource {
+  start(onFix: (fix: PositionFix) => void, onError: (kind: LocationErrorKind) => void): () => void
+  /**
+   * Told which route is being driven whenever that changes. The device's
+   * GPS has no use for it; a simulated driver follows it.
+   */
+  follow?(geometry: readonly LngLat[]): void
+}
+
+/** How long the device may take over one fix of a watch before it reports a timeout (and keeps trying). */
+export const WATCH_TIMEOUT_MS = 20_000
+
+export interface WatchOptions extends Omit<CurrentPositionOptions, 'timeoutMs'> {
+  timeoutMs?: number
+  /** The clock every fix is stamped with on arrival. Defaults to Date.now. */
+  now?: () => number
+}
+
+const finiteOrNull = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null)
+
+/**
+ * The device's position as a stream: the browser's `watchPosition`, with
+ * high accuracy and no cached fixes. Asks for the location permission when
+ * started, so it is started only from the "Start drive" tap. Each fix is
+ * handed over as it comes and kept nowhere here; nothing is logged. A fix is
+ * stamped with this clock's time on arrival, so that fix times and the
+ * session's own clock can be compared. Errors come as kinds (the same as
+ * currentPosition's); the watch itself goes on after an error until stopped.
+ */
+export function geolocationSource(options: WatchOptions = {}): PositionSource {
+  const {
+    geolocation = defaultGeolocation(),
+    secureContext = globalThis.isSecureContext ?? true,
+    timeoutMs = WATCH_TIMEOUT_MS,
+    now = Date.now,
+  } = options
+  return {
+    start(onFix, onError) {
+      if (!secureContext) {
+        onError('insecure')
+        return () => {}
+      }
+      if (geolocation === null || geolocation.watchPosition === undefined) {
+        onError('unsupported')
+        return () => {}
+      }
+      let id: number | null = null
+      let stopped = false
+      try {
+        id = geolocation.watchPosition(
+          ({ coords }) => {
+            if (stopped) return
+            if (typeof coords.longitude !== 'number' || typeof coords.latitude !== 'number' || !isValidLngLat([coords.longitude, coords.latitude])) {
+              onError('unavailable')
+              return
+            }
+            onFix({
+              lng: coords.longitude,
+              lat: coords.latitude,
+              accuracyM: finiteOrNull(coords.accuracy) ?? NaN,
+              speedMps: finiteOrNull(coords.speed),
+              headingDeg: finiteOrNull(coords.heading),
+              timeMs: now(),
+            })
+          },
+          (error) => {
+            if (!stopped) onError(error.code === 1 ? 'denied' : error.code === 3 ? 'timeout' : 'unavailable')
+          },
+          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
+        )
+      } catch {
+        onError('unavailable')
+      }
+      return () => {
+        stopped = true
+        try {
+          if (id !== null) geolocation.clearWatch?.(id)
+        } catch {
+          // Nothing to do: the watch is not listened to any more.
+        }
+      }
+    },
+  }
 }

@@ -101,6 +101,40 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    Lead distances are along the route to the turn-off and take no account of the
    lane the driver is in. With no typical duration on a route the engine stays;
    Mapbox always sent one on `driving-traffic` in testing.
+   **Done: live drive (web).** "Start drive" feeds the same engine with the device's
+   position; one tap, none after. `src/core/tracking.ts` does what the note above
+   asked for: fixes matched to a pass of the route (the one that fits the progress so
+   far where the route crosses itself), progress that does not run back on noise but
+   does on a real U-turn, smoothed speed, an off-route verdict with patience (50 m
+   for 8 s or 3 good fixes, never one), arrival within 40 m. `src/core/live.ts` is
+   the session as a pure state machine (events in, state and effects out):
+   a check every 60 s, never within 10 s, paused when stationary for 2 minutes or
+   hidden, at once when off the route; the position each query was sent from goes to
+   the engine with its answer; a switch is applied, spoken, and can be undone for 8 s
+   ("Keep previous route", which the engine honours through a new `declined` list
+   and `declineRoute`). `src/core/guidance.ts` and the Mapbox adapter carry banner
+   and voice instructions (`banner_instructions`, `voice_instructions`), made up from
+   the steps where missing. `src/core/speechQueue.ts` rules the voice. The browser
+   sits behind `src/device` (position watch, speech, wake lock, visibility), and
+   `src/live/runner.ts` runs the machine with whatever it is handed. A development
+   GPS replay (`src/drive/replay.ts`) drives the same path with noise, dropouts, a
+   stop, a tunnel and a wrong turn.
+   The limit: a web page only runs in front with the screen on. Open: none of it has
+   been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
+   audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Seen in
+   testing with live traffic: near Uptown the route being driven was often missing
+   from the fresh routes, so the engine moved to the best fresh route after three
+   checks, in the simulated drive too; find out whether Mapbox drops it or the 10 m
+   path match is too strict there before trusting those switches. A switch said
+   aloud while a near turn prompt is speaking waits for it; an "off the route" line
+   can be replaced by the "new route" line that follows within a second. Which
+   carriageway the car is on is not known. The first route is the best-ranked one
+   from the device's position, not the one picked in the list.
+   For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
+   and `src/live/runner.ts` run as they are, or port one to one; it replaces the
+   three device wrappers (position source -> Core Location with background updates,
+   speech -> AVSpeechSynthesizer with an audio session that ducks music, wake lock
+   -> isIdleTimerDisabled) and the visibility wrapper falls away.
 7. **Done: synthetic tests.** `tests/reroute.test.ts` runs scripted drives through the
    engine on a made-up road network with a fake clock, no network: oscillating ETAs
    (no switch), a steady 3 minute gain (one switch after two polls), a gain inside

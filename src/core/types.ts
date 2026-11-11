@@ -73,6 +73,44 @@ export interface RouteCandidate {
   readonly limitedAccessSpansM: readonly DistanceSpanM[] | null
   /** Upcoming maneuvers, used later to block impractical late switches. */
   readonly maneuvers: readonly Maneuver[]
+  /**
+   * Turn-by-turn guidance for a live drive: one entry per maneuver, in
+   * driving order, each with what to show and what to say (see guidance.ts).
+   * Left out by a provider, or a test, that has no turn data: the drive then
+   * runs without turn prompts.
+   */
+  readonly guidance?: readonly GuidanceStep[]
+}
+
+/** Something to say before a maneuver, and where along the route to say it. */
+export interface GuidanceAnnouncement {
+  /** Meters from the route start at which it becomes due. Never below 0. */
+  readonly atDistanceM: number
+  /** Plain text for a text-to-speech engine (no SSML). */
+  readonly text: string
+}
+
+/** One maneuver of a route as the driver is told about it. */
+export interface GuidanceStep {
+  /** Distance from the route start to the maneuver, in meters. */
+  readonly atDistanceM: number
+  readonly location: LngLat
+  /** The provider's maneuver type: "turn", "fork", "off ramp", "merge", "roundabout", "arrive", ... */
+  readonly type: string
+  /** "left", "slight right", "uturn", "straight", ...; null when the provider gives none. */
+  readonly modifier: string | null
+  /** The big line of the turn banner: usually the road to turn onto. Never empty. */
+  readonly primaryText: string
+  /** The smaller line under it (a destination or a second road name). Null when there is none. */
+  readonly secondaryText: string | null
+  /** What to say on the way to this maneuver, in the order it becomes due. */
+  readonly announcements: readonly GuidanceAnnouncement[]
+  /**
+   * True when the banner or the announcements were made up here from the
+   * step's plain instruction, because the provider sent no banner or voice
+   * instruction for it.
+   */
+  readonly synthesized: boolean
 }
 
 /**

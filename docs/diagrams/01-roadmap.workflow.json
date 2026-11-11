@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "RouteIQ roadmap: done, in progress, next",
+    "locale": "en",
+    "output": "01-roadmap.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "backend": { "label": "Built (done and pushed)" },
+        "cloud": { "label": "In progress now" },
+        "frontend": { "label": "Planned / next" },
+        "database": { "label": "Owner action" },
+        "security": { "label": "Blocked on Apple" }
+      }
+    }
+  },
+  "lanes": [
+    { "id": "web", "label": "Web prototype" },
+    { "id": "signals", "label": "Signal data" },
+    { "id": "native", "label": "Native app" },
+    { "id": "design", "label": "Design" },
+    { "id": "owner", "label": "Owner actions" },
+    { "id": "apple", "label": "Apple gates", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "done", "label": "Done", "fromCol": 0, "toCol": 1 },
+    { "id": "now", "label": "In progress now", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "next", "label": "Next", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["web_routes", "web_brain", "web_live", "core_port", "testflight", "commute"],
+  "nodes": [
+    { "id": "web_routes", "lane": "web", "col": 0, "type": "backend", "label": "Map, routes, ranking", "sublabel": "PLAN steps 1-5", "tag": "built" },
+    { "id": "web_brain", "lane": "web", "col": 1, "type": "backend", "label": "Reroute engine + search", "sublabel": "simulated drives, saved places", "tag": "built" },
+    { "id": "web_live", "lane": "web", "col": 2, "type": "cloud", "label": "Live drive mode", "sublabel": "real GPS + voice, foreground", "tag": "in progress" },
+    { "id": "web_handoff", "lane": "web", "col": 4, "type": "frontend", "label": "Route hand-off", "sublabel": "Google Maps / Waze links", "tag": "planned" },
+    { "id": "web_freeze", "lane": "web", "col": 5, "type": "frontend", "label": "Freeze core contracts", "sublabel": "version src/core types", "tag": "planned" },
+
+    { "id": "sig_rules", "lane": "signals", "col": 0, "type": "backend", "label": "Signal counting rules", "sublabel": "src/core/signals.ts", "tag": "built" },
+    { "id": "sig_tiles", "lane": "signals", "col": 1, "type": "backend", "label": "Bundled NC + SC tiles", "sublabel": "OSM, Overpass as backup", "tag": "built" },
+    { "id": "sig_pack", "lane": "signals", "col": 4, "type": "frontend", "label": "Pack tiles for iOS", "sublabel": "one file or SQLite", "tag": "planned" },
+    { "id": "sig_host", "lane": "signals", "col": 5, "type": "frontend", "label": "Tile renewal pack", "sublabel": "hosted download", "tag": "planned" },
+
+    { "id": "probe", "lane": "native", "col": 2, "type": "cloud", "label": "iOS probe app", "sublabel": "locked-phone GPS + speech", "tag": "in progress" },
+    { "id": "native_start", "lane": "native", "col": 3, "type": "cloud", "label": "Native app started", "sublabel": "branch native-app", "tag": "in progress" },
+    { "id": "core_port", "lane": "native", "col": 4, "type": "frontend", "label": "Port core to Swift", "sublabel": "package RouteIQCore", "tag": "planned" },
+    { "id": "testflight", "lane": "native", "col": 5, "type": "frontend", "label": "TestFlight builds", "sublabel": "GitHub Actions macOS", "tag": "planned" },
+
+    { "id": "strip", "lane": "design", "col": 2, "type": "cloud", "label": "UI exploration", "sublabel": "the strip; look not final", "tag": "in progress" },
+    { "id": "final_ui", "lane": "design", "col": 4, "type": "frontend", "label": "Final look", "sublabel": "applied to native app", "tag": "planned" },
+
+    { "id": "enrol", "lane": "owner", "col": 3, "type": "database", "label": "Enrol + create keys", "sublabel": "Apple, Mapbox, App Store", "tag": "owner, next" },
+    { "id": "decide", "lane": "owner", "col": 4, "type": "database", "label": "Data decisions", "sublabel": "tile hosting, Charlotte data", "tag": "owner, next" },
+    { "id": "commute", "lane": "owner", "col": 5, "type": "database", "label": "Commute tests", "sublabel": "vs Google Maps and Waze", "tag": "owner, next" },
+
+    { "id": "apple_dev", "lane": "apple", "col": 4, "type": "security", "label": "Developer Program", "sublabel": "$99/yr membership", "tag": "gate" },
+    { "id": "carplay", "lane": "apple", "col": 5, "type": "security", "label": "CarPlay screen", "sublabel": "entitlement not guaranteed", "tag": "needs Apple" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "web_routes", "to": "web_brain" },
+    { "id": "e2", "from": "web_brain", "to": "web_live" },
+    { "id": "e3", "from": "web_live", "to": "core_port", "label": "proven logic", "variant": "emphasis" },
+    { "id": "e4", "from": "web_handoff", "to": "web_freeze" },
+    { "id": "e5", "from": "sig_rules", "to": "sig_tiles" },
+    { "id": "e6", "from": "sig_tiles", "to": "sig_pack", "variant": "dashed" },
+    { "id": "e7", "from": "sig_pack", "to": "sig_host" },
+    { "id": "e8", "from": "probe", "to": "native_start" },
+    { "id": "e9", "from": "native_start", "to": "core_port" },
+    { "id": "e10", "from": "core_port", "to": "testflight", "variant": "emphasis" },
+    { "id": "e11", "from": "strip", "to": "final_ui", "variant": "dashed" },
+    { "id": "e12", "from": "enrol", "to": "apple_dev", "label": "enrol", "variant": "security" },
+    { "id": "e13", "from": "apple_dev", "to": "carplay", "label": "request", "variant": "security" },
+    { "id": "e14", "from": "testflight", "to": "commute", "label": "install build", "variant": "emphasis" },
+    { "id": "e15", "from": "enrol", "to": "decide" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Done and pushed (web prototype)", "items": ["Map shell, routes, route facts, signal counting, ranking", "Automatic rerouting engine with simulated drives", "Place search, saved places, phone-width layout", "Signal tiles for NC and SC built from Geofabrik extracts"] },
+    { "dot": "amber", "title": "In progress right now", "items": ["Live drive mode on the web: real GPS and voice, foreground only", "iOS probe app with a cloud build (branch native-probe)", "Native app started in a separate session (branch native-app)", "UI design exploration: routes as lines with signal dots"] },
+    { "dot": "violet", "title": "Only the owner can do", "items": ["Enrol in the Apple Developer Program ($99/yr)", "Mapbox secret download token as a GitHub secret", "App Store Connect API key for TestFlight", "Submit the CarPlay entitlement request", "Install test builds and run commute tests"] },
+    { "dot": "rose", "title": "Known limits", "items": ["No public live signal-phase data: location of lights, not colour", "A web page cannot run with the phone locked", "Mapbox returns at most 3 routes", "Signal counts are about 1-2 off on some routes"] }
+  ]
+}

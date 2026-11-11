@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.workflow.json",
+    "sha256": "cd7117b9f609a04090a636eb0d6a6c638a049755789269b2dffdca119aa8bcd3",
+    "bytes": 6770
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.html",
+    "sha256": "e680ef33e967f394f4883eb0747a2c614a5769e64f003ab4cb74839ee6335990",
+    "bytes": 864403
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3752,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

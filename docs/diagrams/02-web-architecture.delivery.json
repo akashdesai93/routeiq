@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "81c5dc5b-f339-424e-9378-3334ea5ef23a",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\02-web-architecture.architecture.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\02-web-architecture.html",
+  "specification": {
+    "sha256": "333b275d99100424664ff8060b76c5dd4c0609707012747767622a74aa5b6f44",
+    "bytes": 10358
+  },
+  "artifact": {
+    "sha256": "804d4f5c10d74f9a2b4b94e68c86b1b92e8c9d948abd95759ddbfa24fb5d31d0",
+    "bytes": 875598
+  }
+}

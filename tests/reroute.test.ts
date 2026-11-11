@@ -3,6 +3,7 @@ import {
   alongRouteM,
   bearingDeg,
   decideReroute,
+  declineRoute,
   DEFAULT_REROUTE_OPTIONS,
   findCurrentRoute,
   INITIAL_REROUTE_STATE,
@@ -739,3 +740,42 @@ describe('property: seeded random ETAs', () => {
     }
   })
 })
+
+describe('a route the driver turned down', () => {
+  // "Keep previous route" in the live drive: declineRoute, then the same faster route at every poll.
+  const mainRoad = { geometry: candidate('A', at(0, 0), 2000)!.geometry, maneuvers: [], limitedAccessSpansM: null }
+  const offer = (nowSec: number, state: RerouteState, xM: number) =>
+    decideReroute(state, {
+      nowSec,
+      route: mainRoad,
+      positionAlongM: xM,
+      speedMps: 5,
+      candidates: [candidate('A', at(xM, 0), 2000)!, candidate('B', at(xM, 0), 1500)!],
+    })
+
+  it('is not switched to again until its time is up, whatever it saves', () => {
+    const b = candidate('B', at(900, 0), 1500)!
+    const declined = declineRoute(INITIAL_REROUTE_STATE, b.geometry, 600)
+    expect(declined).toEqual({ ...INITIAL_REROUTE_STATE, declined: [{ geometry: b.geometry, untilSec: 600 }] })
+    const first = offer(60, declined, 1200)
+    expect(first).toMatchObject({ action: 'stay', code: 'driver-declined' })
+    expect(first.reason).toBe('Staying: faster route saves 8.3 minutes, but you chose to keep this route')
+    // No confirmation builds up meanwhile.
+    expect(first.nextState.pending).toBeNull()
+    const second = offer(120, first.nextState, 1500)
+    expect(second.code).toBe('driver-declined')
+    // Once the time is up the entry is dropped and the usual rules apply again.
+    const later = offer(600, second.nextState, 3000)
+    expect(later.nextState.declined).toEqual([])
+    expect(later).toMatchObject({ action: 'stay', code: 'confirming' })
+    expect(offer(660, later.nextState, 3300)).toMatchObject({ action: 'switch', code: 'faster-route' })
+  })
+
+  it('another faster route is still taken', () => {
+    const c = candidate('C', at(900, 0), 1500)!
+    const first = offer(60, declineRoute(INITIAL_REROUTE_STATE, c.geometry, 600), 1200)
+    expect(first.code).toBe('confirming')
+    expect(offer(120, first.nextState, 1500)).toMatchObject({ action: 'switch', code: 'faster-route' })
+  })
+})
+

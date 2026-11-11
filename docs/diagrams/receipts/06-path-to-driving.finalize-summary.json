@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+    "sha256": "af8ea34150d318be7e40e84adc16f511a36d8ec548c798cb73b7f3cdef8dbcb5",
+    "bytes": 4838
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+    "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+    "bytes": 849840
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3139,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

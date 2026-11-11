@@ -24,6 +24,12 @@ interface MapViewProps {
   signals: readonly RouteSignal[]
   /** A simulated drive to draw: the car, the route being driven and the turn-off of a switch. Null or left out for none. */
   drive?: DriveOverlay | null
+  /**
+   * Keeps the map on the car during a live drive: centred on `center`, turned so that
+   * `bearingDeg` points up. Null or left out: the map is the user's to move. While it is
+   * set the pins cannot be dragged and the origin pin is hidden.
+   */
+  follow?: { readonly center: LngLat; readonly bearingDeg: number } | null
   /** Called once when a drag ends, never while the pin is moving. */
   onPinMove: (role: PinRole, position: LngLat) => void
   onSelectRoute: (id: string) => void
@@ -36,6 +42,8 @@ const HIT_LAYER = 'routes-hit'
 const SIGNAL_SOURCE = 'route-signals'
 const DRIVE_SOURCE = 'drive'
 const FIT_PADDING = 80
+/** How close the map is when it follows the car. */
+const FOLLOW_ZOOM = 15.5
 
 function pinLabel(role: PinRole, place: Place): string {
   return `${PIN_NAME[role]}: ${place.label}`
@@ -43,7 +51,7 @@ function pinLabel(role: PinRole, place: Place): string {
 
 /**
  * Thin Mapbox GL JS wrapper. It draws the pins, routes and signals it is given (and a
- * simulated drive, when there is one) and
+ * simulated or live drive, when there is one, following the car when told to) and
  * reports drags and clicks upward; it decides nothing. Following Mapbox's
  * React guide, the map is created once in an effect and removed on unmount.
  */
@@ -54,6 +62,7 @@ export function MapView({
   selectedRouteId,
   signals,
   drive = null,
+  follow = null,
   onPinMove,
   onSelectRoute,
   onCenterChange,
@@ -284,6 +293,43 @@ export function MapView({
     const source = readyMap.getSource<mapboxgl.GeoJSONSource>(DRIVE_SOURCE)
     source?.setData(driveFeatures(drive))
   }, [readyMap, drive])
+
+  // A live drive: the map follows the car, heading up. Leaving it turns the map north
+  // again and shows the trip.
+  const following = follow !== null
+  useEffect(() => {
+    if (!readyMap || !following) return
+    const markers = markersRef.current
+    markers?.origin.getElement().style.setProperty('display', 'none')
+    PIN_ROLES.forEach((role) => markers?.[role].setDraggable(false))
+    readyMap.easeTo({ zoom: FOLLOW_ZOOM, pitch: 40, duration: 0 })
+    const { pins: shown } = latest.current
+    return () => {
+      markers?.origin.getElement().style.removeProperty('display')
+      PIN_ROLES.forEach((role) => markers?.[role].setDraggable(true))
+      const [west, south, east, north] = boundsOf(PIN_ROLES.map((role) => shown[role].position))
+      try {
+        readyMap.fitBounds(
+          [
+            [west, south],
+            [east, north],
+          ],
+          { padding: FIT_PADDING, bearing: 0, pitch: 0 },
+        )
+      } catch {
+        // The map itself is being removed (the page is closing): nothing to put back.
+      }
+    }
+  }, [readyMap, following])
+
+  const followLng = follow?.center[0]
+  const followLat = follow?.center[1]
+  const followBearing = follow?.bearingDeg
+  useEffect(() => {
+    if (!readyMap || followLng === undefined || followLat === undefined) return
+    // A little longer than the second between two fixes, so the map glides instead of stepping.
+    readyMap.easeTo({ center: [followLng, followLat], bearing: followBearing ?? 0, duration: 1100, easing: (t) => t })
+  }, [readyMap, followLng, followLat, followBearing])
 
   return (
     <>

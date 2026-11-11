@@ -1,0 +1,1506 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "showcase",
+  "startedAt": "2026-11-11T20:05:50.451Z",
+  "specification": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+    "sha256": "af8ea34150d318be7e40e84adc16f511a36d8ec548c798cb73b7f3cdef8dbcb5",
+    "bytes": 4838
+  },
+  "artifact": {
+    "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+    "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+    "bytes": 849840
+  },
+  "stages": {
+    "validate": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": null,
+      "execution": "embedded-in-deliver",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\akash\\.claude\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "workflow",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "--quality",
+        "showcase",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "validate",
+        "specification": {
+          "sha256": "af8ea34150d318be7e40e84adc16f511a36d8ec548c798cb73b7f3cdef8dbcb5",
+          "bytes": 4838
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    "deliver": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 678,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\akash\\.claude\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "workflow",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "--quality",
+        "showcase",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "receiptId": "4a1c26b7-abcd-4c44-ad49-508e2380425f",
+        "ok": true,
+        "command": "deliver",
+        "type": "workflow",
+        "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.workflow.json",
+        "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "specification": {
+          "sha256": "af8ea34150d318be7e40e84adc16f511a36d8ec548c798cb73b7f3cdef8dbcb5",
+          "bytes": 4838
+        },
+        "artifact": {
+          "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+          "bytes": 849840
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        },
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      }
+    },
+    "check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 187,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\akash\\.claude\\skills\\archify\\bin\\archify.mjs",
+        "check",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "--require-provenance"
+      ],
+      "receipt": {
+        "ok": true,
+        "file": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "artifact": {
+          "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+          "bytes": 849840
+        },
+        "checks": [
+          {
+            "name": "single_svg",
+            "ok": true,
+            "details": [
+              "found 1 <svg> block(s)"
+            ]
+          },
+          {
+            "name": "finite_svg",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "orthogonal_arrows",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "label_route_clearance",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "relationship_crossings",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "relationship_corridors",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "container_border_runs",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "route_rhythm",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "legend_clearance",
+            "ok": true,
+            "details": []
+          }
+        ],
+        "composition": {
+          "schemaVersion": 1,
+          "profile": "showcase",
+          "status": "pass",
+          "summary": {
+            "errors": 0,
+            "warnings": 0
+          },
+          "metrics": {
+            "properCrossings": 0,
+            "resolvedCrossovers": 0,
+            "ambiguousCorridors": 0,
+            "arrowheadCollisions": 0,
+            "containerBorderRuns": 0,
+            "labelRouteClearanceIssues": 0,
+            "labelCanvasOverflowIssues": 0,
+            "minLabelRouteClearance": 28.5,
+            "desktopReadabilityIssues": 0,
+            "viewportHeightIssues": 0,
+            "minProjectedNodeTextPx": 6.138,
+            "maxBends": 0,
+            "routesOverSuggestedBends": 0,
+            "maxStretch": 1,
+            "routesOverSuggestedStretch": 0,
+            "minSegmentPx": 8,
+            "minInteriorSegmentPx": null,
+            "shortSegmentCount": 2,
+            "shortEndpointSegmentCount": 2,
+            "shortInteriorSegmentCount": 0,
+            "microSegmentCount": 0
+          },
+          "suggestedLimits": {
+            "bendsPerRelationship": 2,
+            "stretch": 1.35,
+            "segmentPx": 16,
+            "microSegmentPx": 8
+          },
+          "routeReview": {
+            "crossings": [],
+            "detours": []
+          },
+          "leadingSpace": {
+            "measured": false,
+            "reviewSuggested": false
+          },
+          "desktopReadability": {
+            "budgetBasis": "legacy-930",
+            "readerContract": "declared-wide-v1",
+            "availableDiagramWidth": 930,
+            "actualBudgetPx": 930,
+            "limit": "legacy",
+            "requestedTargetPx": null,
+            "requestedTargetMet": null,
+            "hardFloorPx": 6,
+            "hardFloorMet": true,
+            "minimumOwner": {
+              "kind": "node",
+              "id": "port"
+            },
+            "minimumSourceTextPx": 6.6,
+            "minimumProjectedTextPx": 6.138,
+            "semanticTextCount": 30
+          },
+          "issues": []
+        },
+        "provenance": "current",
+        "deliveryReceiptId": "4a1c26b7-abcd-4c44-ad49-508e2380425f"
+      }
+    },
+    "browser-check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 1522,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\akash\\.claude\\skills\\archify\\bin\\archify.mjs",
+        "browser-check",
+        "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+        "--json",
+        "--require-provenance"
+      ],
+      "execution": "in-process",
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "browser-check",
+        "evidenceKind": "automated-browser",
+        "status": "pass",
+        "visualReview": "not-requested",
+        "provenance": "current",
+        "deliveryReceiptId": "4a1c26b7-abcd-4c44-ad49-508e2380425f",
+        "artifact": {
+          "path": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.html",
+          "sha256": "306d2eff174f5ec7922fb9f08a32a6649d71e5ba8c8082609d498e1096c72725",
+          "bytes": 849840
+        },
+        "state": {
+          "detail": "read",
+          "motion": "still"
+        },
+        "chrome": {
+          "status": "available",
+          "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        },
+        "diagnostics": [],
+        "containment": {
+          "status": "pass",
+          "policy": "fit-or-reader-declared-readable-vertical-scroll",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 52,
+                "diagramChromePx": 78,
+                "svgPx": 719,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 143,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1491,
+              "diagramWidth": 1461,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 780,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 155,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1640,
+              "diagramWidth": 1610,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 860,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 171,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 68,
+                "diagramChromePx": 94,
+                "svgPx": 999,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 198,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "themeStates": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            }
+          ]
+        },
+        "readability": {
+          "status": "pass",
+          "minimumProjectedNodeTextPx": 6,
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 52,
+                "diagramChromePx": 78,
+                "svgPx": 719,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 143,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1491,
+              "diagramWidth": 1461,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 780,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 155,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1640,
+              "diagramWidth": 1610,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 860,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 171,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 68,
+                "diagramChromePx": 94,
+                "svgPx": 999,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 198,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "viewerChrome": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 900,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1376,
+              "diagramWidth": 1346,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 52,
+                "diagramChromePx": 78,
+                "svgPx": 719,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 143,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 143,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 92,
+                  "spaceAboveNodesPx": 46,
+                  "spaceBelowNodesPx": 5
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1000,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1491,
+              "diagramWidth": 1461,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 780,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 155,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 155,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 99,
+                  "spaceAboveNodesPx": 50,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1080,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1640,
+              "diagramWidth": 1610,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 60,
+                "diagramChromePx": 84,
+                "svgPx": 860,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 171,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 171,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 109,
+                  "spaceAboveNodesPx": 55,
+                  "spaceBelowNodesPx": 6
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": null,
+              "ok": true,
+              "readerWidth": 1920,
+              "diagramWidth": 1870,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 68,
+                "diagramChromePx": 94,
+                "svgPx": 999,
+                "cardsPx": 0,
+                "viewBoxHeight": 534
+              },
+              "viewBoxWidth": 1000,
+              "workflowLanes": [
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "prove",
+                    "port",
+                    "nativeapp",
+                    "cibuild",
+                    "carplayui"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-1",
+                  "heightPx": 198,
+                  "nodeCount": 5,
+                  "nodeIds": [
+                    "enrol",
+                    "keys",
+                    "request",
+                    "install",
+                    "commute"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                },
+                {
+                  "frameId": "lane-2",
+                  "heightPx": 198,
+                  "nodeCount": 2,
+                  "nodeIds": [
+                    "gate1",
+                    "gate2"
+                  ],
+                  "nodeSpanPx": 127,
+                  "spaceAboveNodesPx": 64,
+                  "spaceBelowNodesPx": 7
+                }
+              ],
+              "minimumProjectedNodeTextPx": 6.6,
+              "minimumProjectedNonEdgeTextPx": 6.6,
+              "minimumProjectedEdgeTextPx": 8,
+              "minimumProjectedNodeText": "src/core to RouteIQCore",
+              "minimumProjectedNodeTextDetail": "context",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "node",
+                "id": "port"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "captures": {
+          "status": "not-requested",
+          "screenshots": [],
+          "contactSheet": null
+        },
+        "sidecars": {
+          "receipt": "06-path-to-driving.browser-check.json",
+          "files": []
+        }
+      }
+    }
+  },
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "diagnostics": [],
+  "evidence": {
+    "receipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.finalize.json",
+    "summaryReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\06-path-to-driving.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "finishedAt": "2026-11-11T20:05:53.590Z",
+  "durationMs": 3139,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "disabled"
+  }
+}

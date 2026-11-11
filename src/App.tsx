@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_TRIP, formatLatLng, restoreTrip, type LngLat, type Place } from './core/index.ts'
+import {
+  DEFAULT_TRIP,
+  formatLatLng,
+  lineFrom,
+  restoreTrip,
+  type LngLat,
+  type Place,
+  type RouteCandidate,
+  type RouteSignal,
+} from './core/index.ts'
 import { tokenStatus, type TokenStatus } from './config.ts'
 import { DrivePanel } from './DrivePanel.tsx'
+import { cruiseSpeedMps } from './drive/simulation.ts'
+import { LiveDriveView } from './LiveDriveView.tsx'
+import { DEFAULT_REPLAY_SETUP, replayPlanOf, type ReplaySetup } from './drive/replaySetup.ts'
+import { ReplayPanel } from './ReplayPanel.tsx'
+import { useLiveDrive } from './useLiveDrive.ts'
+import type { DriveOverlay } from './map/driveFeatures.ts'
 import { MapView } from './map/MapView.tsx'
 import type { PinRole } from './map/pins.ts'
 import { PlanPanel, type PlaceOrigin } from './PlanPanel.tsx'
@@ -29,6 +44,8 @@ const deviceStore = localTextStore()
 
 /** While a simulated drive is on, the route list and the map are not for picking routes. */
 const ignore = () => {}
+const NO_ROUTES: readonly RouteCandidate[] = []
+const NO_SIGNALS: readonly RouteSignal[] = []
 
 interface AppProps {
   status?: TokenStatus
@@ -49,6 +66,35 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
   const sim = useDriveSim(token, pins.destination.position, selectedRoute)
   const stopDrive = sim.stop
   const { rememberTrip, addRecent } = places
+
+  // The live drive: the same engine fed by the device's position. In development a
+  // replayed drive can stand in for the GPS (the browser pane has none); it starts at
+  // the origin pin. A live drive never moves a pin, and its position is never kept.
+  const [replaySetup, setReplaySetup] = useState<ReplaySetup>(DEFAULT_REPLAY_SETUP)
+  const replaySpeedMps = selectedRoute === null ? 15 : cruiseSpeedMps(selectedRoute)
+  const originPosition = pins.origin.position
+  const replay = useMemo(
+    () =>
+      import.meta.env.DEV && replaySetup.enabled
+        ? { origin: originPosition, plan: replayPlanOf(replaySetup, replaySpeedMps), multiplier: replaySetup.multiplier }
+        : null,
+    [replaySetup, replaySpeedMps, originPosition],
+  )
+  const setWhatIfDelaySec = sim.setWhatIfDelaySec
+  const clearWhatIf = useCallback(() => setWhatIfDelaySec(0), [setWhatIfDelaySec])
+  const live = useLiveDrive({
+    token,
+    destination: pins.destination.position,
+    rerouteOptions: sim.rerouteOptions,
+    settings: sim.settings,
+    whatIfDelaySec: sim.whatIfDelaySec,
+    onWhatIfSpent: clearWhatIf,
+    replay,
+  })
+  const startLive = () => {
+    stopDrive()
+    live.start()
+  }
 
   // Keeps the trip for the next visit. The built-in trip is not kept: without a stored
   // trip the app opens with it anyway. (An origin set from the device's position is
@@ -104,13 +150,35 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
   const car = view?.car
   const routeAhead = view?.routeAhead
   const turn = view?.turn
-  const driveOverlay = useMemo(
+  const simOverlay = useMemo(
     () => (car === undefined || routeAhead === undefined ? null : { car, routeAhead, turn: turn ?? null }),
     [car, routeAhead, turn],
   )
 
+  // The live drive draws through the same overlay: the car where the tracker has it,
+  // the rest of the route being driven, and the turn-off of a switch.
+  const liveTracking = live.state.tracking
+  const liveRoute = live.state.route
+  const liveTurn = live.state.turn
+  const liveFix = live.state.lastFix
+  const liveOverlay = useMemo((): DriveOverlay | null => {
+    if (liveTracking !== null && liveRoute !== null) {
+      return { car: liveTracking.position, routeAhead: lineFrom(liveRoute.geometry, liveTracking.alongRouteM), turn: liveTurn }
+    }
+    if (liveFix !== null) return { car: [liveFix.lng, liveFix.lat], routeAhead: [], turn: null }
+    return null
+  }, [liveTracking, liveRoute, liveTurn, liveFix])
+  const liveCar = liveOverlay?.car
+  const liveHeading = liveTracking?.headingDeg ?? 0
+  const liveStatus = live.state.status
+  const follow = useMemo(
+    () => (liveStatus === 'arrived' || liveStatus === 'failed' || liveCar === undefined ? null : { center: liveCar, bearingDeg: liveHeading }),
+    [liveStatus, liveCar, liveHeading],
+  )
+  const liveCandidates = live.state.candidates
+
   return (
-    <div className="app">
+    <div className={live.active ? 'app live' : 'app'}>
       <header className="bar">
         <strong>RouteIQ</strong>
       </header>
@@ -119,14 +187,38 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
           <MapView
             token={token}
             pins={pins}
-            routes={polled?.candidates ?? routing.routes}
-            selectedRouteId={polled !== null ? polled.currentCandidateId : routing.selectedId}
-            signals={polled !== null ? polled.signals : routing.selectedSignals}
-            drive={driveOverlay}
+            routes={live.active ? (liveCandidates ?? NO_ROUTES) : (polled?.candidates ?? routing.routes)}
+            selectedRouteId={live.active ? null : polled !== null ? polled.currentCandidateId : routing.selectedId}
+            signals={live.active ? NO_SIGNALS : polled !== null ? polled.signals : routing.selectedSignals}
+            drive={live.active ? liveOverlay : simOverlay}
+            follow={live.active ? follow : null}
             onPinMove={movePin}
-            onSelectRoute={driving ? ignore : routing.select}
+            onSelectRoute={driving || live.active ? ignore : routing.select}
             onCenterChange={noteCenter}
           />
+          {live.active && (
+            <LiveDriveView
+              state={live.state}
+              view={live.view}
+              destinationLabel={pins.destination.label}
+              speechSupported={live.speechSupported}
+              replaying={live.replaying}
+              dev={
+                import.meta.env.DEV
+                  ? {
+                      multiplier: replaySetup.multiplier,
+                      setMultiplier: (multiplier) => setReplaySetup((s) => ({ ...s, multiplier })),
+                      whatIfDelaySec: sim.whatIfDelaySec,
+                      setWhatIfDelaySec: sim.setWhatIfDelaySec,
+                    }
+                  : null
+              }
+              onKeepPrevious={live.keepPrevious}
+              onMute={live.setMuted}
+              onEnd={live.end}
+              onRestart={startLive}
+            />
+          )}
           <div className="side">
             <PlanPanel
               pins={pins}
@@ -148,6 +240,9 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
             signalsError={routing.signalsError}
             onRetrySignals={routing.retrySignals}
             signalDataDate={routing.signalDataDate}
+            onStartDrive={startLive}
+            canStartDrive={live.canStart}
+            startDriveExtra={import.meta.env.DEV ? <ReplayPanel setup={replaySetup} onChange={setReplaySetup} /> : null}
           >
               <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />
             </RoutePanel>

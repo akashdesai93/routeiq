@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "759d4b3b-099d-4206-9aa3-450179e5ef2c",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.workflow.json",
+  "output": "C:\\Users\\akash\\dev\\routeiq\\docs\\diagrams\\01-roadmap.html",
+  "specification": {
+    "sha256": "cd7117b9f609a04090a636eb0d6a6c638a049755789269b2dffdca119aa8bcd3",
+    "bytes": 6770
+  },
+  "artifact": {
+    "sha256": "e680ef33e967f394f4883eb0747a2c614a5769e64f003ab4cb74839ee6335990",
+    "bytes": 864403
+  }
+}

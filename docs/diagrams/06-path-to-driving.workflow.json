@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "From here to driving it: steps to the first real commute test",
+    "locale": "en",
+    "output": "06-path-to-driving.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "cloud": { "label": "Build work, in progress now" },
+        "frontend": { "label": "Build work, planned" },
+        "database": { "label": "Owner action" },
+        "security": { "label": "External gate (Apple)" }
+      }
+    }
+  },
+  "lanes": [
+    { "id": "build", "label": "Build work" },
+    { "id": "owner", "label": "Owner (only you can do these)" },
+    { "id": "apple", "label": "Apple gates", "variant": "exception" }
+  ],
+  "mainPath": ["prove", "port", "nativeapp", "cibuild", "install", "commute"],
+  "nodes": [
+    { "id": "prove", "lane": "build", "col": 0, "type": "cloud", "label": "1. Prove it", "sublabel": "live drive on web + iOS probe", "tag": "in progress" },
+    { "id": "port", "lane": "build", "col": 1, "type": "frontend", "label": "2. Port core", "sublabel": "src/core to RouteIQCore", "tag": "planned" },
+    { "id": "nativeapp", "lane": "build", "col": 2, "type": "cloud", "label": "3. Native app", "sublabel": "SwiftUI + Navigation SDK", "tag": "started" },
+    { "id": "cibuild", "lane": "build", "col": 3, "type": "frontend", "label": "4. Cloud build", "sublabel": "Actions to TestFlight", "tag": "planned" },
+    { "id": "carplayui", "lane": "build", "col": 5, "type": "frontend", "label": "Later: CarPlay screen", "sublabel": "only after the grant", "tag": "planned" },
+    { "id": "enrol", "lane": "owner", "col": 0, "type": "database", "label": "A. Enrol with Apple", "sublabel": "Developer Program, $99/yr", "tag": "owner" },
+    { "id": "keys", "lane": "owner", "col": 2, "type": "database", "label": "B. Add two keys", "sublabel": "Mapbox token, App Store key", "tag": "owner" },
+    { "id": "request", "lane": "owner", "col": 3, "type": "database", "label": "C. CarPlay request", "sublabel": "submit to Apple", "tag": "owner" },
+    { "id": "install", "lane": "owner", "col": 4, "type": "database", "label": "D. Install test build", "sublabel": "TestFlight on the iPhone", "tag": "owner" },
+    { "id": "commute", "lane": "owner", "col": 5, "type": "database", "label": "E. Commute test", "sublabel": "vs Google Maps and Waze", "tag": "owner" },
+    { "id": "gate1", "lane": "apple", "col": 1, "type": "security", "label": "Gate 1: enrolment", "sublabel": "membership active", "tag": "gate" },
+    { "id": "gate2", "lane": "apple", "col": 4, "type": "security", "label": "Gate 2: CarPlay", "sublabel": "entitlement, not guaranteed", "tag": "gate" }
+  ],
+  "edges": [
+    { "id": "s1", "from": "prove", "to": "port", "variant": "emphasis" },
+    { "id": "s2", "from": "port", "to": "nativeapp", "variant": "emphasis" },
+    { "id": "s3", "from": "nativeapp", "to": "cibuild", "variant": "emphasis" },
+    { "id": "s4", "from": "cibuild", "to": "install", "label": "build ready", "variant": "emphasis" },
+    { "id": "s5", "from": "install", "to": "commute", "variant": "emphasis" },
+    { "id": "o1", "from": "enrol", "to": "gate1", "label": "apply", "variant": "security" },
+    { "id": "o2", "from": "gate1", "to": "keys", "label": "approved", "variant": "security" },
+    { "id": "o3", "from": "keys", "to": "cibuild", "label": "GitHub secrets" },
+    { "id": "o4", "from": "keys", "to": "request" },
+    { "id": "o5", "from": "request", "to": "gate2", "label": "wait", "variant": "security" },
+    { "id": "o6", "from": "gate2", "to": "carplayui", "label": "if granted", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    { "dot": "violet", "title": "Your steps, in order", "items": ["A. Enrol in the Apple Developer Program ($99/yr)", "B. Create a Mapbox secret download token and an App Store Connect API key; store both as GitHub secrets, never in chat", "C. Submit the CarPlay entitlement request", "D. Install the TestFlight build on the iPhone", "E. Drive the commute and compare with Google Maps and Waze"] },
+    { "dot": "amber", "title": "Build work", "items": ["1. Live drive mode on the web and the iOS probe app (in progress)", "2. Port src/core to the Swift package RouteIQCore", "3. Native app on Mapbox Navigation SDK v3 (started)", "4. GitHub Actions macOS build uploaded to TestFlight"] },
+    { "dot": "rose", "title": "Two external gates", "items": ["Gate 1: Apple enrolment. Nothing reaches TestFlight before it", "Gate 2: CarPlay entitlement. Not guaranteed, and not needed for the first commute test on the phone", "Until gate 2, RouteIQ runs on the iPhone only"] },
+    { "dot": "slate", "title": "Also yours to decide", "items": ["Where to host renewed signal tiles", "Whether to drop the City of Charlotte data", "Both can wait until after the first commute test"] }
+  ]
+}
