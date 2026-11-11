@@ -1,0 +1,2 @@
+# Shell scripts run in Linux cloud sessions and in Git Bash hooks; CRLF breaks them.
+*.sh text eol=lf

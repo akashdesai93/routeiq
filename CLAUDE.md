@@ -26,6 +26,22 @@ npm.cmd run e2e                # end-to-end scenarios, offline, ~1 min (ports 43
 npx.cmd playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm.cmd run e2e:build)
 ```
 
+## Commands (Linux / cloud sessions)
+
+In a Claude Code cloud session (or any Linux/macOS shell) the plain names work. The cloud
+environment is prepared by `scripts/cloud-setup.sh` (see `docs/cloud-sessions.md`).
+
+```bash
+npm run typecheck              # tsc -b
+npm run lint                   # oxlint
+npx vitest run                 # all unit tests
+npm run build                  # typecheck + vite build
+npm run e2e                    # end-to-end scenarios (headless Chromium, offline)
+npx playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm run e2e:build)
+(cd native/RouteIQCore && swift build --build-tests && swift test)   # native sessions only
+node --test native/scripts/pack-signal-bundle.test.mjs              # native: signal bundle packer
+```
+
 To save tokens, wrap the test run with rtk: `rtk test npx.cmd vitest run`.
 "Done" means typecheck, lint, unit tests and the e2e scenarios are all green, and a feature
 the user can see or hear has an e2e scenario that shows it working. The `/verify` skill runs
@@ -97,12 +113,12 @@ a PR. When nothing is ready, it files new `triage` issues instead. Loops never p
 
 ## Coordination (several sessions at once)
 
-- **Orchestrator:** the CLI session started in `C:\Users\akash\dev` (`7ea8fc08`). It keeps
+- **Orchestrator:** the CLI session started in `C:\Users\akash\dev` (its name is on #17, currently `dev-18`). It keeps
   the board up to date, reviews and merges PRs (`/pr-watch`), sends out work, and reports
   to the owner. Other sessions don't merge.
 - **Status board:** pinned issue #17. Every session posts with `/status` when it starts,
   ships, gets blocked or stops, and at least once an hour while working.
-- **Check in on start (required):** the first thing any session working on RouteIQ does is
+- **Check in on start (required, local sessions):** the first thing any session working on RouteIQ does is
   send the orchestrator a 5-line status (goal, branch/worktree, files you touch, done, next)
   with SendMessage. Find it in `ListAgents`: it's the CLI session whose cwd is
   `C:\Users\akash\dev`, and its current name is on #17. Message it again when you ship,
@@ -113,8 +129,42 @@ a PR. When nothing is ready, it files new `triage` issues instead. Loops never p
 - **Ship work through PRs**, one issue per PR, with `Closes #N` and how it was verified.
   The orchestrator reviews the PR with an independent agent, checks CI, and squash-merges.
   After a merge, rebase onto or restart from `origin/main`.
-- **Questions for the owner** go on the issue with the `needs-human` label and in your
-  status post. The orchestrator collects them for the owner.
+- **Questions for the owner** go on the issue with the `needs-human` label (remove `ready`)
+  and in your status post, as one comment that starts `Decision needed:` with the question,
+  a recommendation and the options. The orchestrator collects them for the owner.
+- **Who is on what** is the `in-progress` label plus the comment
+  `claude-loop: claimed by <session/agent>` on the issue. The orchestrator regenerates #17
+  from those; nobody edits its body by hand.
+
+### Cloud sessions
+
+Some sessions run as Claude Code cloud sessions (claude.ai/code) instead of on the owner's
+PC: the design session (#21), the native session (#15) and the e2e session (#32). Setup for
+the owner: `docs/cloud-sessions.md`.
+
+- **Start from the handoff.** Read this file, then the handoff comment on your issue, then continue.
+- **No messaging.** A cloud session can't see or message the local sessions (the fleet mod,
+  SendMessage and ListAgents are local only), so skip the check-in message and the roster.
+  Report with `/status` comments on #17 instead, and through your PRs. The orchestrator
+  reads both. Post a status when you start, ship, get blocked or stop, and at least once an
+  hour while working.
+- **`gh` is REST-only in the cloud.** `gh` is preinstalled and authenticated through the
+  GitHub proxy, but the proxy rejects GraphQL, so `gh issue …` and `gh pr …` fail. Use `gh api`:
+
+  ```bash
+  R=repos/akashdesai93/routeiq
+  gh api -X POST $R/issues/17/comments -F body=@status.md                 # status on #17
+  gh api $R/issues/N/comments --jq '.[-5:][] | .body'                     # read a handoff
+  gh api -X POST $R/pulls -f title="..." -f head=claude/... -f base=main -F body=@pr.md
+  gh api -X POST $R/issues/N/labels -f 'labels[]=review'                  # labels
+  gh api $R/actions/runs --jq '.workflow_runs[:5][] | [.name,.head_branch,.conclusion] | @tsv'
+  ```
+- **Same rules otherwise:** your own branch `claude/...` from `origin/main`, one issue per PR
+  with `Closes #N` and how it was verified, never push to `main`, never merge. Use the
+  Linux commands above. Never paste or ask for the real Mapbox token; tests and the e2e
+  build use a dummy `pk.test` token.
+- The proxy pushes branches but refuses branch deletions and tags. The native session runs
+  `bash scripts/cloud-setup.sh swift` once if `swift` is missing (see `docs/cloud-sessions.md`).
 
 ## Where things stand (Nov 2026)
 
