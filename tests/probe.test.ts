@@ -92,6 +92,76 @@ describe('selectViaPoints', () => {
     expect(selectViaPoints([...candidates].reverse())).toEqual(once)
   })
 
+  it('breaks an equal-duration tie by the smaller id, whatever the order', () => {
+    // Same ETA: 'a' (A, straight) must be the base over 'b' (D, north detour), in either order.
+    const a = { ...world('A', 1200), id: 'a' }
+    const b = { ...world('D', 1200), id: 'b' }
+    for (const candidates of [[a, b], [b, a]]) {
+      const points = selectViaPoints(candidates)
+      expect(points.length).toBeGreaterThan(0)
+      expect(points.every((p) => p.baseRouteId === 'a')).toBe(true)
+    }
+  })
+
+  it('orders sides by room even when another candidate has a NaN coordinate', () => {
+    // B runs 1 km north of A, so the right (south) side has more room and comes first.
+    const candidates = [world('A', 1200), world('B', 1300)]
+    expect(selectViaPoints(candidates).map((p) => p.side)).toEqual(['right', 'left'])
+    const geometry = [...world('C', 1250).geometry]
+    geometry[3] = [Number.NaN, Number.NaN]
+    const broken = { ...world('C', 1250), id: 'broken', geometry }
+    expect(selectViaPoints([...candidates, broken]).map((p) => p.side)).toEqual(['right', 'left'])
+  })
+
+  it('merges overlapping freeway spans and ignores empty, reversed or NaN ones', () => {
+    const spansOf = (limitedAccessSpansM: RouteCandidate['limitedAccessSpansM']) =>
+      selectViaPoints([world('A', 1200, { limitedAccessSpansM })], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 10 }).map(
+        (p) => p.targetSpanM,
+      )
+    const whole = [
+      [1000, 19000],
+      [1000, 19000],
+    ]
+    // [3, 8] and [5, 12] km overlap into one freeway from 3 to 12 km: stretches [12, 19] and [1, 3] km.
+    const overlapping = spansOf([
+      [5000, 12000],
+      [3000, 8000],
+    ])
+    expect(overlapping.map((s) => s.map((m) => Math.round(m)))).toEqual([
+      [12000, 19000],
+      [1000, 3000],
+      [12000, 19000],
+      [1000, 3000],
+    ])
+    expect(spansOf([[4000, 6000], [4500, 5500]]).map((s) => s.map((m) => Math.round(m)))).toEqual([
+      [6000, 19000],
+      [1000, 4000],
+      [6000, 19000],
+      [1000, 4000],
+    ])
+    expect(spansOf([])).toEqual(spansOf(null))
+    for (const spans of [[[5000, 5000]], [[8000, 3000]], [[2000, Number.NaN]], [[Number.NaN, 6000]]] as const) {
+      expect(spansOf(spans as unknown as RouteCandidate['limitedAccessSpansM']).map((s) => s.map(Math.round))).toEqual(
+        whole,
+      )
+    }
+  })
+
+  it("uses the segment's own heading at a hairpin", () => {
+    // East 10 km, north 100 m, back west 10 km. A freeway over the last 1.04 km puts the probe spot
+    // on the short northbound link, 30 m up it, where the ±150 m chord is much shorter than the window.
+    const hairpin: RouteCandidate = {
+      ...world('A', 1200),
+      id: 'hairpin',
+      geometry: [at(0, 0), at(10000, 0), at(10000, 100), at(0, 100)],
+      limitedAccessSpansM: [[19060, 20100]],
+    }
+    const points = selectViaPoints([hairpin])
+    // Heading north: right is east. The chord would tilt it and land on the eastbound leg.
+    expect(points.map((p) => [p.side, p.offsetM])).toEqual([['right', 500]])
+    expect(distanceM(points[0]!.position, at(10500, 30))).toBeLessThan(2)
+  })
+
   it('spreads a small budget over stretches before taking second sides, and respects maxPoints', () => {
     // A freeway span from 8 to 12 km splits A into two surface stretches: [1, 8] and [12, 19] km.
     const candidates = [world('A', 1200, { limitedAccessSpansM: [[8000, 12000]] })]

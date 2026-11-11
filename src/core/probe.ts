@@ -96,12 +96,14 @@ function fastest(candidates: readonly RouteCandidate[]): RouteCandidate | null {
 /**
  * The parts of [fromM, toM] not covered by the limited-access spans. Unknown
  * road kinds (null spans) count as surface street: a wasted probe costs one
- * request, a skipped one can hide the fastest route.
+ * request, a skipped one can hide the fastest route. A span with a NaN bound,
+ * or one that covers nothing (end at or before start), is ignored the same way:
+ * kept, it would break the cursor or the sort.
  */
 function surfaceStretches(spans: readonly DistanceSpanM[] | null, fromM: number, toM: number): DistanceSpanM[] {
   const out: DistanceSpanM[] = []
   let cursor = fromM
-  const sorted = [...(spans ?? [])].sort((a, b) => a[0] - b[0])
+  const sorted = (spans ?? []).filter(([a, b]) => b > a).sort((a, b) => a[0] - b[0])
   for (const [start, end] of sorted) {
     if (start > cursor) out.push([cursor, Math.min(start, toM)])
     cursor = Math.max(cursor, end)
@@ -158,7 +160,8 @@ export function selectViaPoints(
   const stretches = surfaceStretches(base.limitedAccessSpansM, clear, lengthM - clear)
     .filter(([a, b]) => b - a >= options.minStretchM)
     .sort((x, y) => y[1] - y[0] - (x[1] - x[0]) || x[0] - y[0])
-  const others = candidates.filter((c) => c !== base)
+  // Only usable lines measure room: one NaN coordinate would make every room NaN and hide the side order.
+  const others = candidates.filter((c) => c !== base && usable(c))
   const offsets = [...options.offsetsM].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
 
   const rounds: ViaPoint[][] = [[], []]
