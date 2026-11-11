@@ -42,7 +42,10 @@ cd native/RouteIQCore && swift test
 **On the Windows PC.** Swift 6.4.2 is installed with `winget install --id Swift.Toolchain`,
 next to Visual Studio 2022 with the C++ x64 tools and the Windows 11 SDK (22621). Run swift
 from an "x64 Native Tools Command Prompt for VS 2022", so that `link.exe` and the C headers
-are found. Use the classic build system: in 6.4.2 the default one does not find the
+are found. Open the prompt after the install, so it picks up the installer's `SDKROOT`
+variable. In a shell started before the install, set `SDKROOT` to
+`%LOCALAPPDATA%\Programs\Swift\Platforms\6.4.2\Windows.platform\Developer\SDKs\Windows.sdk\`.
+Without it, swift fails with "unable to load standard library". Use the classic build system: in 6.4.2 the default one does not find the
 Windows C headers (`'stdlib.h' file not found`).
 
 ```bat
