@@ -25,6 +25,9 @@
 //
 // How long each stretch takes is set by a Traffic function, so a scenario can
 // script "a jam on A from the third request on" without touching the geometry.
+// Every answer carries Mapbox's per-segment annotations (congestion and
+// duration, one entry per segment of the line), the congestion read off how much
+// slower the segment is than its usual pace (see congestionOf).
 // Nothing here is a real road or a real place; only O and D are, and those
 // come from the app (public landmarks in the scenarios).
 
@@ -46,6 +49,17 @@ export type Traffic = (route: RouteName, at: FramePoint, n: number) => number
 // S's own stretch (the middle half, where it leaves A) is a slower street: in free
 // flow S is about 1.5 minutes behind A and last of all four.
 const BASE_PACE: Record<RouteName, number> = { A: 1 / 22, B: 1 / 23, C: 1 / 22.5, S: 1 / 18, 'off-route': 1 / 12 }
+
+/**
+ * Mapbox's congestion word for a segment driven at `ratio` times its usual pace.
+ * Made up for this world: Mapbox does not publish how it buckets live speeds.
+ */
+export function congestionOf(ratio: number): 'low' | 'moderate' | 'heavy' | 'severe' {
+  if (ratio >= 3) return 'severe'
+  if (ratio >= 1.75) return 'heavy'
+  if (ratio >= 1.25) return 'moderate'
+  return 'low'
+}
 
 /** Free-flowing traffic everywhere: each route at its usual pace. */
 export const FREE_FLOW: Traffic = (route) => BASE_PACE[route]
@@ -246,6 +260,8 @@ export class World {
     let duration = 0
     let typical = 0
     let distance = 0
+    const congestion: string[] = []
+    const segmentSec: number[] = []
     const corners = road.corners
     for (let i = 0; i < corners.length - 1; i++) {
       const a = corners[i]!
@@ -264,8 +280,11 @@ export class World {
         // S drives A's own road before and after its middle half.
         const onSharedA = road.name === 'S' && (mid.f < 0.25 || mid.f > 0.75)
         const paceOf: RouteName = (road.name === 'off-route' && i > 0) || onSharedA ? 'A' : road.name
-        stepSec += m * traffic(paceOf, mid, n)
+        const pace = traffic(paceOf, mid, n)
+        stepSec += m * pace
         typical += m * BASE_PACE[paceOf]
+        congestion.push(congestionOf(pace / BASE_PACE[paceOf]))
+        segmentSec.push(round1(m * pace))
       }
       duration += stepSec
       distance += stepM
@@ -307,7 +326,15 @@ export class World {
       duration_typical: round1(typical),
       distance: round1(distance),
       geometry: { type: 'LineString', coordinates: line },
-      legs: [{ distance: round1(distance), duration: round1(duration), summary: road.legNames[0] ?? '', steps }],
+      legs: [
+        {
+          distance: round1(distance),
+          duration: round1(duration),
+          summary: road.legNames[0] ?? '',
+          steps,
+          annotation: { congestion, duration: segmentSec },
+        },
+      ],
     }
   }
 }
@@ -439,7 +466,14 @@ export interface RouteJson {
   duration_typical: number
   distance: number
   geometry: { type: 'LineString'; coordinates: LngLat[] }
-  legs: { distance: number; duration: number; summary: string; steps: StepJson[] }[]
+  legs: {
+    distance: number
+    duration: number
+    summary: string
+    steps: StepJson[]
+    /** Sent with annotations=congestion,duration: one entry per segment of `geometry`. */
+    annotation: { congestion: string[]; duration: number[] }
+  }[]
 }
 export interface DirectionsJson {
   code: 'Ok'

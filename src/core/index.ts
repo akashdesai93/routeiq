@@ -1,6 +1,7 @@
 // Public surface of the framework-free core. UI code imports from here only.
 export type {
   BBox,
+  CongestionLevel,
   DistanceSpanM,
   GuidanceAnnouncement,
   GuidanceStep,
@@ -12,6 +13,7 @@ export type {
   RouteSource,
   RouteIntersection,
   RouteSignal,
+  SegmentTraffic,
   SignalCoverage,
   SignalPoint,
   SignalSource,

@@ -60,7 +60,8 @@ export interface DirectionsUrlOptions {
 
 /**
  * Directions request URL: traffic-aware driving, with alternatives, full GeoJSON
- * geometry, steps, and the banner and voice instructions of each step. Coordinates go longitude,latitude, joined by an encoded
+ * geometry, steps, the banner and voice instructions of each step, and the
+ * congestion and travel time of every segment of the line. Coordinates go longitude,latitude, joined by an encoded
  * semicolon as the Mapbox docs show. Null when a coordinate is not valid.
  *
  * No `depart_at`: without it driving-traffic routes for "now" on live traffic,
@@ -85,6 +86,12 @@ export function buildDirectionsUrl(
     banner_instructions: 'true',
     voice_instructions: 'true',
     voice_units: 'imperial',
+    // Per-segment traffic along the line (Directions docs, `annotations`, checked Nov 11, 2026):
+    // "congestion" is "only available for the mapbox/driving-traffic profile" and is one of
+    // low, moderate, heavy, severe or unknown; "duration" is the time between each pair of
+    // coordinates. It "must be used in conjunction with overview=full". Same request, same
+    // price: the API is "billed by requests", whatever the parameters.
+    annotations: 'congestion,duration',
   })
   // One "angle,range" per coordinate, semicolon-separated; an empty entry leaves
   // that coordinate free, as the destination always is (Mapbox docs: bearings).

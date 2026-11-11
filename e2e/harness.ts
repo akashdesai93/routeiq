@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, type E2EWindow } from './browserStubs.ts'
-import { along, alongOf, FREE_FLOW, sideStep, World, type LngLat, type Traffic } from './world/roads.ts'
+import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type Traffic } from './world/roads.ts'
 
 export { expect }
 
@@ -85,7 +85,17 @@ export class App {
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
   /** Side-street probes (requests with a via point), in order: the road each one came back on, null for NoSegment. */
-  readonly probes: { forRequest: number; destination: LngLat; road: string | null; durationSec: number | null; radiuses: string | null }[] = []
+  readonly probes: {
+    forRequest: number
+    destination: LngLat
+    road: string | null
+    durationSec: number | null
+    radiuses: string | null
+    /** Where the via was, in the trip's frame (share of the way, meters to the left). */
+    via: FramePoint
+    /** The `annotations` parameter the request sent. */
+    annotations: string | null
+  }[] = []
   /** Probe requests the page itself cancelled (aborted) before they were answered, by their index in `probes`. */
   readonly abortedProbes: number[] = []
   private held: (() => Promise<void>)[] = []
@@ -327,7 +337,16 @@ export class App {
           const radiuses = url.searchParams.get('radiuses')
           const viaRadius = Number(radiuses?.split(';')[1])
           const probe = world.through(from, points[1]!, traffic, this.directionsRequests, Number.isFinite(viaRadius) ? viaRadius : undefined)
-          const index = this.probes.push({ forRequest: this.directionsRequests, destination: to, road: probe.road, durationSec: probe.durationSec, radiuses }) - 1
+          const index =
+            this.probes.push({
+              forRequest: this.directionsRequests,
+              destination: to,
+              road: probe.road,
+              durationSec: probe.durationSec,
+              radiuses,
+              via: world.frameOf(points[1]!),
+              annotations: url.searchParams.get('annotations'),
+            }) - 1
           if (this.outside.holdProbes !== true) return route.fulfill({ json: probe.answer })
           this.heldRequests.set(request, index)
           // Answering a request the page has cancelled fails; that is the point of some scenarios.

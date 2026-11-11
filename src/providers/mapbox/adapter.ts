@@ -1,6 +1,7 @@
 import {
   alongRouteM,
   distanceM as distanceBetweenM,
+  type CongestionLevel,
   isValidLngLat,
   routeIdFromGeometry,
   synthesizeAnnouncements,
@@ -11,6 +12,7 @@ import {
   type Maneuver,
   type RouteCandidate,
   type RouteIntersection,
+  type SegmentTraffic,
 } from '../../core/index.ts'
 
 export type DirectionsErrorKind =
@@ -327,6 +329,53 @@ function toGuidance(legs: unknown): GuidanceStep[] {
   return guidance
 }
 
+const CONGESTION_LEVELS: ReadonlySet<string> = new Set<CongestionLevel>(['low', 'moderate', 'heavy', 'severe', 'unknown'])
+
+/**
+ * One annotation list (`legs[].annotation.<key>`, sent with
+ * annotations=congestion,duration and overview=full) for the whole route: the
+ * legs' lists one after another. Each leg's list has one entry per segment of
+ * that leg's part of the line, and a later leg starts at the point where the
+ * last one arrived, so the lists together have one entry per segment of the
+ * route. Null when any leg lacks the list, or the total is not exactly
+ * `segments` long: a list that does not line up with the geometry would put
+ * the traffic in the wrong place. Limit: only the total is checked, since a
+ * leg's share of the overview line is not in the response; one leg short and
+ * the next one long would pass. Routes here are one leg (via points are
+ * silent waypoints), so that cannot happen today.
+ */
+function annotationList<T>(legs: unknown, key: string, segments: number, entry: (v: unknown) => T | null): T[] | null {
+  if (!Array.isArray(legs) || legs.length === 0) return null
+  const out: T[] = []
+  for (const leg of legs as unknown[]) {
+    if (!isRecord(leg) || !isRecord(leg.annotation)) return null
+    const list = leg.annotation[key]
+    if (!Array.isArray(list)) return null
+    for (const raw of list as unknown[]) {
+      const value = entry(raw)
+      if (value === null) return null
+      out.push(value)
+    }
+  }
+  return out.length === segments ? out : null
+}
+
+/**
+ * Per-segment congestion and travel time (see RouteCandidate.segmentTraffic).
+ * A congestion entry Mapbox does not document (another word, a number, null)
+ * reads as 'unknown', never as a level; a duration entry that is not a
+ * number of 0 or more makes the whole duration list null. Null when neither
+ * list is usable.
+ */
+function toSegmentTraffic(legs: unknown, segments: number): SegmentTraffic | null {
+  if (segments < 1) return null
+  const congestion = annotationList<CongestionLevel>(legs, 'congestion', segments, (v) =>
+    typeof v === 'string' && CONGESTION_LEVELS.has(v) ? (v as CongestionLevel) : 'unknown',
+  )
+  const durationSec = annotationList(legs, 'duration', segments, nonNegative)
+  return congestion === null && durationSec === null ? null : { congestion, durationSec }
+}
+
 /** Null when the route lacks what the app cannot do without: a line, a time, a length. */
 function toCandidate(route: unknown): RouteCandidate | null {
   if (!isRecord(route)) return null
@@ -354,12 +403,15 @@ function toCandidate(route: unknown): RouteCandidate | null {
       geometry.length === coordinates.length ? toLimitedAccessSpans(route.legs, geometry) : null,
     maneuvers: toManeuvers(route.legs),
     guidance: toGuidance(route.legs),
+    // Annotations line up with the line Mapbox sent: with a point dropped they would be misplaced.
+    segmentTraffic: geometry.length === coordinates.length ? toSegmentTraffic(route.legs, geometry.length - 1) : null,
   }
 }
 
 /**
  * Turns a Mapbox Directions API v5 JSON body (geometries=geojson, steps=true,
- * and for turn guidance banner_instructions=true and voice_instructions=true)
+ * for turn guidance banner_instructions=true and voice_instructions=true, and
+ * for per-segment traffic annotations=congestion,duration with overview=full)
  * into RouteCandidates. Pure, and never throws: anything unexpected comes back
  * as a typed failure. Route ids come from the geometry (core/hash.ts), so the
  * same route keeps its id from one response to the next; if two routes in one

@@ -86,6 +86,32 @@ export interface RouteCandidate {
    * provider's own alternatives. Left out, or 'provider': the provider offered it.
    */
   readonly source?: RouteSource
+  /**
+   * Live traffic along the route, one entry per segment of `geometry` (entry i
+   * covers geometry[i] to geometry[i + 1]), from the provider's per-segment
+   * annotations. Used to aim side-street probes at the congested part of the
+   * route (see probe.ts). Left out, or null, when the provider sent none; each
+   * list inside is null on its own when it is missing or does not have exactly
+   * one entry per segment. Never guessed.
+   */
+  readonly segmentTraffic?: SegmentTraffic | null
+}
+
+/**
+ * How congested one stretch of road is right now, in the provider's words
+ * (Mapbox: low, moderate, heavy, severe; 'unknown' when it does not know).
+ */
+export type CongestionLevel = 'low' | 'moderate' | 'heavy' | 'severe' | 'unknown'
+
+/** See RouteCandidate.segmentTraffic. Both lists, when present, have geometry.length - 1 entries. */
+export interface SegmentTraffic {
+  /** Congestion of each segment. Null when the provider sent none, or the wrong number of entries. */
+  readonly congestion: readonly CongestionLevel[] | null
+  /**
+   * Traffic-aware travel time of each segment, in seconds. Null when missing, the wrong length, or any entry is not a number of 0 or more.
+   * Carried for later use; nothing ranks or probes by it yet.
+   */
+  readonly durationSec: readonly number[] | null
 }
 
 /** See RouteCandidate.source. */

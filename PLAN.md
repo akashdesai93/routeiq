@@ -206,8 +206,9 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       three points 500 or 800 m to either side of the fastest route's longest
       surface-street stretches, clear of known routes and of both ends, with every
       threshold in `DEFAULT_PROBE_OPTIONS` (README, Side-street probing).
-      RouteCandidate has no congestion annotation, so "slowest" is approximated by
-      "longest"; adding `annotations=congestion` to the adapter would sharpen it.
+      Since #23 (Nov 2026) the Directions requests send `annotations=congestion,duration`
+      and the points aim at the congested stretches first (`RouteCandidate.segmentTraffic`);
+      "longest" stands in for "slowest" only when there is no congestion data.
       11b (done, Nov 11, 2026, plan screen): `planProbes` cuts the points to
       `DEFAULT_PROBE_BUDGET` (2 requests per plan, 800 ms after the main routes, none
       for freeway-only trips), `fetchProbeRoute` asks origin → via → destination on

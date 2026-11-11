@@ -378,6 +378,21 @@ to look at are in `design/exports/merged/`.
 
 - **Routes and map:** Mapbox Directions API (`driving-traffic`) and Mapbox GL JS, with
   your token.
+- **Live congestion along a route:** the same Directions requests (the plan, the drive's
+  checks and the side-street probes) send `annotations=congestion,duration`, so every
+  route comes back with the congestion (`low`, `moderate`, `heavy`, `severe` or
+  `unknown`) and the traffic-aware travel time of each segment of its line. The docs
+  ([Directions API, `annotations`](https://docs.mapbox.com/api/navigation/directions/),
+  checked Nov 11, 2026) say `congestion` is "only available for the
+  `mapbox/driving-traffic` profile", `duration` is "the duration between each pair of
+  coordinates", and annotations "must be used in conjunction with `overview=full`" (which
+  RouteIQ already sends). The adapter (`src/providers/mapbox/adapter.ts`) carries them into
+  `RouteCandidate.segmentTraffic`, one entry per segment. A list that is missing or does
+  not have exactly one entry per segment is null, never guessed, and a congestion word
+  Mapbox does not document reads as `unknown`. Today only side-street probing uses it
+  (see Side-street probing). **Cost:** nothing extra. The Directions API is "billed by
+  requests" (docs, Pricing), whatever the parameters, and this is the same request; only
+  the response grows, by two arrays the length of the route line.
 - **Place search:** Mapbox Search Box API (`/suggest`, `/retrieve`), with the same
   token; see Planning a trip.
 - **Traffic signals, primary:** OpenStreetMap, nodes tagged `highway=traffic_signals`.
@@ -828,16 +843,24 @@ Planning a trip):
 | A whole plan | at most 3 |
 
 How the points are chosen: the fastest candidate's surface-street stretches (everything
-outside its freeway spans, with the first and last kilometer cut off) are taken longest
-first, and each is probed at its middle, square to the route, on both sides. A point that
+outside its freeway spans, with the first and last kilometer cut off) are taken slowest
+first, by Mapbox's live congestion (`segmentTraffic`, see Data sources): a stretch with at
+least `minCongestedM` (300 m) of `heavy` or `severe` traffic (`congestedLevels`; congested
+runs `congestionGapM`, 200 m, or less apart count as one jam) comes first, the most
+congested first, and is probed beside the middle of its longest jam. The other stretches
+follow, longest first, each probed at its middle. A route without congestion data, or with
+none at those levels (`moderate` and `unknown` are never a jam), is the old rule unchanged:
+the longest stretch stands in for the slowest. Each point is placed square to the route, on
+both sides. A point that
 lands near any known route is moved further out or dropped, since it would only repeat
 that route, and a point within the endpoint clearance of the origin or destination in a
 straight line is skipped too (a stretch can bend back toward an end). Within a stretch the
 side with more room from the other known routes goes first. The first side of every stretch
 comes before any second side, so a small budget spreads over the trip. Unknown road kinds
 count as surface street, and so does a freeway span with a NaN bound or no length. Freeway-only
-trips and trips under 3 km get no points. RouteCandidate has no congestion or
-per-segment times yet, so the longest stretch stands in for the slowest.
+trips and trips under 3 km get no points. Each point says which jam it aims at
+(`congestedSpanM`, null when it was placed without traffic data). The per-segment
+durations are carried but not used for the choice yet.
 
 | `DEFAULT_PROBE_OPTIONS` | Default | Meaning |
 | --- | --- | --- |
@@ -850,6 +873,9 @@ per-segment times yet, so the longest stretch stands in for the slowest.
 | `headingWindowM` | 150 m | Route heading at the probe spot is taken over ± this |
 | `viaRadiusM` | 250 m | How far Mapbox may move the via onto a road (`radiuses`); no more than `clearOfRoutesM`, so a via never snaps back onto a known route |
 | `coverSampleM` | 10 m | A known route is sampled this often when checking whether a probe covers it (dead-end spur) |
+| `congestedLevels` | heavy, severe | Mapbox congestion levels that count as a jam to aim at |
+| `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
+| `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
 
 ## Live drive
 

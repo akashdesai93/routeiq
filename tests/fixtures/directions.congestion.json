@@ -1,0 +1,122 @@
+{
+  "code": "Ok",
+  "uuid": "hand-written-fixture-not-a-real-response",
+  "waypoints": [
+    { "name": "East Trade Street", "location": [-80.8431, 35.2271], "distance": 1.2 },
+    { "name": "Sharon Road", "location": [-80.8295, 35.1527], "distance": 3.4 }
+  ],
+  "routes": [
+    {
+      "weight_name": "auto",
+      "weight": 1010.5,
+      "duration": 900.4,
+      "duration_typical": 780.1,
+      "distance": 9300.5,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8436, 35.2201],
+          [-80.8402, 35.1903],
+          [-80.8331, 35.1611],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "South Tryon Street, Sharon Road",
+          "duration": 900.4,
+          "distance": 9300.5,
+          "annotation": {
+            "congestion": ["low", "heavy", "severe", "moderate"],
+            "duration": [80.2, 310.5, 402.1, 107.6]
+          },
+          "steps": [
+            {
+              "name": "South Tryon Street",
+              "distance": 9300.5,
+              "duration": 900.4,
+              "maneuver": { "type": "depart", "location": [-80.8431, 35.2271], "instruction": "Drive south on South Tryon Street" }
+            },
+            {
+              "name": "Sharon Road",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": { "type": "arrive", "location": [-80.8295, 35.1527], "instruction": "You have arrived at your destination" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "weight_name": "auto",
+      "weight": 1100.0,
+      "duration": 960.0,
+      "duration_typical": 800.0,
+      "distance": 9800.0,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8500, 35.2000],
+          [-80.8400, 35.1700],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "South Boulevard",
+          "duration": 960.0,
+          "distance": 9800.0,
+          "annotation": {
+            "congestion": ["low", "jammed", null],
+            "duration": [300.0, 330.0]
+          },
+          "steps": [
+            {
+              "name": "South Boulevard",
+              "distance": 9800.0,
+              "duration": 960.0,
+              "maneuver": { "type": "depart", "location": [-80.8431, 35.2271], "instruction": "Drive south on South Boulevard" }
+            },
+            {
+              "name": "Sharon Road",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": { "type": "arrive", "location": [-80.8295, 35.1527], "instruction": "You have arrived at your destination" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "weight_name": "auto",
+      "weight": 1200.0,
+      "duration": 1000.0,
+      "distance": 10100.0,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80.8431, 35.2271],
+          [-80.8350, 35.1900],
+          [-80.8295, 35.1527]
+        ]
+      },
+      "legs": [
+        {
+          "summary": "Park Road",
+          "duration": 1000.0,
+          "distance": 10100.0,
+          "steps": [
+            {
+              "name": "Park Road",
+              "distance": 10100.0,
+              "duration": 1000.0,
+              "maneuver": { "type": "depart", "location": [-80.8431, 35.2271], "instruction": "Drive south on Park Road" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
