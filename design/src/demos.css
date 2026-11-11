@@ -1,0 +1,33 @@
+/* The stages the screens sit on. Each direction's own look lives in dirs/. */
+.rq-one .ss-stage, .rq-cmp .ss-stage, .rq-all .ss-stage {
+  display: grid;
+  place-items: center;
+  font-family: 'Inter Variable', -apple-system, 'Segoe UI', sans-serif;
+  color: #16181c;
+}
+.rq-phone { flex: none; }
+
+/* Every screen is its own absolutely placed world at 402 x 874 points */
+.rq-screen { position: absolute; inset: 0; overflow: hidden; }
+/* The loop's reset is a cross-fade, never a blank (#46). A still copy of the
+   opening frame sits under the live screen (.rq-under). At the reset the live
+   screen's content fades out over it, the trip is put back unseen, and the
+   live screen comes back at once: by then it is the same picture as the copy
+   beneath, so nothing shows. The status bar never dims. */
+.rq-under { display: contents; }
+.rq-body { position: absolute; inset: 0; }
+.rq-screen[data-cover] { background: transparent !important; }
+.rq-screen[data-cover] > .rq-body { opacity: 0; transition: opacity 0.42s ease; }
+
+.rq-cmp__row { display: flex; gap: 72px; justify-content: center; align-items: flex-start; }
+.rq-cmp__col { display: flex; flex-direction: column; gap: 22px; align-items: center; width: 348px; }
+.rq-label { align-self: stretch; padding: 0 6px; }
+.rq-label__name { display: flex; gap: 12px; align-items: center; font-size: 26px; font-weight: 680; letter-spacing: -0.02em; line-height: 1.2; }
+.rq-label__n { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #16181c; color: #fff; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.rq-label__idea { margin-top: 6px; min-height: 44px; color: #555b66; font-size: 15px; line-height: 1.45; }
+
+.rq-all__grid { display: flex; flex-direction: column; gap: 64px; }
+.rq-all__band { display: flex; flex-direction: column; gap: 20px; }
+.rq-all__band > .rq-label { padding: 0 60px; }
+.rq-all__band .rq-label__idea { min-height: 0; }
+.rq-all__cap { color: #555b66; font-size: 15px; font-weight: 550; }

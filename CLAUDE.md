@@ -173,7 +173,12 @@ the owner: `docs/cloud-sessions.md`.
 - The live board is pinned issue #17. This section is only a snapshot.
 - Other trees: `.claude/worktrees/native-app-3ae6fd` (branch `claude/native-app-3ae6fd`)
   and `../routeiq-probe` (branch `native-probe`, a Capacitor iOS background-location probe
-  with a GitHub Actions macOS build). `../routeiq-design` is a separate design and slides kit.
+  with a GitHub Actions macOS build).
+- UI design workspace: `design/` (moved in from the old local `../routeiq-design`). A separate
+  Stageshow + Vite project with its own `package.json`, outside root typecheck, lint, tests
+  and e2e. Run it with `cd design && npm install && npm run dev` (port 5273). Merged direction
+  for #21/#22 is in `design/src/merged/` and `design/exports/merged/`; #47 is not done and
+  `design/tools/patch47-draft.py` is an unapplied, untested draft. See `design/README.md`.
 - Next in PLAN.md: step 9 (route hand-off to Google Maps / Waze), step 10 (freeze the
   contracts), step 11 (side-street alternatives, proposed).
 

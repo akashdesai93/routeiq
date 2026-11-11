@@ -40,3 +40,9 @@ dist-ssr
 dist-e2e/
 dist-e2e-notoken/
 e2e-report/
+
+# Design workspace (design/, its own project): scratch film output and
+# Mapbox / OpenStreetMap reference stills that must never be published
+design/node_modules/
+design/shots/
+design/reference/mapbox-screenshots-internal-not-for-publishing/

@@ -1,0 +1,5 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #fff; }
+body { font-family: 'Inter Variable', -apple-system, 'Segoe UI', sans-serif; }
+#example { width: 100%; min-height: 1px; }
+#example > .ss-fit { margin-inline: auto; }
