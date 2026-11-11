@@ -1,4 +1,5 @@
 import { alongRouteM, distanceM, isValidLngLat, localProjector, pointAtDistance, pointToSegment } from './geo.ts'
+import { findCurrentRoute, type RerouteDecision, type RerouteOptions } from './reroute.ts'
 import { SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
 import type { CongestionLevel, DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
 
@@ -233,12 +234,19 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`
  * slowest. Every stretch is probed on both sides. Within a stretch the side
  * farther from the other candidates comes first, then left; the first side of
  * every stretch comes before any second side, so a small budget spreads out.
+ *
+ * `base`, when given and usable, is the route to probe beside instead of the
+ * fastest (a drive probes beside the route being driven: see checkProbes).
+ * Every candidate, `base` included, still counts as a known route to keep
+ * clear of.
  */
 export function selectViaPoints(
   candidates: readonly RouteCandidate[],
   options: ProbeOptions = DEFAULT_PROBE_OPTIONS,
+  base: RouteCandidate | null = null,
 ): ViaPoint[] {
-  const base = fastest(candidates)
+  if (base !== null && !usable(base)) base = null
+  base ??= fastest(candidates)
   if (base === null || options.maxPoints <= 0) return []
   const along = alongRouteM(base.geometry)
   const lengthM = along.at(-1)!
@@ -264,6 +272,7 @@ export function selectViaPoints(
     .sort((x, y) => y.congestedM - x.congestedM || spanLength(y.span) - spanLength(x.span) || x.span[0] - y.span[0])
   // Only usable lines measure room: one NaN coordinate would make every room NaN and hide the side order.
   const others = candidates.filter((c) => c !== base && usable(c))
+  const known = candidates.includes(base) ? candidates : [...candidates, base]
   const offsets = [...options.offsetsM].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
 
   const rounds: ViaPoint[][] = [[], []]
@@ -286,7 +295,7 @@ export function selectViaPoints(
         const position = offsetPoint(mid, heading, side, offsetM)
         if (!isValidLngLat(position)) continue
         if (distanceM(position, origin) < clear || distanceM(position, destination) < clear) continue
-        if (candidates.some((c) => distanceToLineM(position, c.geometry) < options.clearOfRoutesM)) continue
+        if (known.some((c) => distanceToLineM(position, c.geometry) < options.clearOfRoutesM)) continue
         const roomM = Math.min(...others.map((c) => distanceToLineM(position, c.geometry)))
         const reason =
           jam === null
@@ -473,4 +482,184 @@ export function sideStreetNotice(ranked: readonly { readonly route: RouteCandida
   return minutes < 1
     ? 'Faster route found via side streets, saves under a minute.'
     : `Faster route found via side streets, saves ${minutes} min.`
+}
+
+/**
+ * How many side-street probes a drive may make (PLAN step 11c, #5). Probes
+ * share the drive's request budget (LiveOptions.maxRequests, the simulated
+ * drive's DriveSettings.maxRequests): they never take a request an ordinary
+ * check or its path check (baselineProbe) needs.
+ */
+export interface DriveProbeBudget {
+  /** Most probe requests per check. A fraction is rounded down; under 1, or not a finite number, turns probing off during a drive. */
+  readonly requestsPerCheck: number
+  /** Most probe requests per drive, so that most of the request budget stays for the checks themselves. */
+  readonly requestsPerDrive: number
+}
+
+export const DEFAULT_DRIVE_PROBE_BUDGET: DriveProbeBudget = {
+  requestsPerCheck: 1,
+  requestsPerDrive: 20,
+}
+
+const whole = (v: number | undefined, fallback: number) =>
+  v === undefined ? fallback : Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0
+
+/**
+ * How many probe requests the check being sent may make. `requestsUsed`
+ * counts the drive's requests so far, this check included; `probesUsed` the
+ * probes among them. One request is always left over for the check's own
+ * path check (baselineProbe), whether it turns out to be needed or not, so a
+ * probe never takes the request the engine needs to judge the route being
+ * driven. Zero once the per-drive cap or the budget is reached.
+ */
+export function checkProbeAllowance(
+  used: { readonly requestsUsed: number; readonly probesUsed: number },
+  maxRequests: number,
+  budget: Partial<DriveProbeBudget> = {},
+): number {
+  const perCheck = whole(budget.requestsPerCheck, DEFAULT_DRIVE_PROBE_BUDGET.requestsPerCheck)
+  const perDrive = whole(budget.requestsPerDrive, DEFAULT_DRIVE_PROBE_BUDGET.requestsPerDrive)
+  if (![used.requestsUsed, used.probesUsed, maxRequests].every(Number.isFinite)) return 0
+  const room = Math.floor(maxRequests) - used.requestsUsed - 1
+  return Math.max(0, Math.min(perCheck, perDrive - used.probesUsed, room))
+}
+
+/** What a drive remembers about its probes between checks. Plain data: keep it, pass it back, never edit it. */
+export interface CheckProbeMemory {
+  /** Probe requests made so far on this drive. */
+  readonly used: number
+  /** Checks that made a probe so far: which of a check's via points comes first next time (they take turns). */
+  readonly round: number
+  /**
+   * The via point of the probed route the reroute engine is confirming (or
+   * holding through its cooldown): the next check asks through it first, so
+   * the route it found can come back and be confirmed. Null when there is none.
+   */
+  readonly keep: LngLat | null
+}
+
+export const INITIAL_CHECK_PROBES: CheckProbeMemory = { used: 0, round: 0, keep: null }
+
+export interface CheckProbeInput {
+  /** The route being driven, and how far along it the check was asked from. */
+  readonly route: Pick<RouteCandidate, 'geometry'>
+  readonly alongM: number
+  /** The check's fresh routes, from the car. */
+  readonly fresh: readonly RouteCandidate[]
+  /** The answer to the check's request for the current path itself, when one was made (see RerouteObservation.baseline). */
+  readonly baseline?: readonly RouteCandidate[] | null
+  readonly memory: CheckProbeMemory
+  /** How many probe requests this check may make (checkProbeAllowance). */
+  readonly allowed: number
+  /** The engine's thresholds in use, so the current route is found among the fresh ones as the engine finds it. */
+  readonly rerouteOptions?: Partial<RerouteOptions>
+}
+
+/** Where along a line the point nearest `p` is, in meters from the line's start. */
+function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
+  const project = localProjector(p)
+  const along = alongRouteM(line)
+  let best = { distanceM: Infinity, atM: 0 }
+  for (let i = 1; i < line.length; i++) {
+    const hit = pointToSegment([0, 0], project(line[i - 1]!), project(line[i]!))
+    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, atM: along[i - 1]! + hit.t * (along[i]! - along[i - 1]!) }
+  }
+  return best.atM
+}
+
+/**
+ * The via points to probe on one check of a drive (PLAN step 11c, #5), at
+ * most `allowed` of them. The points are selectViaPoints' (the same rules and
+ * options as the plan screen's), from the car: beside the route being driven
+ * as this check found it (among the fresh routes, or the answer for the
+ * current path itself), or beside the fastest fresh route when it was not
+ * found. Every fresh route, and that answer, is a known route to keep clear of.
+ *
+ * - The via of a probed route the engine is confirming (memory.keep) comes
+ *   first, while it is still beside the road ahead (not within the endpoint
+ *   clearance of the car or the destination, along the route or in a straight
+ *   line) and clear of every known route. Confirmation needs the same route
+ *   on consecutive checks; the points alone would move with the car.
+ * - The other points take turns, check by check (memory.round), so a small
+ *   budget tries every side of every stretch in time. A point within
+ *   clearOfRoutesM of the kept via is the same probe and is skipped.
+ *
+ * Empty when nothing may be asked, there is no usable route, or there is
+ * nothing to probe (under minTripM left, or freeway only). Pure: the same
+ * input gives the same points in the same order.
+ */
+export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFAULT_PROBE_OPTIONS): LngLat[] {
+  const allowed = whole(input.allowed, 0)
+  if (allowed <= 0) return []
+  const known = [...input.fresh, ...(input.baseline ?? [])].filter(usable)
+  if (known.length === 0) return []
+  const current = findCurrentRoute(input.route, input.alongM, known, input.rerouteOptions)
+  const base = current ?? fastest(known)
+  if (base === null) return []
+  const points = selectViaPoints(known, options, base).map((p) => p.position)
+
+  const out: LngLat[] = []
+  const keep = input.memory.keep
+  if (keep !== null && isValidLngLat(keep)) {
+    const lengthM = alongRouteM(base.geometry).at(-1) ?? 0
+    const atM = nearestAlongM(base.geometry, keep)
+    const clear = options.endpointClearanceM
+    const beside =
+      lengthM >= options.minTripM &&
+      atM >= clear &&
+      atM <= lengthM - clear &&
+      distanceM(keep, base.geometry[0]!) >= clear &&
+      distanceM(keep, base.geometry.at(-1)!) >= clear &&
+      !known.some((c) => distanceToLineM(keep, c.geometry) < options.clearOfRoutesM)
+    if (beside) out.push(keep)
+  }
+  const kept = out[0]
+  const others = points.filter((p) => kept === undefined || distanceM(p, kept) >= options.clearOfRoutesM)
+  const start = others.length === 0 ? 0 : whole(input.memory.round, 0) % others.length
+  const turn = [...others.slice(start), ...others.slice(0, start)]
+  return [...out, ...turn].slice(0, allowed)
+}
+
+/**
+ * The check's fresh routes with its probed routes added: a probed route is
+ * kept only when it is new against the fresh routes AND the answer for the
+ * current path itself (mergeProbeRoutes' rules: not the same path, and not a
+ * known route plus a dead-end spur), tagged `source: 'probe'`. The fresh
+ * routes come first, as they came, so the reroute engine's off-route test
+ * still reads the provider's own first route. That answer is not added: it is
+ * passed to the engine on its own, as before.
+ */
+export function mergeCheckProbes(
+  fresh: readonly RouteCandidate[],
+  baseline: readonly RouteCandidate[] | null | undefined,
+  probed: readonly RouteCandidate[],
+): RouteCandidate[] {
+  const known = [...fresh, ...(baseline ?? [])]
+  const added = mergeProbeRoutes(known, probed).slice(known.length)
+  return [...fresh, ...added]
+}
+
+/**
+ * The probe memory after a check has been decided. `asked`: the probe
+ * requests the check made; `routes`: the routes the engine was given (null
+ * for a failed check). The kept via is the one of the probed route the engine
+ * is now confirming or holding (a 'stay' with a pending alternative that is a
+ * probed route carrying its via); a failed check keeps it, as the engine
+ * keeps a confirmation through a failed poll; anything else, a switch
+ * included, drops it.
+ */
+export function rememberCheckProbes(
+  memory: CheckProbeMemory,
+  asked: number,
+  decision: Pick<RerouteDecision, 'action' | 'considered' | 'nextState'>,
+  routes: readonly RouteCandidate[] | null,
+): CheckProbeMemory {
+  const made = whole(asked, 0)
+  const counted: CheckProbeMemory = { ...memory, used: memory.used + made, round: made > 0 ? memory.round + 1 : memory.round }
+  if (routes === null) return counted
+  const pending = decision.action === 'stay' && decision.nextState.pending !== null ? decision.considered : null
+  const route = pending === null ? undefined : routes.find((r) => r.id === pending.routeId)
+  const keep = route?.source === 'probe' && route.via !== undefined && isValidLngLat(route.via) ? route.via : null
+  return { ...counted, keep }
 }

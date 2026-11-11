@@ -228,8 +228,28 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       through the existing path check (`baselineProbe` vias), and without that answer
       the route is unconfirmed, not lost. e2e: "when I start on the side-street route,
       it drives the side street" and "when I pick a slower route on purpose, it drives
-      that route". Open for later: probes in the reroute engine (#5), so a check can
-      find a side street the plan did not.
+      that route".
+      11c (done, Nov 11, 2026, #5): probes in the reroute checks, live and simulated.
+      `checkProbes` picks the via points from the car, beside the route being driven,
+      by the plan screen's rules; `fetchFreshRoutes` asks for each one (with the car's
+      heading and the 250 m via radius) after the check and its path check;
+      `mergeCheckProbes` adds the new paths to the fresh routes, tagged `source: 'probe'`
+      with their via, and `decideReroute` judges them unchanged. One probe per check
+      (`DEFAULT_DRIVE_PROBE_BUDGET`), at most 20 a drive, inside the drive's 60 requests
+      and never taking the path check's request (`checkProbeAllowance`). The points take
+      turns check by check, and the via of a probed route being confirmed is asked again
+      first, so a confirmation can happen. No reroute threshold changed. Tests:
+      `tests/reroute.test.ts` ("side streets found by probes during a drive": 3 minutes
+      saved switches on the second check, 60 s never does, the 5 % share, a missed
+      check restarts the count, confirmPolls, the lead), `tests/probe.test.ts`,
+      `tests/live.test.ts`, `tests/drive.test.ts`; e2e: "when a jam builds during the
+      drive, a side street found mid-drive takes me round it" and "when a side street
+      found mid-drive saves only about a minute, it stays on my route". Open for later:
+      the via-asked ETA may run below the ordinary one (measured 3 to 13 % with 2 to 10
+      vias, one via not measured), which favours a probed route a little; a second
+      probe per check, or probes only while a jam is reported, if one turns out to miss
+      side streets on real trips; probes from inside the side street's own stretch see
+      only what Mapbox offers from there.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

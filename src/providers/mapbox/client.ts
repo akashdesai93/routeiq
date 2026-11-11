@@ -192,6 +192,8 @@ export interface FetchProbeRouteOptions {
    * A via with no road this close comes back as NoSegment, so null. Left out: unlimited.
    */
   viaRadiusM?: number
+  /** The vehicle's heading at the origin, for a probe made during a drive (see DirectionsUrlOptions.originHeadingDeg). */
+  originHeadingDeg?: number
   signal?: AbortSignal
   fetchImpl?: typeof fetch
 }
@@ -211,9 +213,9 @@ export interface FetchProbeRouteOptions {
  * is extra, so its failure is dropped silently and never reaches the user.
  */
 export async function fetchProbeRoute(options: FetchProbeRouteOptions): Promise<RouteCandidate | null> {
-  const { origin, via, destination, token, viaRadiusM, signal, fetchImpl } = options
+  const { origin, via, destination, token, viaRadiusM, originHeadingDeg, signal, fetchImpl } = options
   // buildDirectionsUrl leaves a bad via out, which would ask for the plain trip instead.
   if (!isValidLngLat(via)) return null
-  const result = await fetchDirections({ origin, destination, token, via: [{ point: via, radiusM: viaRadiusM }], signal, fetchImpl })
+  const result = await fetchDirections({ origin, destination, token, originHeadingDeg, via: [{ point: via, radiusM: viaRadiusM }], signal, fetchImpl })
   return result.ok ? (result.routes[0] ?? null) : null
 }

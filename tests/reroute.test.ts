@@ -3,13 +3,20 @@ import {
   alongRouteM,
   baselineProbe,
   bearingDeg,
+  checkProbes,
   decideReroute,
   declineRoute,
   DEFAULT_REROUTE_OPTIONS,
   findCurrentRoute,
+  INITIAL_CHECK_PROBES,
   INITIAL_REROUTE_STATE,
   lineFrom,
+  localProjector,
+  mergeCheckProbes,
   pointAtDistance,
+  pointToSegment,
+  rememberCheckProbes,
+  type CheckProbeMemory,
   type LngLat,
   type MatchMeter,
   type RerouteDecision,
@@ -17,7 +24,7 @@ import {
   type RerouteState,
   type RouteCandidate,
 } from '../src/core/index.ts'
-import { at, candidate, drive, nameOf, type DriveScript, type PollContext, type RouteName } from './helpers/driveWorld.ts'
+import { at, candidate, drive, lineOf, nameOf, type DriveScript, type PollContext, type RouteName } from './helpers/driveWorld.ts'
 
 // PLAN step 7: scripted drives through the reroute engine on a fake clock and a made-up road
 // network (see helpers/driveWorld.ts). No network, no timers; every position is invented.
@@ -1207,3 +1214,123 @@ describe('matching cost on a long route (#51)', () => {
   })
 })
 
+
+describe('side streets found by probes during a drive (PLAN step 11c, #5)', () => {
+  // Each check, the provider offers A (the route being driven) and B from the car, never the
+  // side street S (500 m south of A from 6 to 14 km). One probe goes out through the via point
+  // checkProbes picks, and is answered the way Mapbox snaps a via: along a road within 250 m of
+  // it (viaRadiusM), here only S, or NoSegment. What comes back joins the candidates, and the
+  // engine judges it by the rules every route goes through. No threshold is touched.
+
+  const distanceToS = (p: LngLat) => {
+    const project = localProjector(p)
+    const xy = lineOf('S').map(project)
+    let best = Infinity
+    for (let i = 1; i < xy.length; i++) best = Math.min(best, pointToSegment([0, 0], xy[i - 1]!, xy[i]!).distanceM)
+    return best
+  }
+
+  interface ProbedDrive {
+    polls: number
+    etaA: number
+    etaS: number
+    startAlongM?: number
+    /** Checks (0 for the first) at which the probe fails (NoSegment, a network error). */
+    probeFailsAt?: readonly number[]
+    options?: Partial<RerouteOptions>
+  }
+
+  function probedDrive({ polls, etaA, etaS, startAlongM = 1000, probeFailsAt = [], options = {} }: ProbedDrive) {
+    const route = candidate('A', at(0, 0), 2400)!
+    let state = INITIAL_REROUTE_STATE
+    let memory: CheckProbeMemory = INITIAL_CHECK_PROBES
+    const records: { decision: RerouteDecision; vias: LngLat[]; found: boolean }[] = []
+    for (let poll = 0; poll < polls; poll++) {
+      const alongM = startAlongM + poll * 300
+      const here = pointAtDistance(route.geometry, alongM)!.point
+      const fresh = [candidate('A', here, etaA), candidate('B', here, etaA + 200)].filter((c) => c !== null)
+      const vias = checkProbes({ route, alongM, fresh, memory, allowed: 1 })
+      // Past the point where S leaves A, this network has no road from the car onto S: no route that way.
+      const probed = vias.flatMap((via) => {
+        const s = probeFailsAt.includes(poll) || distanceToS(via) > 250 ? null : candidate('S', here, etaS)
+        return s === null ? [] : [{ ...s, via }]
+      })
+      const candidates = mergeCheckProbes(fresh, null, probed)
+      const decision = decideReroute(
+        state,
+        { nowSec: poll * 60, route, positionAlongM: alongM, speedMps: 5, candidates },
+        options,
+      )
+      records.push({ decision, vias, found: probed.length > 0 })
+      state = decision.nextState
+      memory = rememberCheckProbes(memory, vias.length, decision, candidates)
+      if (decision.action === 'switch') {
+        const to = candidates.find((c) => c.id === decision.toRouteId)!
+        return { records, switchedTo: { poll, route: to }, memory }
+      }
+    }
+    return { records, switchedTo: null, memory }
+  }
+
+  it('a side street that saves 3 minutes is found by a probe and switched to on the second check in a row, like any route', () => {
+    const { records, switchedTo, memory } = probedDrive({ polls: 6, etaA: 2000, etaS: 1820 })
+    expect(records.map((r) => r.decision.code)).toEqual(['confirming', 'faster-route'])
+    expect(records.every((r) => r.found)).toBe(true)
+    expect(records[0]!.decision.reason).toBe('Staying: faster route saves 3 minutes, confirming, check 1 of 2')
+    // The second check asked through the same via, so the same side street could come back and be confirmed.
+    expect(records[1]!.vias).toEqual(records[0]!.vias)
+    expect(switchedTo).not.toBeNull()
+    expect(nameOf(switchedTo!.route)).toBe('S')
+    expect(switchedTo!.route.source).toBe('probe')
+    const considered = records[1]!.decision.considered!
+    expect(considered).toMatchObject({ savingSec: 180, requiredLeadM: 400, onFreeway: false })
+    // Where S leaves A: 6 km, from the car 1.3 km along.
+    expect(considered.turnInM).toBeCloseTo(4700, 0)
+    expect(records[1]!.decision.reason).toBe('Switching: saves 3 minutes, turn in 2.9 miles')
+    // A switch drops the via: the next check starts from the new route.
+    expect(memory).toEqual({ used: 2, round: 2, keep: null })
+  })
+
+  it('a side street that saves only 60 s never triggers a switch, however often it is found', () => {
+    const { records, switchedTo } = probedDrive({ polls: 12, etaA: 2000, etaS: 1940 })
+    expect(switchedTo).toBeNull()
+    // Nothing is being confirmed, so the two sides of the road take turns: S is south, found every other check.
+    expect(records.map((r) => r.found)).toEqual(Array.from({ length: 12 }, (_, i) => i % 2 === 0))
+    const onS = records.filter((r) => r.found)
+    expect(new Set(onS.map((r) => r.decision.code))).toEqual(new Set(['saving-too-small']))
+    expect(new Set(records.filter((r) => !r.found).map((r) => r.decision.code))).toEqual(new Set(['current-best']))
+    expect(onS[0]!.decision.reason).toBe('Staying: faster route saves only 60 seconds')
+    expect(onS[0]!.decision.considered!.savingSec).toBe(60)
+  })
+
+  it('a side street is held to 5 % of the time left as well: 2.5 minutes on a 60-minute trip is not enough', () => {
+    const { records, switchedTo } = probedDrive({ polls: 8, etaA: 3600, etaS: 3450 })
+    expect(switchedTo).toBeNull()
+    expect(new Set(records.filter((r) => r.found).map((r) => r.decision.code))).toEqual(new Set(['saving-share-too-small']))
+  })
+
+  it('a side street found on one check and missed on the next starts the confirmation over', () => {
+    const { records, switchedTo } = probedDrive({ polls: 8, etaA: 2000, etaS: 1820, probeFailsAt: [1] })
+    expect(records.map((r) => r.found)).toEqual([true, false, true, true])
+    // The check that missed it had no winner (B is slower): the count starts again.
+    expect(records.map((r) => r.decision.code)).toEqual(['confirming', 'current-best', 'confirming', 'faster-route'])
+    expect(switchedTo!.poll).toBe(3)
+  })
+
+  it('needs as many checks in a row as confirmPolls says, for a side street too', () => {
+    const { records, switchedTo } = probedDrive({ polls: 8, etaA: 2000, etaS: 1820, options: { confirmPolls: 3 } })
+    expect(records.map((r) => r.decision.code)).toEqual(['confirming', 'confirming', 'faster-route'])
+    expect(switchedTo!.poll).toBe(2)
+  })
+
+  it('a side street whose turn-off is too close is refused, whatever it saves', () => {
+    // The first check (5.4 km along A) probes the north side; the second, from 5.7 km, finds S,
+    // which turns off 300 m ahead: under the 400 m lead. After that its turn-off is behind the car.
+    const { records, switchedTo } = probedDrive({ polls: 4, etaA: 2000, etaS: 1700, startAlongM: 5400 })
+    expect(records.map((r) => r.found)).toEqual([false, true, false, false])
+    expect(records[1]!.decision.code).toBe('too-late')
+    expect(records[1]!.decision.reason).toMatch(/^Staying: faster route turns off in .+, too late to take safely$/)
+    expect(records[1]!.decision.considered!.turnInM).toBeCloseTo(300, 0)
+    expect(switchedTo).toBeNull()
+  })
+})
