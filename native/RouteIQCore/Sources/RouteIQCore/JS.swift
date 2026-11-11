@@ -3,10 +3,10 @@ import Foundation
 /// Small helpers that reproduce JavaScript number and string semantics where
 /// the TypeScript core relies on them, so the Swift port gives the same
 /// answers. Internal: the public API never needs them.
-enum JS {
+package enum JS {
     /// `Math.round`: halves round toward +infinity (-2.5 gives -2), unlike
     /// Swift's `.rounded()`, which rounds halves away from zero.
-    static func round(_ x: Double) -> Double {
+    package static func round(_ x: Double) -> Double {
         guard x.isFinite else { return x }
         let down = x.rounded(.down)
         return x - down >= 0.5 ? down + 1 : down
@@ -14,17 +14,17 @@ enum JS {
 
     /// `Math.min` of two numbers: NaN if either is NaN. Swift's `min` returns
     /// the other operand instead.
-    static func min(_ a: Double, _ b: Double) -> Double {
+    package static func min(_ a: Double, _ b: Double) -> Double {
         a.isNaN || b.isNaN ? .nan : Swift.min(a, b)
     }
 
     /// `Math.max` of two numbers: NaN if either is NaN.
-    static func max(_ a: Double, _ b: Double) -> Double {
+    package static func max(_ a: Double, _ b: Double) -> Double {
         a.isNaN || b.isNaN ? .nan : Swift.max(a, b)
     }
 
     /// The `ToInt32` conversion behind `x | 0`: truncate, then wrap modulo 2^32.
-    static func toInt32(_ x: Double) -> Int32 {
+    package static func toInt32(_ x: Double) -> Int32 {
         guard x.isFinite else { return 0 }
         let t = x.rounded(.towardZero)
         var m = fmod(t, 4_294_967_296)
@@ -35,7 +35,7 @@ enum JS {
     /// A number as JavaScript's `Number.prototype.toString()` (and template
     /// literals) prints it: ECMAScript Number::toString laid out on Swift's
     /// shortest round-trip digits, which are the same digits JavaScript picks.
-    static func string(_ x: Double) -> String {
+    package static func string(_ x: Double) -> String {
         if x.isNaN { return "NaN" }
         if x == 0 { return "0" }
         if x.isInfinite { return x > 0 ? "Infinity" : "-Infinity" }
@@ -76,7 +76,7 @@ enum JS {
     /// `Number.prototype.toFixed(digits)` for 0...20 digits: the decimal
     /// string closest to x, picking the larger one on an exact tie, with no
     /// sign on negative zero.
-    static func toFixed(_ x: Double, _ fractionDigits: Int) -> String {
+    package static func toFixed(_ x: Double, _ fractionDigits: Int) -> String {
         if x.isNaN { return "NaN" }
         if abs(x) >= 1e21 || x.isInfinite { return string(x) }
         let sign = x < 0 ? "-" : ""
@@ -110,21 +110,21 @@ enum JS {
     }
 
     /// The `<` of two JavaScript strings: UTF-16 code unit order.
-    static func less(_ a: String, _ b: String) -> Bool {
+    package static func less(_ a: String, _ b: String) -> Bool {
         a.utf16.lexicographicallyPrecedes(b.utf16)
     }
 
     /// A three-way comparison like the TypeScript `compare` helper: 0 when
     /// neither is less (equal, or either is NaN).
-    static func compare(_ a: Double, _ b: Double) -> Int {
+    package static func compare(_ a: Double, _ b: Double) -> Int {
         a < b ? -1 : (a > b ? 1 : 0)
     }
 
-    static func compare(_ a: String, _ b: String) -> Int {
+    package static func compare(_ a: String, _ b: String) -> Int {
         less(a, b) ? -1 : (less(b, a) ? 1 : 0)
     }
 
-    static func compare(_ a: Int, _ b: Int) -> Int {
+    package static func compare(_ a: Int, _ b: Int) -> Int {
         a < b ? -1 : (a > b ? 1 : 0)
     }
 
@@ -141,7 +141,7 @@ enum JS {
 
     /// `n + 1` that stops at Int.max instead of trapping. (A JavaScript
     /// counter is a double and never overflows.)
-    static func increment(_ n: Int) -> Int {
+    package static func increment(_ n: Int) -> Int {
         n == .max ? .max : n + 1
     }
 }

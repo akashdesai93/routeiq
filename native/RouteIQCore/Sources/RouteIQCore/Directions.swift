@@ -17,6 +17,11 @@ public enum Directions {
         case api
         /// The body is not a Directions response, or no route in it is usable.
         case malformed
+        /// Filled by the fetch client (RouteIQKit), never by the parser.
+        case token
+        case rateLimit = "rate-limit"
+        case network
+        case aborted
     }
 
     public enum Result: Hashable, Sendable {
