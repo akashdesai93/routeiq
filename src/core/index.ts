@@ -101,6 +101,7 @@ export {
   spokenDistance,
   spokenDuration,
   type BaselineViaPoint,
+  type MatchMeter,
   type RerouteAlternative,
   type RerouteCode,
   type RerouteDecision,

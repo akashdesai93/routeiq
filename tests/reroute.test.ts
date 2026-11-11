@@ -11,6 +11,7 @@ import {
   lineFrom,
   pointAtDistance,
   type LngLat,
+  type MatchMeter,
   type RerouteDecision,
   type RerouteOptions,
   type RerouteState,
@@ -83,6 +84,7 @@ describe('reroute thresholds', () => {
       matchToleranceM: 20,
       matchMinOverlap: 0.95,
       matchMaxGapM: 400,
+      matchMaxDivergenceM: 50,
       matchIgnoreStartM: 150,
       baselineViaSpacingM: 3000,
       baselineMaxViaPoints: 6,
@@ -258,16 +260,28 @@ describe('the same route, drawn differently (patterns measured on real answers)'
     expect(decision.considered!.turnInM).toBeCloseTo(7000, -2)
   })
 
-  // Review of the overlap rule: where its loose side ends. A stretch apart shorter than
-  // matchMaxGapM that also fits in the 5% allowance is NOT told from the current route,
-  // however far to the side it runs. One city block around is such a stretch.
-  it('known limit: one block around counts as the current route on a long trip, two blocks or a short trip do not', () => {
-    /** North one 125 m block at xM, east `blocks` blocks, and back down to the main road. */
-    const around = (xM: number, blocks: number): Corner[] => [[xM, 0], [xM, 125], [xM + 125 * blocks, 125], [xM + 125 * blocks, 0]]
-    // 17 km to go, about 340 m of the fresh line apart: inside both limits.
-    const oneBlock: Corner[] = [[HERE, 0], ...around(10000, 1), [20000, 0]]
-    expect(isCurrent(oneBlock)).toBe(true)
-    // So it is never weighed as an alternative, whatever time it claims; the exact drawing gives the ETA.
+  // Where the overlap rule's loose side ends (#41). A stretch apart shorter than matchMaxGapM
+  // that fits in the 5% allowance used to pass however far to the side it ran, so one city
+  // block around matched as the current route on a long trip, and a reroute round a closed
+  // block kept the old guidance until off-route fired. Now no point of a stretch apart may
+  // run farther than matchMaxDivergenceM (50 m) from the other line: above the farthest
+  // measured drawing quirk (39 m, the lane group above), below any street a block over.
+  /** North one 125 m block at xM (or `sideM` to the side), east `blocks` blocks, and back down to the main road. */
+  const around = (xM: number, blocks: number, sideM = 125): Corner[] => [[xM, 0], [xM, sideM], [xM + 125 * blocks, sideM], [xM + 125 * blocks, 0]]
+  const oneBlock: Corner[] = [[HERE, 0], ...around(10000, 1), [20000, 0]]
+
+  it('one block around is another route, on a long trip too (#41)', () => {
+    // 17 km to go, about 340 m of the fresh line apart: inside the length and share limits, 125 m to the side.
+    expect(isCurrent(oneBlock)).toBe(false)
+    // The divergence cap, either side of 50 m: 300 m of road 45 m to the side is still a drawing of
+    // the same road; 60 m is the next street.
+    expect(isCurrent([[HERE, 0], ...around(10000, 2.4, 45), [20000, 0]])).toBe(true)
+    expect(isCurrent([[HERE, 0], ...around(10000, 2.4, 60), [20000, 0]])).toBe(false)
+    expect(findCurrentRoute(onA, HERE, [fresh([[HERE, 0], ...around(10000, 2.4, 60), [20000, 0]])], { matchMaxDivergenceM: 70 })).not.toBeNull()
+    // Two blocks, or one with 5 km to go, were already another route.
+    expect(isCurrent([[HERE, 0], ...around(10000, 2), [20000, 0]])).toBe(false)
+    expect(findCurrentRoute(onA, 15000, [fresh([[15000, 0], ...around(17000, 1), [20000, 0]])])).toBeNull()
+    // So it is weighed as an alternative like any other: five minutes faster, it starts a confirmation.
     const both = decideReroute(INITIAL_REROUTE_STATE, {
       nowSec: 0,
       route: onA,
@@ -275,15 +289,30 @@ describe('the same route, drawn differently (patterns measured on real answers)'
       speedMps: 20,
       candidates: [fresh(oneBlock, 1700), candidate('A', at(HERE, 0), 2000)!],
     })
-    expect(both).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 2000, asked: false } })
-    // Offered alone (the provider routes round that block), the driven line and its guidance are
-    // kept and only the time is taken from it: the engine does not see the block as left.
-    const alone = decideReroute(INITIAL_REROUTE_STATE, { nowSec: 0, route: onA, positionAlongM: HERE, speedMps: 20, candidates: [fresh(oneBlock, 1700)] })
-    expect(alone).toMatchObject({ action: 'stay', code: 'no-alternative', current: { durationSec: 1700 } })
-    // Two blocks: the stretch apart is longer than matchMaxGapM.
-    expect(isCurrent([[HERE, 0], ...around(10000, 2), [20000, 0]])).toBe(false)
-    // One block with 5 km to go: more than 5% of what is left.
-    expect(findCurrentRoute(onA, 15000, [fresh([[15000, 0], ...around(17000, 1), [20000, 0]])])).toBeNull()
+    expect(both).toMatchObject({ action: 'stay', code: 'confirming', considered: { savingSec: 300 } })
+  })
+
+  it('a closed block ahead: the provider routes round it, the block itself is asked for, and three "no route" answers take the detour (#41)', () => {
+    // Every check, the provider's only answer goes round the block at 10 km; the main road is closed there.
+    let state = INITIAL_REROUTE_STATE
+    const decisions: RerouteDecision[] = []
+    for (let poll = 0; poll < 3; poll++) {
+      const x = HERE + 600 * poll
+      const detour = fresh([[x, 0], ...around(10000, 1), [20000, 0]], 1700)
+      // Not the current route any more, so its time is asked for, with one via point: on the closed block itself.
+      const probe = baselineProbe(onA, x, [detour])!
+      expect(probe.via).toHaveLength(1)
+      const viaX = alongRouteM([at(0, 0), probe.via[0]!.point])[1]!
+      expect(viaX).toBeGreaterThan(10000)
+      expect(viaX).toBeLessThan(10125)
+      // The provider finds no route through it.
+      const decision = decideReroute(state, { nowSec: 60 * poll, route: onA, positionAlongM: x, speedMps: 10, candidates: [detour], baseline: [] })
+      decisions.push(decision)
+      state = decision.nextState
+    }
+    expect(decisions.map((d) => d.code)).toEqual(['route-unconfirmed', 'route-unconfirmed', 'route-lost'])
+    expect(decisions[2]).toMatchObject({ action: 'switch', toRouteId: fresh(oneBlock, 1700).id })
+    expect(decisions[2]!.reason).toMatch(/^Switching: the road ahead can no longer be routed, turn in /)
   })
 
   it('a confirmation carries on when the same alternative comes back drawn a little differently', () => {
@@ -623,6 +652,14 @@ describe('scripted drives', () => {
     // called that "current route missing" and counted towards leaving it, which was the bug:
     // routes that start a little behind the car are still the same routes, compared like for like.
     expect(poll(3300)).toMatchObject({ action: 'stay', code: 'current-best' })
+    // Only a straight approach from behind is left out of the comparison: a route that first
+    // drives a kilometer the other way and turns back is not the current route (#41 review).
+    const uTurn = (yM: number) => {
+      const geometry = [at(2900, 0), at(1900, 0), at(1900, yM), at(20000, yM)]
+      return { ...candidate('A', fetchedFrom, 1700)!, id: `u-turn-${yM}`, geometry, distanceM: alongRouteM(geometry).at(-1)!, maneuvers: [] }
+    }
+    expect(findCurrentRoute(route, 3000, [uTurn(15)])).toBeNull()
+    expect(findCurrentRoute(route, 3000, [uTurn(0.1)])).toBeNull()
   })
 
   it('the road ahead not routed for one poll only: the count starts again', () => {
@@ -637,6 +674,30 @@ describe('scripted drives', () => {
     expect(log.polls.map((p) => p.decision.nextState.lostPolls)).toEqual([0, 1, 0, 0, 1, 0, 0, 1])
   })
 
+  it('"no route" answers add up even with "another road" answers between them; finding the current route starts over (#41)', () => {
+    // A closure between via points: some checks the points miss it and the provider routes round it
+    // through them (another road), some checks a point lands on it (no route).
+    const lostAt = (poll: number) => poll % 2 === 0
+    const log = drive({
+      polls: 5,
+      eta: fixed({ A: 2000, B: 1900 }),
+      tamper: (candidates) => candidates.filter((c) => nameOf(c) !== 'A'),
+      baseline: (candidates, { poll }) => (lostAt(poll) ? [] : candidates.filter((c) => nameOf(c) === 'B')),
+    })
+    expect(log.polls.map((p) => p.decision.nextState.lostPolls)).toEqual([1, 1, 2, 2, 0])
+    expect(log.codes).toEqual(['route-unconfirmed', 'route-unconfirmed', 'route-unconfirmed', 'route-unconfirmed', 'route-lost'])
+    expect(log.switches).toHaveLength(1)
+    // The current route offered again between them: the count starts over, and nothing switches.
+    const found = drive({
+      polls: 5,
+      eta: fixed({ A: 2000, B: 1900 }),
+      tamper: (candidates, { poll }) => (poll === 3 ? candidates : candidates.filter((c) => nameOf(c) !== 'A')),
+      baseline: (candidates, { poll }) => (poll === 3 ? null : lostAt(poll) ? [] : candidates.filter((c) => nameOf(c) === 'B')),
+    })
+    expect(found.polls.map((p) => p.decision.nextState.lostPolls)).toEqual([1, 1, 2, 0, 1])
+    expect(found.switches).toEqual([])
+  })
+
   it('a poll that could not ask for the current path neither adds to the count nor clears it', () => {
     const state: RerouteState = { ...INITIAL_REROUTE_STATE, lostPolls: 2 }
     const notAsked = pollOnA({ xM: 1000, etas: { B: 1500 }, state })
@@ -644,11 +705,13 @@ describe('scripted drives', () => {
     expect(notAsked.nextState.lostPolls).toBe(2)
     // "No route through these points" is the answer that counts: the third in a row.
     expect(pollOnA({ xM: 1000, etas: { B: 1500 }, state, baseline: {} })).toMatchObject({ action: 'switch', code: 'route-lost' })
-    // Answered with another road (the via points did not pin the path): no evidence, and the count starts again.
+    // Answered with another road (the via points did not pin the path): no evidence either way,
+    // and the count is kept (#41). It used to start again, so a closure between two via points
+    // never added up.
     const otherRoad = pollOnA({ xM: 1000, etas: { B: 1500 }, state, baseline: { B: 1500 } })
     expect(otherRoad).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
     expect(otherRoad.reason).toBe('Staying: current route is not among the fresh routes, and asking for it brought back another road')
-    expect(otherRoad.nextState.lostPolls).toBe(0)
+    expect(otherRoad.nextState.lostPolls).toBe(2)
     // An answer that is the current path but has no typical duration is not compared, and is not shown as its ETA.
     const noTraffic = pollOnA({ xM: 1000, etas: { B: 1500 }, baseline: { A: 2400 }, extra: { A: { typicalDurationSec: null } } })
     expect(noTraffic).toMatchObject({ action: 'stay', code: 'no-traffic-data', current: null })
@@ -1057,6 +1120,90 @@ describe('a route the driver turned down', () => {
     const declined = declineRoute({ ...INITIAL_REROUTE_STATE, lostPolls: 2 }, b.geometry, 600)
     expect(declined.lostPolls).toBe(0)
     expect(declined.pending).toBeNull()
+  })
+})
+
+// #51: the overlap matching walked every 10 m of both lines, and every point of a stretch apart
+// looked at the whole other line, so a 100 km route cost about 12 times the old vertex-by-vertex
+// matcher. The cost is counted (segment distance checks plus grid entries, see MatchMeter), not
+// timed, so the test says the same on every machine.
+describe('matching cost on a long route (#51)', () => {
+  type Corner = readonly [xM: number, yM: number]
+  /** Through the corners with a vertex every 20 m: 100 km is 5000 vertices. */
+  const dense = (corners: readonly Corner[]): Corner[] => {
+    const out: Corner[] = [corners[0]!]
+    for (let i = 1; i < corners.length; i++) {
+      const [x0, y0] = corners[i - 1]!
+      const [x1, y1] = corners[i]!
+      const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / 20))
+      for (let k = 1; k <= n; k++) out.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n])
+    }
+    return out
+  }
+  /** A route north (+) or south (-) of the straight line by `bumpM` for the middle 45 %, as meters and as a candidate. */
+  const bumped = (id: string, bumpM: number, durationSec: number) => {
+    const xy = dense([[0, 0], [27_500, 0], [27_500, bumpM], [72_500, bumpM], [72_500, 0], [100_000, 0]])
+    const geometry = xy.map(([x, y]) => at(x, y))
+    const route: RouteCandidate = { ...candidate('A', at(0, 0), durationSec)!, id, geometry, distanceM: alongRouteM(geometry).at(-1)!, maneuvers: [] }
+    return { xy, route }
+  }
+  // The current route: 100 km east, 1 km north for the middle 45 %. Three alternatives run 2 to
+  // 4 km from it for that 45 % (the first just as long, so no length check rules it out), and
+  // one is the current route drawn again.
+  const driven = bumped('driven', 1000, 5000)
+  const alternatives = [bumped('south-1', -1000, 4800), bumped('south-2', -2000, 4900), bumped('south-3', -3000, 5000)]
+  const same = bumped('same', 1000, 5100)
+
+  /**
+   * The matcher before #35, as a reference for the cost: every vertex of each line within
+   * 10 m of the other, each looked up by scanning the other line from its start. Counts its
+   * segment distance checks, in meters on a flat plane as it measured them.
+   */
+  function oldMatcherChecks(path: readonly Corner[], candidates: readonly (readonly Corner[])[]): number {
+    let checks = 0
+    const toSegment = (p: Corner, a: Corner, b: Corner) => {
+      checks++
+      const dx = b[0] - a[0]
+      const dy = b[1] - a[1]
+      const lengthSq = dx * dx + dy * dy
+      const t = lengthSq === 0 ? 0 : Math.min(1, Math.max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / lengthSq))
+      return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+    }
+    const near = (p: Corner, line: readonly Corner[]) => {
+      for (let i = 1; i < line.length; i++) if (toSegment(p, line[i - 1]!, line[i]!) <= 10) return true
+      return false
+    }
+    for (const fresh of candidates) {
+      // Where the fresh route starts on the path (one full scan), then both ways, vertex by vertex.
+      for (let i = 1; i < path.length; i++) toSegment(fresh[0]!, path[i - 1]!, path[i]!)
+      if (fresh.every((p) => near(p, path)) && path.every((p) => near(p, fresh))) return checks
+    }
+    return checks
+  }
+
+  const cost = (offered: readonly { route: RouteCandidate }[]) => {
+    const meter: MatchMeter = { segmentChecks: 0, gridEntries: 0 }
+    const found = findCurrentRoute(driven.route, 0, offered.map((o) => o.route), {}, meter)
+    return { found, work: meter.segmentChecks + meter.gridEntries }
+  }
+
+  it('the current route not among them: at most twice the old cost', () => {
+    expect(driven.xy).toHaveLength(5101)
+    const { found, work } = cost(alternatives)
+    expect(found).toBeNull()
+    expect(work).toBeLessThanOrEqual(2 * oldMatcherChecks(driven.xy, alternatives.map((a) => a.xy)))
+  })
+
+  it('the current route among them, offered last: at most twice the old cost, and found', () => {
+    const offered = [...alternatives, same]
+    const { found, work } = cost(offered)
+    expect(found).toBe(same.route)
+    expect(work).toBeLessThanOrEqual(2 * oldMatcherChecks(driven.xy, offered.map((a) => a.xy)))
+  })
+
+  it('counting changes nothing: the same answer with or without a meter', () => {
+    expect(findCurrentRoute(driven.route, 0, [...alternatives, same].map((o) => o.route))).toBe(same.route)
+    expect(findCurrentRoute(driven.route, 0, alternatives.map((o) => o.route))).toBeNull()
   })
 })
 

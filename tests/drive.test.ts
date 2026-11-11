@@ -379,6 +379,22 @@ describe('fetchFreshRoutes: one check, and the current path asked for when it is
     expect(await ask(server(onlyB, 503).fetchImpl)).toMatchObject({ ok: true, baseline: null, requests: 2 })
     expect(await ask(server(onlyB, { code: 'NoRoute', routes: [] }).fetchImpl)).toMatchObject({ ok: true, baseline: [], requests: 2 })
   })
+
+  it('a via point that will not snap to a road (NoSegment) is no answer, so it never adds up to a switch (#52)', async () => {
+    const onlyB = body([candidate('B', here, 1450)!])
+    expect(await ask(server(onlyB, { code: 'NoSegment', routes: [] }).fetchImpl)).toMatchObject({ ok: true, baseline: null, requests: 2 })
+    // The via points are fixed places, so the same point fails every check. It used to count as
+    // "no route that way", and three checks switched with no saving ("the road ahead looks closed").
+    let state = INITIAL_REROUTE_STATE
+    for (let check = 0; check < 6; check++) {
+      const result = await ask(server(onlyB, { code: 'NoSegment', routes: [] }).fetchImpl)
+      if (!result.ok) throw new Error('expected routes')
+      const decision = decideReroute(state, { nowSec: 60 * check, route: driven, positionAlongM: 3000, speedMps: 15, candidates: result.candidates, baseline: result.baseline })
+      expect(decision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+      expect(decision.nextState.lostPolls).toBe(0)
+      state = decision.nextState
+    }
+  })
 })
 
 describe('driveFeatures', () => {
