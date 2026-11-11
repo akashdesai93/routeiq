@@ -46,13 +46,6 @@ export interface SignalMatchOptions {
    */
   readonly intersectionRadiusM: number
   /**
-   * A point of the gap-fill dataset is added only when no intersection of the
-   * primary data lies within this many meters of it. Smaller, and one
-   * junction the two datasets place a little apart counts twice; larger, and
-   * a real neighbor missing from the primary data is swallowed.
-   */
-  readonly gapFillRadiusM: number
-  /**
    * The safety net after the rules above: counted intersections whose
    * positions along the route are within this many meters of each other are
    * one stop and count once.
@@ -75,7 +68,6 @@ export const DEFAULT_SIGNAL_MATCH: SignalMatchOptions = {
   clusterRadiusM: 60,
   toleranceM: 30,
   intersectionRadiusM: 40,
-  gapFillRadiusM: 60,
   mergeRadiusM: 40,
   limitedAccessMarginM: 30,
 }
@@ -93,7 +85,7 @@ export interface RouteContext {
    * more than limitedAccessMarginM from both of its ends, is dropped: there
    * is no signal to stop at on a freeway. Rule (c) removes most of these
    * already, but not a signal point that sits on the freeway line itself
-   * right where a ramp joins it, which is how some city data marks an
+   * right where a ramp joins it, which is how some signal data marks an
    * interchange. Null, missing or empty changes nothing.
    */
   readonly limitedAccessSpansM?: readonly DistanceSpanM[] | null
@@ -136,7 +128,6 @@ function resolve(options: Partial<SignalMatchOptions>): SignalMatchOptions {
     clusterRadiusM: pick('clusterRadiusM'),
     toleranceM: pick('toleranceM'),
     intersectionRadiusM: pick('intersectionRadiusM'),
-    gapFillRadiusM: pick('gapFillRadiusM'),
     mergeRadiusM: pick('mergeRadiusM'),
     limitedAccessMarginM: pick('limitedAccessMarginM'),
   }
@@ -185,7 +176,7 @@ interface Sourced {
   readonly source: SignalSource
 }
 
-const SOURCE_ORDER: readonly SignalSource[] = ['primary', 'gapFill', 'fallback']
+const SOURCE_ORDER: readonly SignalSource[] = ['primary', 'fallback']
 
 function clusterSourced(sourced: readonly Sourced[], radiusM: number): SignalCluster[] {
   // One entry per id (a point on a tile edge arrives once per tile), in id order.
@@ -467,21 +458,14 @@ export function signalTilesForRoute(
 }
 
 /**
- * Everything known about signals when routes are counted. The sources stay
- * apart all the way here (they come under different licenses) and are only
- * combined in memory, inside withSignalCounts.
+ * Everything known about signals when routes are counted. The route's own
+ * signal flags (the fallback) are added in memory, inside withSignalCounts.
  */
 export interface SignalData {
   /** Points of the primary source, from every tile that was loaded. A point may appear more than once. */
   readonly primary: readonly SignalPoint[]
   /** The tiles `primary` is complete for. A tile a route needs that is not listed here is missing data. */
   readonly primaryTileIds: ReadonlySet<string>
-  /**
-   * A second dataset that only fills gaps: a point is added when the primary
-   * data has no intersection near it, and never removes or replaces one.
-   * Null when it could not be loaded.
-   */
-  readonly gapFill: readonly SignalPoint[] | null
 }
 
 export interface CountedRoutes {
@@ -495,20 +479,18 @@ export interface CountedRoutes {
  * Fills signalCount and signalCoverage on each route.
  *
  * For every route it works out the tiles the route needs (signalTilesForRoute)
- * and takes signals from three places, most trusted first:
+ * and takes signals from two places, most trusted first:
  * 1. the primary data, for the tiles that were loaded;
- * 2. the gap-fill data, wherever it has a point with no primary intersection
- *    within gapFillRadiusM;
- * 3. the route's own signal-flagged intersections (RouteIntersection.signal),
+ * 2. the route's own signal-flagged intersections (RouteIntersection.signal),
  *    but only those lying in tiles whose primary data is missing.
- * All three then go through the same rules (signalsOnRoute), with the route's
+ * Both then go through the same rules (signalsOnRoute), with the route's
  * intersections and limited-access spans as context.
  *
  * Coverage is 'full' when every needed tile was loaded: the count is the
  * answer, and may be 0. It is 'partial' when a needed tile is missing: the
- * count is what the three sources found, a rough lower bound. It is 'none',
+ * count is what the two sources found, a rough lower bound. It is 'none',
  * with a null count, when nothing at all is known about the route: no needed
- * tile loaded, no gap-fill data and no intersection list. `data` null means
+ * tile loaded and no intersection list. `data` null means
  * nothing has been loaded yet and leaves the routes untouched.
  *
  * Pure. Order and every other field are untouched.
@@ -526,7 +508,7 @@ export function withSignalCounts(
   const counted = routes.map((route): RouteCandidate => {
     const needed = signalTilesForRoute(route.geometry, resolved)
     const missing = needed.filter((id) => !data.primaryTileIds.has(id))
-    if (missing.length === needed.length && data.gapFill === null && route.intersections === null) {
+    if (missing.length === needed.length && route.intersections === null) {
       return { ...route, signalCount: null, signalCoverage: 'none' }
     }
 
@@ -542,29 +524,6 @@ export function withSignalCounts(
       })
     }
     const clusters = clusterSourced([...primary, ...fallback], resolved.clusterRadiusM)
-
-    const fills = (data.gapFill ?? []).filter((point) => isValidLngLat(point.position))
-    if (fills.length > 0) {
-      const taken = pointGrid<true>(
-        resolved.gapFillRadiusM,
-        clusters.flatMap((c) => [c.position, ...c.members]),
-      )
-      for (const c of clusters) for (const at of [c.position, ...c.members]) taken.add(at, true)
-      const seen = new Set<string>()
-      for (const point of fills) {
-        if (seen.has(point.id) || taken.within(point.position).length > 0) continue
-        seen.add(point.id)
-        clusters.push({
-          id: point.id,
-          position: point.position,
-          name: point.name,
-          source: 'gapFill',
-          memberIds: [point.id],
-          members: [point.position],
-        })
-      }
-    }
-
     const found = clustersOnRoute(route.geometry, clusters, resolved, {
       intersections: route.intersections?.map((i) => i.location) ?? null,
       limitedAccessSpansM: route.limitedAccessSpansM,

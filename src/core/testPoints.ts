@@ -30,8 +30,8 @@ export const SOUTHPARK: Place = {
 
 /**
  * The trip the app opens with: Uptown down the US-521 corridor into South
- * Carolina. It leaves the City of Charlotte's signal data behind at the state
- * line, so the count south of it has to come from OpenStreetMap.
+ * Carolina. It crosses the state line, so its signal count needs tiles on
+ * both sides of it.
  */
 export const DEFAULT_TRIP: { readonly origin: Place; readonly destination: Place } = {
   origin: UPTOWN_CHARLOTTE,

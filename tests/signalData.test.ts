@@ -6,9 +6,7 @@ import {
   type LngLat,
   type RouteCandidate,
   type RouteIntersection,
-  type SignalPoint,
 } from '../src/core/index.ts'
-import type { SignalsResult } from '../src/providers/charlotte/client.ts'
 import type { OsmSignalTile } from '../src/providers/osm/adapter.ts'
 import { createOverpassClient, OVERPASS_COOLDOWN_MS, OVERPASS_ENDPOINT } from '../src/providers/osm/client.ts'
 import { memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
@@ -52,14 +50,10 @@ const ROAD: LngLat[] = [
 ]
 const crossing = route('crossing', ROAD)
 
-const NO_CITY: SignalsResult = { ok: false, kind: 'network', message: 'offline' }
-const city = (...signals: SignalPoint[]): SignalsResult => ({ ok: true, signals })
-
 interface Setup {
   answers?: Record<string, TileAnswer>
   cached?: OsmSignalTile[]
   bundled?: OsmSignalTile[]
-  city?: SignalsResult
   cache?: TileStore
   clock?: ReturnType<typeof fakeClock>
 }
@@ -76,7 +70,6 @@ function setup(options: Setup = {}) {
       network: overpassLayer(createOverpassClient({ fetchImpl: server.fetchImpl, now: clock.now })),
       now: clock.now,
     }),
-    gapFill: { load: () => Promise.resolve(options.city ?? NO_CITY) },
   }
   return { clock, server, cache, sources }
 }
@@ -265,31 +258,12 @@ describe('signal data, end to end', () => {
     expect(loaded.data.primary.map((p) => p.id).sort()).toEqual(['osm-1', 'osm-2', 'osm-3'])
   })
 
-  it('uses OpenStreetMap first and the city list only to fill gaps', async () => {
-    const cityList = city(
-      // The same junction OpenStreetMap has, placed 20 m away: ignored.
-      { id: 'clt-1', position: [-80.8052, 35.2501], name: 'A ST_B ST' },
-      // One OpenStreetMap lacks: added.
-      { id: 'clt-2', position: [-80.798, 35.25], name: 'A ST_C ST' },
-      // The city list covers the city, not this road: a point far away changes nothing.
-      { id: 'clt-3', position: [-80.95, 35.4], name: 'X ST_Y ST' },
-    )
-    const { sources } = setup({ answers: { [WEST]: [[1, -80.805, 35.25]] }, city: cityList })
+  it('counts from OpenStreetMap alone where every tile loaded, and hands core nothing else', async () => {
+    const { sources } = setup({ answers: { [WEST]: [[1, -80.805, 35.25]], [EAST]: [] } })
     const { loaded, counted, results } = await count([crossing], sources)
-    expect(results).toEqual([[2, 'full']])
-    expect(counted.signalsByRouteId.get('crossing')!.map((s) => [s.id, s.source, s.name])).toEqual([
-      ['osm-1', 'primary', null],
-      ['clt-2', 'gapFill', 'A ST_C ST'],
-    ])
-    // The two sources arrive side by side, not merged.
-    expect(loaded.data.primary.map((p) => p.id)).toEqual(['osm-1'])
-    expect(loaded.data.gapFill!.map((p) => p.id)).toEqual(['clt-1', 'clt-2', 'clt-3'])
-
-    // Without the city list (it failed to load) the OpenStreetMap count stands, in full.
-    const alone = setup({ answers: { [WEST]: [[1, -80.805, 35.25]] }, city: NO_CITY })
-    const withoutCity = await count([crossing], alone.sources)
-    expect(withoutCity.results).toEqual([[1, 'full']])
-    expect(withoutCity.loaded.data.gapFill).toBeNull()
+    expect(results).toEqual([[1, 'full']])
+    expect(counted.signalsByRouteId.get('crossing')!.map((s) => [s.id, s.source])).toEqual([['osm-1', 'primary']])
+    expect(Object.keys(loaded.data).sort()).toEqual(['primary', 'primaryTileIds'])
   })
 
   it('falls back on the Mapbox signal flags for a tile that could not be loaded', async () => {
@@ -314,11 +288,10 @@ describe('signal data, end to end', () => {
   it('never rejects, whatever a source does', async () => {
     const broken: SignalSources = {
       tiles: { load: () => Promise.reject(new Error('storage exploded')) },
-      gapFill: { load: () => Promise.reject(new Error('network exploded')) },
     }
     const loaded = await loadSignalData([crossing], broken)
     expect(loaded.missingTileIds).toEqual([EAST, WEST])
-    expect(loaded.data).toEqual({ primary: [], primaryTileIds: new Set(), gapFill: null })
+    expect(loaded.data).toEqual({ primary: [], primaryTileIds: new Set() })
     expect(loaded.primaryDataDate).toBeNull()
     expect(withSignalCounts([crossing], loaded.data).routes[0]!.signalCoverage).toBe('none')
     // No routes, no requests.

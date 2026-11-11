@@ -22,9 +22,8 @@ export const OSM_LICENSE = 'ODbL 1.0, https://www.openstreetmap.org/copyright'
 /**
  * `traffic_signals=*` values of nodes that are tagged highway=traffic_signals
  * but are not a signalized intersection a driver stops at in the ordinary
- * way. They are left out, to match how the City of Charlotte adapter keeps
- * only full traffic signals (no flashers, pedestrian beacons, mid-block
- * crossings or fire-station signals):
+ * way. They are left out, so only full traffic signals count (no flashers,
+ * pedestrian beacons, mid-block crossings or fire-station signals):
  * - blinker: a flashing beacon;
  * - emergency: lights that only stop traffic for a fire station or the like;
  * - ramp_meter: a meter on a freeway on-ramp;

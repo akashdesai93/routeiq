@@ -91,7 +91,7 @@ describe('classifySignalTags', () => {
     expect(classifySignalTags({ highway: 'traffic_signals', crossing: 'traffic_signals' }).keep).toBe(true)
   })
 
-  it('leaves out flashers, emergency signals, ramp meters and pedestrian-only signals, as the city adapter does', () => {
+  it('leaves out flashers, emergency signals, ramp meters and pedestrian-only signals', () => {
     for (const subtype of ['blinker', 'emergency', 'ramp_meter', 'pedestrian_crossing', 'crossing', 'level_crossing']) {
       expect(EXCLUDED_SIGNAL_SUBTYPES.has(subtype)).toBe(true)
       expect(classifySignalTags({ highway: 'traffic_signals', traffic_signals: subtype })).toEqual({ keep: false, kind: subtype })
@@ -362,7 +362,6 @@ describe('the bundle layer', () => {
         network: network.layer,
         now: () => NOW,
       }),
-      gapFill: { load: () => Promise.reject(new Error('offline')) },
     }
     const road = route('bundled', ROAD)
     expect(signalTilesForRoute(road.geometry)).toEqual([EAST, WEST])
@@ -467,7 +466,6 @@ describe('createTileSource with a bundle: bundle, then cache, then network', () 
         network: network.layer,
         now: () => nowMs,
       }),
-      gapFill: { load: () => Promise.resolve({ ok: false, kind: 'network', message: 'offline' }) },
     }
     // A road across the edge tile, with Mapbox flagging the signal the extract was clipped before.
     const road = route(

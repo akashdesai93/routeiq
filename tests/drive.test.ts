@@ -25,7 +25,6 @@ import {
 } from '../src/drive/simulation.ts'
 import { fetchFreshRoutes } from '../src/drive/freshRoutes.ts'
 import { driveFeatures } from '../src/map/driveFeatures.ts'
-import type { SignalsResult } from '../src/providers/charlotte/client.ts'
 import { createOverpassClient } from '../src/providers/osm/client.ts'
 import { memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
 import { createTileSource, memoryTileStore, overpassLayer } from '../src/providers/osm/tileSource.ts'
@@ -252,7 +251,6 @@ describe('a whole simulated drive, offline', () => {
 })
 
 describe('askOnce: signal sources for a drive that polls', () => {
-  const NO_CITY: SignalsResult = { ok: false, kind: 'network', message: 'offline' }
   /** A road across two tiles: the west one is in the bundle, the east one is not. */
   const WEST = '-809_352'
   const EAST = '-808_352'
@@ -267,7 +265,6 @@ describe('askOnce: signal sources for a drive that polls', () => {
   function setup(east: number | (readonly [number, number, number])[]) {
     const clock = fakeClock()
     const server = fakeOverpass({ [EAST]: east })
-    let cityLoads = 0
     const inner: SignalSources = {
       tiles: createTileSource({
         cache: memoryTileStore(),
@@ -275,14 +272,8 @@ describe('askOnce: signal sources for a drive that polls', () => {
         network: overpassLayer(createOverpassClient({ fetchImpl: server.fetchImpl, now: clock.now })),
         now: clock.now,
       }),
-      gapFill: {
-        load: () => {
-          cityLoads++
-          return Promise.resolve(NO_CITY)
-        },
-      },
     }
-    return { clock, server, inner, cityLoads: () => cityLoads }
+    return { clock, server, inner }
   }
 
   it('the plain tile source asks again for a failed tile once its wait is over: not good enough for a drive', async () => {
@@ -296,7 +287,7 @@ describe('askOnce: signal sources for a drive that polls', () => {
   })
 
   it('asks for a tile outside the bundle at most once, however long the drive, and never for a bundled one', async () => {
-    const { clock, server, inner, cityLoads } = setup(503)
+    const { clock, server, inner } = setup(503)
     const once = askOnce(inner)
     for (let poll = 0; poll < 40; poll++) {
       const loaded = await loadSignalData([road], once)
@@ -305,8 +296,6 @@ describe('askOnce: signal sources for a drive that polls', () => {
       clock.advance(60_000)
     }
     expect(server.requested()).toEqual([EAST])
-    // The gap-fill list is asked for once as well, even though it failed.
-    expect(cityLoads()).toBe(1)
   })
 
   it('a tile that did load is simply kept', async () => {
@@ -322,11 +311,9 @@ describe('askOnce: signal sources for a drive that polls', () => {
 })
 
 describe('fetchFreshRoutes: one check, and the current path asked for when it is missing', () => {
-  const NO_CITY: SignalsResult = { ok: false, kind: 'network', message: 'offline' }
   /** No signal data at all: this is about the Directions requests. */
   const signalSources: SignalSources = {
     tiles: { load: (ids) => Promise.resolve({ tiles: new Map(), missing: [...ids], partial: new Map() }) },
-    gapFill: { load: () => Promise.resolve(NO_CITY) },
   }
   /** A Directions body for routes of the made-up network. */
   const body = (routes: readonly RouteCandidate[]) => ({

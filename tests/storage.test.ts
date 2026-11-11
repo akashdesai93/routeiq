@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { indexedDbStore, memoryStore } from '../src/storage/kv.ts'
+import { forgetOldSignalData, RETIRED_DATABASES } from '../src/signalData.ts'
+import { deleteIndexedDb, indexedDbStore, memoryStore } from '../src/storage/kv.ts'
 
 const isNumber = (value: unknown): value is number => typeof value === 'number'
 
@@ -136,5 +137,41 @@ describe('indexedDbStore', () => {
     const store = indexedDbStore('routeiq-test', 'numbers', isNumber, disk.factory)
     await expect(store.put('a', 1)).resolves.toBeUndefined()
     await expect(store.get('a')).resolves.toBeNull()
+  })
+})
+
+describe('deleteIndexedDb and forgetOldSignalData', () => {
+  /** A stand-in for IndexedDB's deleteDatabase: each request settles the way `outcome` says. */
+  function deleter(outcome: 'success' | 'error' | 'blocked' | 'throw') {
+    const deleted: string[] = []
+    const factory = {
+      deleteDatabase(name: string) {
+        if (outcome === 'throw') throw new Error('SecurityError')
+        const req: { onsuccess?: () => void; onerror?: () => void; onblocked?: () => void } = {}
+        queueMicrotask(() => {
+          if (outcome === 'success') {
+            deleted.push(name)
+            req.onsuccess?.()
+          } else if (outcome === 'error') req.onerror?.()
+          else req.onblocked?.()
+        })
+        return req
+      },
+    }
+    return { factory: factory as unknown as IDBFactory, deleted }
+  }
+
+  it('deletes the database of the removed City of Charlotte list', async () => {
+    const disk = deleter('success')
+    await forgetOldSignalData(disk.factory)
+    expect(disk.deleted).toEqual(['routeiq-charlotte-signals'])
+    expect(RETIRED_DATABASES).toEqual(['routeiq-charlotte-signals'])
+  })
+
+  it('never rejects, whatever IndexedDB does, and does nothing without it', async () => {
+    for (const outcome of ['error', 'blocked', 'throw'] as const) {
+      await expect(deleteIndexedDb('routeiq-test', deleter(outcome).factory)).resolves.toBeUndefined()
+    }
+    await expect(deleteIndexedDb('routeiq-test', null)).resolves.toBeUndefined()
   })
 })

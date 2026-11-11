@@ -144,8 +144,8 @@ export interface Maneuver {
 
 /**
  * One point from a signal data source. Depending on the source that is a
- * whole signalized intersection (City of Charlotte) or one signal of several
- * at an intersection (OpenStreetMap tags each approach on big junctions).
+ * whole signalized intersection or one signal of several at an intersection
+ * (OpenStreetMap tags each approach on big junctions).
  */
 export interface SignalPoint {
   /** Unique within its source. */
@@ -158,10 +158,9 @@ export interface SignalPoint {
 /**
  * Where a counted signal came from, most trusted first:
  * - 'primary': the main signal data (OpenStreetMap today).
- * - 'gapFill': a second dataset that only adds what the first lacks (City of Charlotte).
  * - 'fallback': the directions provider's own flag, used where no signal data was loaded.
  */
-export type SignalSource = 'primary' | 'gapFill' | 'fallback'
+export type SignalSource = 'primary' | 'fallback'
 
 /** A signalized intersection a route passes through. One entry per pass. */
 export interface RouteSignal {

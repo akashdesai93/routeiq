@@ -263,7 +263,5 @@ describe('the bundle shipped with the app', () => {
     expect((uptown as { fetchedAt: number }).fetchedAt).toBe(index.dataDate)
     const license = readFileSync(join(dir, 'LICENSE.md'), 'utf8').replace(/\r\n/g, '\n')
     expect(license).toBe(OSM_LICENSE_MD)
-    // Nothing of the City of Charlotte dataset is in the folder.
-    expect(readFileSync(join(dir, '-809_352.json'), 'utf8')).not.toContain('clt-')
   })
 })

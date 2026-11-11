@@ -56,9 +56,9 @@ typecheck, lint and unit tests; run `npm.cmd run e2e` as well. The report is
    confirmation polls, the cooldown, no-return, lead distance and the freeway lead exist
    to stop flapping. Don't loosen them without a scripted test in `tests/reroute.test.ts`
    that shows why.
-8. **Licenses stay apart.** OSM data is ODbL. City of Charlotte data is CC BY-NC-SA. The
-   two never share a file, a store or a module. They are merged only in memory, at the
-   moment a route is counted.
+8. **Licenses stay apart.** OSM data is ODbL and is the only signal dataset (the City of
+   Charlotte list was removed in #13). A new dataset under another license gets its own
+   module, store and folder, and is merged with OSM only in memory, when a route is counted.
 9. **Privacy invariants** (README, Privacy): location is read only on an explicit action,
    never stored or logged, and never sent anywhere except to Mapbox as a route endpoint.
    Overpass sees tile bounding boxes only. Any new network call needs a Privacy note in the README.

@@ -52,9 +52,9 @@ const PARTIAL_HELP =
 
 /**
  * The signal data for the routes on screen: the OpenStreetMap tiles they
- * touch and the city list (see loadSignalData), loaded again whenever the
- * routes change or retry is called. Tiles already loaded are answered from
- * memory, the bundled files or the device cache, so only a tile that is
+ * touch (see loadSignalData), loaded again whenever the routes change or
+ * retry is called. Tiles already loaded are answered from memory, the
+ * bundled files or the device cache, so only a tile that is
  * still missing can cost a request, and a tile that failed a moment ago is
  * not asked for again until its wait is over (see createTileSource), unless
  * the user asked for the retry. Null while loading.

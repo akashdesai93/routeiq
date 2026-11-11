@@ -45,4 +45,8 @@ test('a route outside NC/SC shows a partial light count, never 0, and still rank
   const minutes = (await page.locator('.route-eta').allTextContents()).map((t) => Number.parseInt(t, 10))
   expect(minutes).toEqual([...minutes].sort((a, b) => a - b))
   await expect(page.locator('ol.routes > li').first()).toContainText('Recommended')
+  // OpenStreetMap is the only signal data credited. The City of Charlotte list was removed (#13):
+  // the harness no longer answers its server, so a request to it would fail the scenario.
+  await expect(page.getByText('© OpenStreetMap contributors').first()).toBeVisible()
+  await expect(page.getByText('City of Charlotte')).toHaveCount(0)
 })
