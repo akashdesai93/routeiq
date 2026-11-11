@@ -72,6 +72,15 @@ To save tokens, wrap the test run with rtk: `rtk test npx.cmd vitest run`.
 
 Before a commit with logic changes, run the `route-logic-reviewer` agent to check for invariant breaks.
 
+## Task list and the autonomous loop
+
+GitHub issues on `akashdesai93/routeiq` are the task list. The labels are `ready`,
+`in-progress`, `blocked`, `needs-human`, `triage`, `review`, `p1`–`p3` and `area:*`.
+`/loop /work-loop` runs autonomously. Each iteration syncs the board, claims the top
+`ready` issue, builds it in its own worktree on `claude/issue-N-*`, verifies it and opens
+a PR. When nothing is ready, it files new `triage` issues instead. Loops never push to
+`main` and never merge: the owner merges PRs. Rules: `.claude/skills/work-loop/SKILL.md`.
+
 ## Where things stand (Nov 2026)
 
 - Steps 1–8 are done and committed on `main`.
