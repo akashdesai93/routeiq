@@ -45,3 +45,9 @@ For each open, non-draft PR on `akashdesai93/routeiq`
 6. Record each outcome on the status board (see the `status` skill).
 
 Never use `--admin`, never force-push, and never merge red CI.
+
+**Temporary exception (owner, 2026-11-11):** while GitHub Actions is stuck account-wide
+(runs queued with 0 jobs), a PR may merge on a green **local verify** in a clean worktree
+(typecheck, lint with 0 errors, all tests) plus an independent review whose verdict is
+MERGE. Note `merged on local verify (Actions down)` in the merge comment. This ends
+as soon as Actions runs jobs again.
