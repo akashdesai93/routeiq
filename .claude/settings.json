@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm.cmd run typecheck)",
+      "Bash(npm.cmd run lint)",
+      "Bash(npm.cmd run build)",
+      "Bash(npm.cmd test)",
+      "Bash(npm.cmd run test)",
+      "Bash(npx.cmd vitest run:*)",
+      "Bash(npx.cmd tsc:*)",
+      "Bash(rtk test npx.cmd vitest run:*)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npm test)",
+      "Bash(npx vitest run:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree list)",
+      "Bash(rtk git status:*)",
+      "Bash(rtk git diff:*)",
+      "Bash(rtk git log:*)"
+    ],
+    "deny": [
+      "Read(./.env.local)",
+      "Read(./.env)",
+      "Bash(cat .env.local:*)",
+      "Bash(git push --force:*)"
+    ]
+  }
+}

@@ -148,6 +148,21 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    - Both Google Maps and Waze already run on CarPlay, so hand-off is a way to drive
      a RouteIQ-chosen route in the car before RouteIQ has its own CarPlay entitlement.
 10. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
+11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
+    faster cut-through that is not among them is never considered. Widen the search:
+    - **Via probing (first).** A pure `src/core/probe.ts` picks candidate via points,
+      for example on parallel arterials or collectors within a corridor around the
+      current route. Mapbox is then asked for origin → via → destination (traffic-aware),
+      and each result joins the candidate set with a `source: 'probe'` tag. The request
+      budget is rationed like the drive's: a few probes per plan and per reroute check,
+      and none on freeway-only trips. Probed routes go through the same ranking and
+      reroute rules, so a side street wins only by ETA.
+    - **Guard rails.** Leave out routes that only win by modeled noise: the existing
+      minimum saving (120 s and 5%) applies. Optionally penalize many turns or
+      residential cut-throughs, behind a setting and with tests.
+    - **Later, if probing is not enough:** an own routing engine (Valhalla or OSRM on
+      OSM) with live speeds from a traffic feed. That means a server, so it needs a cost
+      and privacy decision first.
 
 ## Native iPhone + CarPlay (later)
 
