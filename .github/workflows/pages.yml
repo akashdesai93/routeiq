@@ -1,0 +1,77 @@
+name: Pages
+
+# Builds the web app and publishes it to GitHub Pages, at
+# https://akashdesai93.github.io/routeiq/, for testing on a real phone over HTTPS.
+# Setup for the owner: docs/phone-testing.md (a repo secret and one Pages setting).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "native/**"
+      - "design/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push waits rather than cancelling a deployment halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The token is a public pk. token, URL-restricted to https://akashdesai93.github.io.
+      # It is bundled into the page (that is what a browser token is), but it is never printed here.
+      - name: Build (base /routeiq/)
+        env:
+          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN_PAGES }}
+          PAGES_BASE: /routeiq/
+        run: |
+          if [ -z "$VITE_MAPBOX_TOKEN" ]; then
+            echo "::error title=Missing Mapbox token::Set the VITE_MAPBOX_TOKEN_PAGES secret (Settings > Secrets and variables > Actions) to a pk. token restricted to https://akashdesai93.github.io. See docs/phone-testing.md."
+            exit 1
+          fi
+          case "$VITE_MAPBOX_TOKEN" in
+            pk.*) ;;
+            *)
+              echo "::error title=Wrong Mapbox token::VITE_MAPBOX_TOKEN_PAGES must be a public token that starts with pk. (never an sk. secret token)."
+              exit 1
+              ;;
+          esac
+          npm run build
+
+      # Fails here if Pages is not on yet: Settings > Pages > Source: GitHub Actions.
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
