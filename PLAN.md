@@ -5,8 +5,8 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
 ## Web prototype (Windows)
 
 1. **Done: map shell.** Vite + React + TS, Mapbox map, two Charlotte test points.
-2. **Done: routes.** Origin and destination as draggable pins (swap, reset; no address
-   search yet); Mapbox Directions API, `driving-traffic` profile with alternatives
+2. **Done: routes.** Origin and destination as draggable pins (swap, reset; address
+   search came with step 8); Mapbox Directions API, `driving-traffic` profile with alternatives
    (up to two, so three routes at most). A Mapbox adapter in `src/providers/mapbox`
    turns the response into `RouteCandidate`. Fetches on drag end only; polling came
    with the simulated drive (step 6).
@@ -110,7 +110,30 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    determinism, and 40 seeded random drives in which switches are never closer
    together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
    request budget, the what-if delay and a whole simulated drive offline.
-8. **Route hand-off** (`src/core/handoff.ts`). After you accept a route, open it in
+8. **Done: go anywhere.** The web version of the phone app's Plan screen
+   (`src/PlanPanel.tsx`). Search for either end of the trip through the Mapbox Search
+   Box API (`/suggest` + `/retrieve` on a session token; chosen over Geocoding v6,
+   which has no POIs): 350 ms debounce, three characters minimum, stale requests
+   aborted, results biased to the map centre, five at most, a combobox usable by
+   keyboard and touch. "Use my location" as the origin (one-shot Geolocation, only on
+   the button). Home, Work, six named places, the last eight destinations and the
+   last trip are kept in localStorage only (`src/core/places.ts` for the rules,
+   `routeiq.places.v1`), with a control to clear them; the built-in trip stays the
+   first-run and Reset trip. At phone width the page is one column: trip input, map,
+   routes, with the simulated drive folded away and 44 px tap targets.
+   Open for phone use: the page needs HTTPS to locate on a real phone (localhost only
+   works on the PC itself), so hosting or a tunnel comes first, and the token's URL
+   restriction has to list that host; no live position yet (the origin is one fix,
+   there is no blue dot and no following); a dragged pin shows coordinates, not an
+   address; the soft keyboard covers part of the suggestion list on a small screen
+   (not tried on a real iPhone); no "add to home screen" manifest or offline shell;
+   Search Box results are for temporary use by Mapbox's terms, so storing saved
+   places from them needs settling (README, Planning a trip). For the native app:
+   places belong in app storage (a protected file or the keychain), location comes
+   from Core Location with its own permission wording, and search can use the same
+   two HTTP calls or Mapbox's Search SDK; `core/places.ts`, `core/search.ts` and the
+   two adapters are the parts to port.
+9. **Route hand-off** (`src/core/handoff.ts`). After you accept a route, open it in
    another navigation app:
    - **Google Maps (primary).** Pick waypoints along the accepted route that pin
      Google to it (for example points on the roads where the alternatives split).
@@ -124,7 +147,7 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
      ordered points out, with tests for the limits and URL encoding.
    - Both Google Maps and Waze already run on CarPlay, so hand-off is a way to drive
      a RouteIQ-chosen route in the car before RouteIQ has its own CarPlay entitlement.
-9. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
+10. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
 
 ## Native iPhone + CarPlay (later)
 

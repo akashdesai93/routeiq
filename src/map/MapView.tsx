@@ -27,6 +27,8 @@ interface MapViewProps {
   /** Called once when a drag ends, never while the pin is moving. */
   onPinMove: (role: PinRole, position: LngLat) => void
   onSelectRoute: (id: string) => void
+  /** Called with the centre of the map once it has loaded and after every move ends. Reported, never used here. */
+  onCenterChange?: (center: LngLat) => void
 }
 
 const ROUTE_SOURCE = 'routes'
@@ -54,17 +56,18 @@ export function MapView({
   drive = null,
   onPinMove,
   onSelectRoute,
+  onCenterChange,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const markersRef = useRef<Record<PinRole, mapboxgl.Marker> | null>(null)
   // What the map's own event handlers should see, without recreating the map.
-  const latest = useRef({ pins, selectedRouteId, onPinMove, onSelectRoute })
+  const latest = useRef({ pins, selectedRouteId, onPinMove, onSelectRoute, onCenterChange })
   const [error, setError] = useState<string | null>(null)
   // Set once the style has loaded and the route layers exist.
   const [readyMap, setReadyMap] = useState<mapboxgl.Map | null>(null)
 
   useEffect(() => {
-    latest.current = { pins, selectedRouteId, onPinMove, onSelectRoute }
+    latest.current = { pins, selectedRouteId, onPinMove, onSelectRoute, onCenterChange }
   })
 
   useEffect(() => {
@@ -105,6 +108,12 @@ export function MapView({
       new mapboxgl.AttributionControl({ compact: false, customAttribution: SIGNAL_DATA_ATTRIBUTION }),
       'bottom-right',
     )
+
+    const reportCenter = () => {
+      const { lng, lat } = map.getCenter().wrap()
+      latest.current.onCenterChange?.([lng, lat])
+    }
+    map.on('moveend', reportCenter)
 
     const marker = (role: PinRole) => {
       const m = new mapboxgl.Marker({ color: PIN_COLOR[role], draggable: true })
@@ -220,6 +229,7 @@ export function MapView({
         },
       })
       setReadyMap(map)
+      reportCenter()
     })
 
     return () => {

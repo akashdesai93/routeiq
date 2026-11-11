@@ -7,15 +7,42 @@
 html, body, #root { height: 100%; margin: 0; }
 .app { display: flex; flex-direction: column; height: 100%; }
 .bar { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid #d0d7de; flex-wrap: wrap; }
-.legend { display: flex; gap: 14px; font-size: 14px; flex-wrap: wrap; }
 /* --pin is set inline from PIN_COLOR in src/map/pins.ts, the one source for pin colors. */
 .dot::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: var(--pin); }
-.actions { display: flex; gap: 8px; margin-left: auto; }
 button { font: inherit; font-size: 14px; padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: inherit; cursor: pointer; }
 button:hover { background: #eaeef2; }
 .main { flex: 1; display: flex; min-height: 0; }
 .map { flex: 1; min-height: 300px; min-width: 0; }
-.panel { width: 300px; padding: 12px 16px; border-left: 1px solid #d0d7de; overflow-y: auto; font-size: 14px; }
+.side { width: 340px; border-left: 1px solid #d0d7de; overflow-y: auto; font-size: 14px; }
+.panel { padding: 12px 16px; }
+.plan { padding: 12px 16px; border-bottom: 1px solid #d0d7de; }
+.field { position: relative; margin-bottom: 4px; }
+.field label { display: block; margin-bottom: 4px; font-weight: 600; }
+.field-row { display: flex; gap: 6px; }
+/* 16px: iOS Safari zooms the page when a smaller input takes the focus. */
+.plan input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid #8c959f; border-radius: 6px; background: #ffffff; color: inherit; }
+.plan input:focus-visible, .plan button:focus-visible, .plan summary:focus-visible { outline: 2px solid #1f6feb; outline-offset: 1px; }
+.locate { flex: none; }
+.options { position: absolute; z-index: 5; left: 0; right: 0; margin: 2px 0 0; padding: 0; list-style: none; background: #ffffff; border: 1px solid #8c959f; border-radius: 6px; box-shadow: 0 4px 12px rgba(31, 35, 40, 0.15); max-height: 320px; overflow-y: auto; }
+.option { display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid #eaeef2; cursor: pointer; }
+.option:last-child { border-bottom: 0; }
+.option:hover, .option.active { background: #ddf4ff; }
+.option-name { font-weight: 600; }
+.option-detail { color: #57606a; font-size: 13px; overflow-wrap: anywhere; }
+.field-status { min-height: 4px; margin: 2px 0 6px; color: #57606a; font-size: 13px; }
+.field-status.failed { color: #a40e26; }
+.plan-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.plan button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
+.plan button:disabled { color: #8c959f; cursor: default; }
+.chip { border-radius: 16px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.unset { border-style: dashed; color: #57606a; }
+.plan-more summary { cursor: pointer; }
+.plan-more h3 { margin: 12px 0 6px; font-size: 14px; }
+.place-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.place-go { width: 100%; text-align: left; background: #ffffff; overflow-wrap: anywhere; }
+.saved-row { display: flex; gap: 6px; align-items: center; }
+.saved-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.name-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .panel h2 { margin: 0 0 8px; font-size: 16px; }
 .panel .notice { margin: 0 0 12px; padding: 12px; }
 .panel .notice p { margin: 0 0 8px; }
@@ -33,7 +60,8 @@ button:hover { background: #eaeef2; }
 button.link { padding: 0; border: 0; background: none; font-size: inherit; color: #0969da; text-decoration: underline; }
 button.link:hover { background: none; color: #0550ae; }
 .drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid #d0d7de; }
-.drive h3 { margin: 0 0 8px; font-size: 15px; }
+.drive h3 { display: inline; margin: 0; font-size: 15px; }
+.drive > details > summary { cursor: pointer; margin-bottom: 8px; }
 .drive-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .drive button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
 .drive button:disabled { color: #8c959f; cursor: default; }
@@ -52,9 +80,27 @@ button.link:hover { background: none; color: #0550ae; }
 .drive-log-switch { font-weight: 600; background: #dafbe1; }
 .drive-log-note { color: #57606a; }
 .notice { margin: 24px 16px; padding: 16px; border: 1px solid #d4a72c; background: #fff8c5; border-radius: 6px; max-width: 640px; line-height: 1.5; }
+/* Phone width: one scrolling column, the trip input above the map and the routes under it.
+   .side dissolves so its two parts can sit either side of the map. The same 700px is in DrivePanel.tsx. */
 @media (max-width: 700px) {
-  .main { flex-direction: column; }
-  .panel { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid #d0d7de; }
+  .bar { padding: 6px 16px; }
+  .main { flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+  .side { display: contents; }
+  .plan { order: 1; flex: none; font-size: 14px; }
+  .map, .main > .notice { order: 2; }
+  .map { flex: none; height: 46vh; height: 46dvh; min-height: 280px; }
+  .panel { order: 3; flex: none; border-top: 1px solid #d0d7de; font-size: 14px; }
+  /* Everything that is tapped is at least 44px high. */
+  button, summary, .plan input, .setting input { min-height: 44px; }
+  button { padding: 8px 14px; }
+  summary { display: flex; align-items: center; gap: 6px; }
+  summary::before { content: '▸'; }
+  details[open] > summary::before { content: '▾'; }
+  button.link { display: inline-flex; align-items: center; padding: 0 4px; }
+  .hint a { display: inline-block; padding: 14px 0; }
+  .setting input { width: 88px; font-size: 16px; }
+  .drive-log { max-height: 200px; }
+  .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
 }
 /* The attribution is never collapsed (it carries the OpenStreetMap credit), so on a narrow map it is kept clear of the Mapbox logo in the other corner. */
 .map .mapboxgl-ctrl-bottom-right { max-width: calc(100% - 110px); }

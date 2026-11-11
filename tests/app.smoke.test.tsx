@@ -1,7 +1,24 @@
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_REROUTE_OPTIONS, rankRoutes, type RouteCandidate, type SignalCoverage } from '../src/core/index.ts'
+import {
+  addCustomPlace,
+  addRecent,
+  DEFAULT_REROUTE_OPTIONS,
+  DEFAULT_TRIP,
+  EMPTY_PLACE_BOOK,
+  rankRoutes,
+  serializePlaceBook,
+  setLastTrip,
+  setSlot,
+  type Place,
+  type PlaceBook,
+  type RouteCandidate,
+  type SignalCoverage,
+} from '../src/core/index.ts'
 import { DEFAULT_DRIVE_SETTINGS } from '../src/drive/simulation.ts'
+import { memoryTextStore } from '../src/storage/local.ts'
+import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
+import type { PlaceBookState } from '../src/usePlaceBook.ts'
 import type { DriveSim, DriveView } from '../src/useDriveSim.ts'
 
 // Mapbox GL needs WebGL, which Node does not have. The smoke test checks the
@@ -12,6 +29,12 @@ vi.mock('mapbox-gl/dist/mapbox-gl.css', () => ({}))
 const { default: App } = await import('../src/App.tsx')
 const { RoutePanel } = await import('../src/RoutePanel.tsx')
 const { DrivePanel } = await import('../src/DrivePanel.tsx')
+const { PlanPanel } = await import('../src/PlanPanel.tsx')
+
+// Public landmarks only.
+const STADIUM: Place = { id: 'mapbox:stadium', label: 'Bank of America Stadium', position: [-80.8528, 35.2258] }
+const AIRPORT: Place = { id: 'mapbox:airport', label: 'Charlotte Douglas International Airport', position: [-80.9431, 35.214] }
+const PARK: Place = { id: 'mapbox:park', label: 'Carowinds', position: [-80.9414, 35.1037] }
 
 describe('App smoke test', () => {
   it('shows setup help when no token is set', () => {
@@ -49,12 +72,116 @@ describe('App smoke test', () => {
     expect(without).not.toContain('Finding routes')
   })
 
+  it('opens with the last trip when this device has one, and with the built-in trip when it does not', () => {
+    const book = setLastTrip(EMPTY_PLACE_BOOK, { origin: STADIUM, destination: PARK })
+    const placeStore = memoryTextStore({ [PLACE_BOOK_KEY]: JSON.stringify(serializePlaceBook(book)) })
+    const html = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} placeStore={placeStore} />)
+    expect(html).toContain('value="Bank of America Stadium"')
+    expect(html).toContain('value="Carowinds"')
+    expect(html).not.toContain('Uptown Charlotte')
+    // An origin that was not kept (it was the device's position) comes from the built-in trip.
+    const noOrigin = memoryTextStore({
+      [PLACE_BOOK_KEY]: JSON.stringify(serializePlaceBook(setLastTrip(EMPTY_PLACE_BOOK, { origin: null, destination: PARK }))),
+    })
+    const partly = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} placeStore={noOrigin} />)
+    expect(partly).toContain('value="Uptown Charlotte (Trade &amp; Tryon)"')
+    expect(partly).toContain('value="Carowinds"')
+    // Corrupt storage is the same as none.
+    const corrupt = memoryTextStore({ [PLACE_BOOK_KEY]: '{"version":1,' })
+    const fresh = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} placeStore={corrupt} />)
+    expect(fresh).toContain('value="Uptown Charlotte (Trade &amp; Tryon)"')
+    expect(fresh).toContain('value="Indian Land, SC (US-521 &amp; SC-160)"')
+    expect(corrupt.read(PLACE_BOOK_KEY)).toBeNull()
+  })
+
   it('offers the simulated drive in the panel, not startable before there is a route', () => {
     const html = renderToString(<App status={{ kind: 'ok', token: 'pk.test' }} />)
     expect(html).toContain('Simulate drive')
     expect(html).toMatch(/<button type="button" disabled="">Start drive<\/button>/)
     expect(html).toContain('Reroute settings')
     expect(renderToString(<App status={{ kind: 'missing' }} />)).not.toContain('Simulate drive')
+  })
+})
+
+describe('PlanPanel', () => {
+  const nothing = () => {}
+  const state = (book: PlaceBook, storageNote: string | null = null): PlaceBookState => ({
+    book,
+    storageNote,
+    setSlot: nothing,
+    addCustom: () => null,
+    rename: () => null,
+    remove: nothing,
+    addRecent: nothing,
+    rememberTrip: nothing,
+    clear: nothing,
+  })
+  const render = (places: PlaceBookState) =>
+    renderToString(
+      <PlanPanel
+        pins={DEFAULT_TRIP}
+        token="pk.test"
+        places={places}
+        getProximity={() => DEFAULT_TRIP.origin.position}
+        onPlace={nothing}
+        onSwap={nothing}
+        onReset={nothing}
+      />,
+    ).replace(/<!-- -->/g, '')
+
+  it('first run: two labelled search fields, use my location, and Home and Work waiting to be set', () => {
+    const html = render(state(EMPTY_PLACE_BOOK))
+    // Real inputs, each tied to its label, each a combobox over a listbox that is closed for now.
+    const inputs = html.match(/<input[^>]*role="combobox"[^>]*>/g) ?? []
+    expect(inputs).toHaveLength(2)
+    for (const input of inputs) {
+      const id = /id="([^"]+)"/.exec(input)![1]!
+      expect(html).toContain(`<label for="${id}"`)
+      expect(input).toContain('aria-expanded="false"')
+      expect(input).toContain('aria-autocomplete="list"')
+      expect(input).toContain('autoComplete="off"')
+    }
+    expect(html).toMatch(/<label for="[^"]+" class="dot"[^>]*>Origin<\/label>/)
+    expect(html).toMatch(/<label for="[^"]+" class="dot"[^>]*>Destination<\/label>/)
+    expect(html).toContain('value="Uptown Charlotte (Trade &amp; Tryon)"')
+    expect(html).not.toContain('role="listbox"')
+    expect(html).toContain('>Use my location</button>')
+    expect(html).toContain('Set Home…')
+    expect(html).toContain('Set Work…')
+    expect(html).toContain('No recent destinations yet')
+    expect(html).toContain('Clear saved places and history')
+    expect(html).toContain('Swap')
+    expect(html).toContain('Reset to test points')
+    // Says where things are kept and what leaves the device; shows no alarm and no token.
+    expect(html).toContain('kept in this browser only')
+    expect(html).toContain('sent to Mapbox')
+    expect(html).not.toContain('role="alert"')
+    expect(html).not.toContain('pk.test')
+  })
+
+  it('with a place book: saved places one tap away, recents listed newest first, and ways to manage them', () => {
+    let book = setSlot(setSlot(EMPTY_PLACE_BOOK, 'home', STADIUM), 'work', AIRPORT)
+    book = addCustomPlace(book, 'Rides', PARK).book
+    book = addRecent(addRecent(book, AIRPORT), PARK)
+    const html = render(state(book))
+    for (const name of ['Home', 'Work', 'Rides']) expect(html).toContain(`>${name}</button>`)
+    expect(html).not.toContain('Set Home…')
+    expect(html).toContain('title="Bank of America Stadium"')
+    expect(html).not.toContain('No recent destinations yet')
+    const recents = html.slice(html.indexOf('aria-label="Recent destinations"'))
+    expect(recents.indexOf('>Carowinds<')).toBeGreaterThan(0)
+    expect(recents.indexOf('>Carowinds<')).toBeLessThan(recents.indexOf('>Charlotte Douglas International Airport<'))
+    // Only a named place can be renamed; all three can be removed.
+    expect(html.match(/>Rename</g)).toHaveLength(1)
+    expect(html.match(/aria-label="Remove /g)).toHaveLength(3)
+    expect(html).toContain('Save as Home')
+    expect(html).toContain('Saving the destination: Indian Land, SC (US-521 &amp; SC-160)')
+  })
+
+  it('says so when the device would not store the places', () => {
+    const html = render(state(EMPTY_PLACE_BOOK, 'This browser would not store your places.'))
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('This browser would not store your places.')
   })
 })
 

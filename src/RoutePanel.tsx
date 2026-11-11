@@ -104,7 +104,7 @@ export function RoutePanel({
       </ol>
       {children}
       {!loading && !error && ranked.length > 0 && (
-        <p className="hint">Times include live traffic. Drag a pin to change the trip.</p>
+        <p className="hint">Times include live traffic. Search for a place or drag a pin to change the trip.</p>
       )}
       {ranked.length > 0 && signalsStatus !== 'loading' && (
         <p className="hint">

@@ -3,6 +3,10 @@
 A Vite + React + TypeScript web app that shows a Mapbox map with two draggable pins,
 starting with a test trip down the US-521 corridor: Uptown Charlotte (origin, blue) to
 the intersection of US-521 and SC-160 in Indian Land, South Carolina (destination, red).
+The trip can be anywhere: search for a place or an address for either end, use the
+device's location as the origin, keep Home, Work and a few named places one tap away,
+and pick from the recent destinations (see Planning a trip). The page lays itself out
+for a phone at narrow widths.
 It draws up to three traffic-aware driving routes between them and lists each
 one's ETA, distance, difference from typical time and number of signalized
 intersections (from OpenStreetMap, with City of Charlotte data filling gaps), with the
@@ -52,6 +56,66 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`, `npm run pr
 extracts on disk) and `npm run seed:charlotte` (refreshes the City of Charlotte snapshot);
 see Data sources.
 
+## Planning a trip
+
+The panel beside the map (above it on a phone) is the trip input.
+
+- **Search.** Each end of the trip is a search field. Type three characters or more and,
+  once typing has paused for 350 ms, up to five suggestions appear, nearest the centre of
+  the map first; pick one with a tap, or with the arrow keys and Enter (Enter alone takes
+  the first). Escape or leaving the field puts the current place back. Errors are said in
+  words under the field: a rejected or URL-restricted token (401, 403), rate limiting
+  (429), no connection.
+- **Use my location** sets the origin from the browser's Geolocation API: one fix, high
+  accuracy, 15 second limit. It is asked for only when the button is pressed, never when
+  the page loads. Browsers allow it only on HTTPS or localhost; a refusal, a timeout and
+  an unavailable position each get their own message.
+- **Saved places.** Home, Work and up to six named places. "Recent and saved places"
+  saves the current origin or destination under one of them, renames and removes them. A
+  saved place is a button that sets the destination, and both fields list the saved
+  places when focused, so one can be the origin too.
+- **Recent.** The last eight destinations picked from search, newest first, without
+  repeats (the same spot within 50 m, or the same name within 300 m, is one entry). The
+  destination field lists them when focused.
+- **Last trip.** A reload opens with the trip that was on screen, not the built-in one.
+  "Reset to test points" goes back to the built-in trip (Uptown to US-521 and SC-160),
+  which is also what a first visit and a cleared device open with.
+- **Pins** can still be dragged. A dragged pin shows its coordinates ("Dropped pin
+  (35.2271, -80.8431)"), not an address: looking the address up would cost a request per
+  drag, so it is not done.
+- **Clear saved places and history** removes all of the above from the device.
+
+**The search API.** Mapbox Search Box API, `/suggest` while typing and `/retrieve` for
+the suggestion that is picked, called over HTTP (no extra package). It was chosen over
+the Geocoding API v6 because v6 does not return points of interest at all (its docs
+send POI search to Search Box), and a trip to an airport or a stadium is the common
+case. Checked on mapbox.com/pricing and docs.mapbox.com/api/search, Nov 11, 2026:
+
+| | Billed | Free each month | Then |
+| --- | --- | --- | --- |
+| Search Box `/suggest` + `/retrieve` | per session | 500 sessions (the page's "introductory preview" table; its "standard" table says 2,500) | $3.00 per 1,000 (standard: $11.50) |
+| Geocoding v6 forward, temporary | per request, so per keystroke that searches | 100,000 requests | $0.75 per 1,000 |
+| Directions | per request | 100,000 requests | $2.00 per 1,000 |
+
+A session is the suggest requests made on one session token (up to 50) and the one
+retrieve that ends them; it also ends 180 seconds after a suggest that nothing followed.
+So one search costs one session however much is typed: typically 1 to 4 suggest requests
+(the debounce and the three-character minimum keep it there) and 1 retrieve. A search
+that is abandoned still counts as a session. At the lower free figure that is about 16
+searches a day; saved places and recents cost nothing. Requests are also limited to 10
+per second. RouteIQ starts a new token after a pick, after 50 suggests, or after 170
+idle seconds (`sessionForSuggest` in `src/core/search.ts`). Every request carries
+`proximity` (the map centre, rounded to four decimals): without it Mapbox would place
+the caller by IP address. `types` leaves out categories and brands, which are not one
+place. For a large site the place's first `routable_points` entry (a point on the road
+network) is used in preference to the middle of the site.
+
+One thing to settle before this is more than a personal prototype: the Search Box docs
+say its results are "only available for temporary use" and to contact Mapbox about
+storing positions. Saved places and recents keep a name and a coordinate from a search
+result on the device. Mapbox's product for stored results is the Geocoding API with
+`permanent=true` ($5.00 per 1,000, no free tier, no POIs).
+
 ## Mapbox token
 
 - Create a **new public token** at https://console.mapbox.com/account/access-tokens/
@@ -89,6 +153,11 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 inputs always give the same answer. All thresholds are in
                 DEFAULT_REROUTE_OPTIONS. geo.ts also finds the point and heading a
                 distance along a line, and the rest of a line from there.
+                places.ts is the place book: Home, Work, named places, recent
+                destinations and the last trip, with the rules for adding, renaming,
+                removing, telling two places apart, the caps, and reading a stored
+                book back without trusting it. search.ts says when typed text is
+                worth a request and how requests are grouped into billing sessions.
                 No React, Mapbox, DOM or network, so all of it can be ported to Swift
                 or served.
 src/providers/mapbox/
@@ -101,6 +170,15 @@ src/providers/mapbox/
                 client.ts: builds the driving-traffic URL and fetches it (abortable;
                 401/403/429/network become readable errors). A request made while
                 moving carries the vehicle's heading (`bearings`, origin only).
+                searchAdapter.ts: pure Search Box API JSON -> suggestions (`/suggest`)
+                and a Place (`/retrieve`), with typed failures.
+                searchClient.ts: builds the two URLs and fetches them (abortable, never
+                rejects; 401/403/429/network become readable errors).
+src/search/     searchRunner.ts: the typing-to-request logic of a search field, with
+                the timer passed in: debounce, the three-character minimum, and each
+                keystroke aborting the request before it.
+src/device/     geolocation.ts: the one-shot wrapper around the browser's Geolocation
+                API (never rejects; the implementation can be swapped in tests).
 src/providers/charlotte/
                 adapter.ts: pure ArcGIS GeoJSON page -> SignalPoint[] (operating traffic
                 signals only; typed failures).
@@ -128,8 +206,12 @@ src/providers/osm/
                 cache -> network. A tile the bundle covers in full never reaches the
                 cache or the network; other tiles are cached, refreshed after 30 days,
                 and left alone for a while after a failure.
-src/storage/    kv.ts: the tiny key-value store everything on the device goes through:
-                IndexedDB, or memory where IndexedDB is not available.
+src/storage/    kv.ts: the tiny key-value store the signal data on the device goes
+                through: IndexedDB, or memory where IndexedDB is not available.
+                local.ts: the synchronous text store for the place book: localStorage,
+                or memory without it; a full or blocked store reports the failed write.
+                placeBook.ts: loads, saves and clears the place book under one
+                versioned key (`routeiq.places.v1`); corrupt data is removed.
 src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch, and
                 the city list) and wires up the sources the app uses, the bundled
                 tiles ahead of the device cache and the network. askOnce wraps them
@@ -162,18 +244,27 @@ src/useDriveSim.ts Runs a simulated drive on a timer: moves the car, polls Mapbo
                 its position inside the request budget, loads signal counts for the
                 fresh routes (never with retryFailed), asks core/reroute.ts and
                 applies a switch. Orchestrates only.
+src/usePlaceBook.ts  The place book as React state, written to the device on change.
+src/usePlaceSearch.ts  Search for one field: the runner, the session token, the pick.
+src/PlanPanel.tsx  The trip input: the two search fields (comboboxes), "Use my location",
+                the saved-place buttons, swap and reset, and "Recent and saved places".
 src/DrivePanel.tsx The "Simulate drive" controls, the thresholds, the what-if control
                 (development builds only) and the event log.
 src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
                 typical time, the reason for its place, and a "Recommended" badge on
                 the top route. The highlight follows the selection, not the rank.
 src/config.ts   Reads and checks VITE_MAPBOX_TOKEN.
-src/App.tsx     Page shell; owns origin and destination (drag, swap, reset). Shows setup
+src/App.tsx     Page shell; owns origin and destination (search, saved place, location,
+                drag, swap, reset) and restores the last trip. Shows setup
                 help instead of a map when the token is wrong (missing, secret, or
                 rejected by Mapbox with 401/403).
 tests/          Vitest: core helpers, route facts and formatting, signal counting, tile
                 arithmetic, ranking, route ids and selection, Mapbox, Charlotte and
                 OpenStreetMap adapters and clients against hand-written fixtures, the
+                Search Box adapter and client (empty, malformed and error bodies,
+                URL encoding, proximity order, session tokens), the search runner with
+                a hand-fired timer, the place book and its storage (caps, repeats,
+                corrupt and blocked storage), the geolocation wrapper, the
                 tile cache chain and the whole signal path end to end against a stand-in
                 Overpass server (no network anywhere), the bundle (tag rules, tile
                 files, index, coverage of boundaries, bundle layer offline, the wait
@@ -181,7 +272,7 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 the build script and the Charlotte seed script run whole in a temporary
                 folder, the City of Charlotte fallback, a US-521 style corridor trip
                 across the state line and a tile edge, the key-value store, token check,
-                core-purity guard, App, RoutePanel and DrivePanel smoke tests.
+                core-purity guard, App, PlanPanel, RoutePanel and DrivePanel smoke tests.
                 reroute.test.ts drives the reroute engine through scripted trips on a
                 made-up road network (helpers/driveWorld.ts) with a fake clock:
                 oscillating ETAs, a steady gain, a gain that comes too late, cooldown,
@@ -198,6 +289,8 @@ check-prereqs.ps1  Windows prerequisite check.
 
 - **Routes and map:** Mapbox Directions API (`driving-traffic`) and Mapbox GL JS, with
   your token.
+- **Place search:** Mapbox Search Box API (`/suggest`, `/retrieve`), with the same
+  token; see Planning a trip.
 - **Traffic signals, primary:** OpenStreetMap, nodes tagged `highway=traffic_signals`.
   © OpenStreetMap contributors, licensed under the Open Database License (ODbL):
   https://www.openstreetmap.org/copyright. The data reaches the app in tiles of a tenth
@@ -471,8 +564,27 @@ TypeScript), so `npm ci` installs the same tree that was tested.
 
 ## Privacy
 
-Nothing records or stores location yet. When live location arrives it stays in memory
-only by default, with no history written to disk or sent anywhere unless you turn it on.
+**Your location.** The device's location is read only when you press "Use my
+location": once, never on page load and never in the background. It becomes the origin
+pin, so it goes to Mapbox as the origin of the route request, like any pin. It is not
+written to the device: the stored last trip leaves out an origin that came from the
+device's location, and such a place never enters the recent list. The one exception is
+your own doing: saving that origin as Home, Work or a named place stores its
+coordinates like any saved place.
+
+**What you type.** The text typed into a search field is sent to Mapbox (Search Box
+API) to find places, once typing pauses and there are three characters or more, together
+with the centre of the map rounded to four decimals (to put nearby results first) and a
+random session token that groups the requests for billing and says nothing about you.
+Picking a suggestion sends that suggestion's id. Nothing typed is logged or stored by
+RouteIQ; a destination picked from search is kept in the recent list (below).
+
+**Saved places, recent destinations and the last trip** live only in this browser's
+localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They
+are never written to a project file and never sent anywhere, except as the coordinates
+of a route request to Mapbox when one of them is an end of the trip. "Clear saved
+places and history" removes them, as does clearing the site's data. Where localStorage
+is full or blocked the panel says so and they last until the page is closed.
 
 Pin positions go to Mapbox, which is how routes are found. They go nowhere else.
 During a simulated drive the simulated car's position and heading go to Mapbox the same
@@ -510,6 +622,6 @@ you have routed through (database `routeiq-osm-signals`; bundled tiles are never
 into it), the city list (`routeiq-charlotte-signals`), and a
 note of when Overpass may next be asked (`routeiq-overpass-pause`). The stored tiles do
 show roughly where routes have been looked up on this device, to the nearest tile.
-Clearing the site's data in the browser removes all of it. Routes, pins and counts
-themselves are never stored. Where IndexedDB is not available (some private windows)
+Clearing the site's data in the browser removes all of it. Routes and counts
+themselves are never stored; the two ends of the last trip are (see above). Where IndexedDB is not available (some private windows)
 the same data is held in memory only, for as long as the page is open.

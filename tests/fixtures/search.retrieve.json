@@ -1,0 +1,28 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [-80.8528, 35.2258] },
+      "properties": {
+        "name": "Bank of America Stadium",
+        "mapbox_id": "dXJuOm1ieHBvaTpzdGFkaXVtLXRlc3Q",
+        "feature_type": "poi",
+        "address": "800 S Mint St",
+        "full_address": "800 S Mint St, Charlotte, North Carolina 28202, United States",
+        "place_formatted": "Charlotte, North Carolina 28202, United States",
+        "context": {},
+        "coordinates": {
+          "longitude": -80.8528,
+          "latitude": 35.2258,
+          "routable_points": [{ "name": "default", "longitude": -80.8519, "latitude": 35.2249 }]
+        },
+        "language": "en",
+        "maki": "stadium",
+        "poi_category": ["stadium"],
+        "operational_status": "active"
+      }
+    }
+  ],
+  "attribution": "© 2026 Mapbox and its suppliers. All rights reserved."
+}

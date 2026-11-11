@@ -1,0 +1,63 @@
+{
+  "suggestions": [
+    {
+      "name": "Bank of America Stadium",
+      "mapbox_id": "dXJuOm1ieHBvaTpzdGFkaXVtLXRlc3Q",
+      "feature_type": "poi",
+      "address": "800 S Mint St",
+      "full_address": "800 S Mint St, Charlotte, North Carolina 28202, United States",
+      "place_formatted": "Charlotte, North Carolina 28202, United States",
+      "context": {
+        "country": { "name": "United States", "country_code": "US", "country_code_alpha_3": "USA" },
+        "region": { "name": "North Carolina", "region_code": "NC", "region_code_full": "US-NC" },
+        "postcode": { "name": "28202" },
+        "place": { "name": "Charlotte" },
+        "address": { "name": "800 S Mint St", "address_number": "800", "street_name": "s mint st" },
+        "street": { "name": "s mint st" }
+      },
+      "language": "en",
+      "maki": "stadium",
+      "poi_category": ["stadium", "sports"],
+      "poi_category_ids": ["stadium", "sports"],
+      "external_ids": {},
+      "metadata": {},
+      "distance": 900
+    },
+    {
+      "name": "Stadium",
+      "mapbox_id": "stadium",
+      "feature_type": "category",
+      "place_formatted": "Category",
+      "context": {},
+      "language": "en"
+    },
+    {
+      "name": "Charlotte Douglas International Airport",
+      "mapbox_id": "dXJuOm1ieHBvaTphaXJwb3J0LXRlc3Q",
+      "feature_type": "poi",
+      "address": "5501 Josh Birmingham Pkwy",
+      "place_formatted": "Charlotte, North Carolina 28208, United States",
+      "context": {},
+      "language": "en"
+    },
+    {
+      "name": "Charlotte",
+      "mapbox_id": "dXJuOm1ieHBsYzpjaGFybG90dGUtdGVzdA",
+      "feature_type": "place",
+      "place_formatted": "North Carolina, United States",
+      "context": {},
+      "language": "en"
+    },
+    { "name": "", "mapbox_id": "dXJuOm5vLW5hbWU", "feature_type": "poi", "place_formatted": "Nowhere" },
+    { "name": "No id", "feature_type": "poi", "place_formatted": "Nowhere" },
+    "not a suggestion",
+    {
+      "name": "Bank of America Stadium",
+      "mapbox_id": "dXJuOm1ieHBvaTpzdGFkaXVtLXRlc3Q",
+      "feature_type": "poi",
+      "place_formatted": "A repeat of the first id"
+    }
+  ],
+  "attribution": "© 2026 Mapbox and its suppliers. All rights reserved.",
+  "response_id": "test-response-id"
+}
