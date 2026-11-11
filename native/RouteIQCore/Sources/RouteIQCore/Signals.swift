@@ -13,8 +13,6 @@ public struct SignalMatchOptions: Hashable, Sendable {
     public var toleranceM: Double
     /// (c) ...and the route has an intersection of its own this close to one of them. Skipped without a list.
     public var intersectionRadiusM: Double
-    /// A gap-fill point is added only when no primary intersection lies this close to it.
-    public var gapFillRadiusM: Double
     /// Counted intersections this close along the route are one stop.
     public var mergeRadiusM: Double
     /// How far inside a limited-access span a signal must be before it is ignored.
@@ -24,14 +22,12 @@ public struct SignalMatchOptions: Hashable, Sendable {
         clusterRadiusM: Double = 60,
         toleranceM: Double = 30,
         intersectionRadiusM: Double = 40,
-        gapFillRadiusM: Double = 60,
         mergeRadiusM: Double = 40,
         limitedAccessMarginM: Double = 30
     ) {
         self.clusterRadiusM = clusterRadiusM
         self.toleranceM = toleranceM
         self.intersectionRadiusM = intersectionRadiusM
-        self.gapFillRadiusM = gapFillRadiusM
         self.mergeRadiusM = mergeRadiusM
         self.limitedAccessMarginM = limitedAccessMarginM
     }
@@ -48,7 +44,6 @@ public struct SignalMatchOptions: Hashable, Sendable {
             clusterRadiusM: nonNegative(clusterRadiusM),
             toleranceM: nonNegative(toleranceM),
             intersectionRadiusM: nonNegative(intersectionRadiusM),
-            gapFillRadiusM: nonNegative(gapFillRadiusM),
             mergeRadiusM: nonNegative(mergeRadiusM),
             limitedAccessMarginM: nonNegative(limitedAccessMarginM)
         )
@@ -91,21 +86,17 @@ public struct RouteSignals: Hashable, Sendable {
     public static let none = RouteSignals(signals: [], count: 0)
 }
 
-/// Everything known about signals when routes are counted. The sources stay
-/// apart all the way here (they come under different licenses) and are only
-/// combined in memory, inside withSignalCounts.
+/// Everything known about signals when routes are counted. The route's own
+/// signal flags (the fallback) are added in memory, inside withSignalCounts.
 public struct SignalData: Hashable, Sendable {
     /// Points of the primary source, from every tile that was loaded. A point may appear more than once.
     public var primary: [SignalPoint]
     /// The tiles `primary` is complete for. A needed tile not listed here is missing data.
     public var primaryTileIds: Set<String>
-    /// A second dataset that only fills gaps. Nil when it could not be loaded.
-    public var gapFill: [SignalPoint]?
 
-    public init(primary: [SignalPoint], primaryTileIds: Set<String>, gapFill: [SignalPoint]?) {
+    public init(primary: [SignalPoint], primaryTileIds: Set<String>) {
         self.primary = primary
         self.primaryTileIds = primaryTileIds
-        self.gapFill = gapFill
     }
 }
 
@@ -445,11 +436,9 @@ public enum Signals {
         return Tiles.tilesForRoute(geometry, marginM: r.clusterRadiusM + r.toleranceM + r.intersectionRadiusM)
     }
 
-    /// Fills signalCount and signalCoverage on each route, from three sources,
-    /// most trusted first: the primary data for loaded tiles; the gap-fill
-    /// data where it has a point with no primary intersection within
-    /// gapFillRadiusM; the route's own signal flags, only in tiles whose
-    /// primary data is missing. Coverage is `full` when every needed tile was
+    /// Fills signalCount and signalCoverage on each route, from two sources,
+    /// most trusted first: the primary data for loaded tiles; the route's own
+    /// signal flags, only in tiles whose primary data is missing. Coverage is `full` when every needed tile was
     /// loaded, `partial` when one is missing, and `none` (nil count) when
     /// nothing at all is known. Nil `data` leaves the routes untouched.
     public static func withSignalCounts(
@@ -466,7 +455,7 @@ public enum Signals {
             var out = route
             let needed = signalTilesForRoute(route.geometry, options: resolved)
             let missing = needed.filter { !data.primaryTileIds.contains($0) }
-            if missing.count == needed.count && data.gapFill == nil && route.intersections == nil {
+            if missing.count == needed.count && route.intersections == nil {
                 out.signalCount = nil
                 out.signalCoverage = .none
                 return out
@@ -486,27 +475,7 @@ public enum Signals {
                     ))
                 }
             }
-            var clusters = clusterSourced(primary + fallback, radiusM: resolved.clusterRadiusM)
-
-            let fills = (data.gapFill ?? []).filter { Geo.isValidLngLat($0.position) }
-            if !fills.isEmpty {
-                let takenPoints = clusters.flatMap { [$0.position] + $0.members }
-                var taken = PointGrid<Bool>(radiusM: resolved.gapFillRadiusM, points: takenPoints)
-                for at in takenPoints { taken.add(at, true) }
-                var seen = Set<JS.Key>()
-                for point in fills {
-                    if seen.contains(JS.Key(point.id)) || !taken.within(point.position).isEmpty { continue }
-                    seen.insert(JS.Key(point.id))
-                    clusters.append(SignalCluster(
-                        id: point.id,
-                        position: point.position,
-                        name: point.name,
-                        source: .gapFill,
-                        memberIds: [point.id],
-                        members: [point.position]
-                    ))
-                }
-            }
+            let clusters = clusterSourced(primary + fallback, radiusM: resolved.clusterRadiusM)
 
             let found = clustersOnRoute(route.geometry, clusters, resolved, RouteContext(
                 intersections: route.intersections?.map(\.location),
