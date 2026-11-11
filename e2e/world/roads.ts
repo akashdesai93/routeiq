@@ -33,7 +33,7 @@
 
 export type LngLat = [number, number]
 export type RouteName = 'A' | 'B' | 'C' | 'S' | 'off-route'
-type RoadName = 'A' | 'B' | 'C' | 'S'
+export type RoadName = 'A' | 'B' | 'C' | 'S'
 
 /** A point in the trip's own frame: `f` is the share of the way from O to D, `side` is meters to the left (+) or right (-). */
 export interface FramePoint {
@@ -185,7 +185,7 @@ export class World {
   }
 
   /** The full corner list of a route, for driving it. */
-  cornersOf(name: 'A' | 'B' | 'C'): readonly LngLat[] {
+  cornersOf(name: RoadName): readonly LngLat[] {
     return this.road(name).corners
   }
 
@@ -248,6 +248,26 @@ export class World {
     const rest = restOf(best.road, project(this.frame, best.road.corners, from))
     const body = this.routeJson(rest, traffic, n)
     return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: rest.name, durationSec: body.duration }
+  }
+
+  /**
+   * The answer to the drive's own check of the route being driven (core
+   * baselineProbe): from `from` through via points along that route, which
+   * the drive places where it leaves the routes Mapbox offered. One route
+   * along the road that passes within ON_ROAD_M of every via (S only in a
+   * world made with `sideStreet`), from the point on it nearest `from`. Null
+   * when no one road passes them all. Leaves lastOffered alone: the car
+   * drives on what it was driving.
+   */
+  pathThrough(from: LngLat, vias: readonly LngLat[], traffic: Traffic, n: number): { answer: DirectionsJson; road: RouteName; durationSec: number } | null {
+    for (const road of this.roads) {
+      if (road.name === 'S' && !this.sideStreet) continue
+      if (!vias.every((via) => project(this.frame, road.corners, via).offM <= ON_ROAD_M)) continue
+      const rest = restOf(road, project(this.frame, road.corners, from))
+      const body = this.routeJson(rest, traffic, n)
+      return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: road.name, durationSec: body.duration }
+    }
+    return null
   }
 
   private road(name: RoadName): Road {

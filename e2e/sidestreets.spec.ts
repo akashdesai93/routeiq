@@ -9,6 +9,7 @@ import { JAM_WHERE_ALL_THREE_SHARE } from './world/traffic.ts'
 // like any other route: on ETA.
 
 const SIDE = 'via side streets'
+const OFF_ROUTE = 'You are off the route. Finding a new one.'
 /** The via may move 250 m at most (DEFAULT_PROBE_OPTIONS.viaRadiusM); the ends may move as far as they must. */
 const RADIUSES = 'unlimited;250;unlimited'
 const NOTICE = /^Faster route found via side streets, saves (\d+ min|under a minute)\.$/
@@ -258,7 +259,7 @@ test('when a side street joins, the other routes keep their signal counts', asyn
   expect(after.sort()).toEqual([...before].sort())
 })
 
-test('I start a drive with a side street recommended, and it drives to the end with no more probes', async ({ app, page }) => {
+test('when I start on the side-street route, it drives the side street', async ({ app, page }) => {
   app.outside.sideStreet = true
   app.outside.traffic = JAM_WHERE_ALL_THREE_SHARE
   await app.open({ fakeClock: true })
@@ -267,18 +268,59 @@ test('I start a drive with a side street recommended, and it drives to the end w
   const routes = page.locator('ol.routes > li')
   await expect(routes.first()).toContainText(SIDE)
   await expect(routes.first().getByRole('button')).toHaveAttribute('aria-pressed', 'true')
-  await app.snap('the side street is selected; Start drive next')
+  await app.snap('Parallel Street is selected; Start drive next')
   const probesBefore = app.probes.length
   expect(probesBefore).toBe(2)
+  const plannedRequests = app.directionsRequests
 
-  const log = await app.drive()
-  await app.snap('arrived: the summary')
+  // The driver takes Parallel Street, the route on screen, all the way.
+  const log = await app.drive({ road: 'S', snapAtSec: [30, 600] })
+  await app.snap('arrived on Parallel Street: the summary')
 
   expect(log.arrived).toBe(true)
+  expect(log.banners).toEqual([])
   const spoken = await app.spoken()
   expect(spoken[0]).toBe('RouteIQ started')
-  expect(spoken.some((line) => line.startsWith('You have arrived.'))).toBe(true)
+  // The app was on Parallel Street with the driver: never off the route, never switched,
+  // and none of Main Corridor's jog via Cross Street was spoken.
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.some((line) => line.includes('Cross Street'))).toBe(false)
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+  // Start asked Mapbox for nothing: the drive's first request is its first check, and the
+  // path check right after it is the second (with a request of its own at Start it would be the third).
+  expect(app.pathChecks[0]?.n).toBe(plannedRequests + 2)
+  // Mapbox never offered the side street by itself, so each check that needed it asked
+  // for the path itself, through vias along it, and got Parallel Street back: like for like.
+  expect(app.answers.filter((a) => a.n > plannedRequests && a.routes.length > 1).every((a) => a.routes.every((r) => r.name !== 'S'))).toBe(true)
+  expect(app.pathChecks.length).toBeGreaterThan(0)
+  expect(app.pathChecks.every((c) => c.road === 'S')).toBe(true)
   // Probes are a plan-screen thing for now (#5): the drive made none.
   expect(app.probes).toHaveLength(probesBefore)
   await expect(page.getByLabel('Drive summary')).toBeVisible()
+})
+
+test('when I pick a slower route on purpose, it drives that route', async ({ app, page }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // Mapbox's second-fastest route: not the recommended one.
+  const second = app.answers[0]!.routes[1]!.name as 'B' | 'C'
+  const turnOnto = second === 'B' ? 'East Loop' : 'West Loop'
+  const row = page.locator('ol.routes > li').nth(1)
+  await expect(row).not.toContainText('Recommended')
+  await row.getByRole('button').click()
+  await expect(row.getByRole('button')).toHaveAttribute('aria-pressed', 'true')
+  await app.snap(`the slower ${turnOnto} picked on purpose`)
+
+  const log = await app.drive({ road: second })
+  await app.snap(`arrived by ${turnOnto}`)
+
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  // The turns spoken are the picked route's own.
+  expect(spoken.some((line) => line.includes(turnOnto))).toBe(true)
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })

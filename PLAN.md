@@ -222,9 +222,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       is announced in a polite live region, pointer or focus on the list or Start
       drive counts as a pick, the other routes keep their signal counts while a probe's
       load, and e2e covers pin-move cancellation, a held answer for the old trip and a
-      drive started with a probe recommended. Open for later: probes in the reroute
-      engine (#5); the live drive starts from the device's position and does not take
-      the plan's pick, so a recommended side street is not what the drive follows.
+      drive started with a probe recommended. Done in #66 (Nov 11, 2026): the live drive
+      starts on the route picked on the plan screen (a probe route included) when the
+      first fix is on it, with no request of its own; its checks keep a probe route
+      through the existing path check (`baselineProbe` vias), and without that answer
+      the route is unconfirmed, not lost. e2e: "when I start on the side-street route,
+      it drives the side street" and "when I pick a slower route on purpose, it drives
+      that route". Open for later: probes in the reroute engine (#5), so a check can
+      find a side street the plan did not.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

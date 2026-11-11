@@ -53,7 +53,7 @@ function session(options: Partial<LiveOptions> = {}) {
     setTime(sec: number) {
       nowSec = sec
     },
-    start: () => send({ type: 'start', nowMs: nowMs(), destination: DESTINATION }),
+    start: (route?: RouteCandidate | null) => send({ type: 'start', nowMs: nowMs(), destination: DESTINATION, route }),
     fix(xM: number, yM = 0, extra: Partial<PositionFix> = {}) {
       const [lng, lat] = at(xM, yM)
       return send({ type: 'fix', nowMs: nowMs(), fix: { lng, lat, accuracyM: 8, speedMps: null, headingDeg: null, timeMs: nowMs(), ...extra } })
@@ -175,6 +175,131 @@ describe('starting', () => {
     const before = s.state
     s.send({ type: 'routes', nowMs: s.nowMs(), requestId: 99, routes: [] })
     expect(s.state).toBe(before)
+  })
+})
+
+describe('the route picked on the plan screen (#66)', () => {
+  /** B (a side street here: it leaves the main road at 5 km), as the plan screen's probe found it. */
+  const sideStreet = () => candidate('B', at(0, 0), 1250, { source: 'probe' })!
+  /** What the provider offers from the main road by itself: never the side street. */
+  const offered = (xM: number, a = 1300) => routesAt(xM, { A: a, C: 1320 })
+
+  /**
+   * Drives B's first 5 km (the stretch it shares with A) at 15 m/s, answering each check
+   * with `answer`: the provider's own routes, and what came back for the current path.
+   */
+  function cruiseOnB(
+    s: ReturnType<typeof session>,
+    untilSec: number,
+    answer: (xM: number) => { routes: readonly RouteCandidate[]; baseline?: readonly RouteCandidate[] | null },
+  ) {
+    for (let t = s.nowSec + 1; t <= untilSec; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null) {
+        const { routes, baseline } = answer(15 * t)
+        s.answer(routes, undefined, baseline)
+      }
+    }
+  }
+
+  it('Start drives the picked side-street route at once: no request, and the first check a poll interval later', () => {
+    const s = session()
+    const picked = sideStreet()
+    s.start(picked)
+    const effects = s.fix(0)
+    expect(s.state.status).toBe('driving')
+    expect(s.state.route).toBe(picked)
+    expect(s.state.picked).toBeNull()
+    expect(effects[0]).toEqual({ type: 'follow-route', geometry: picked.geometry })
+    expect(s.requests()).toHaveLength(0)
+    expect(s.state.requestsUsed).toBe(0)
+    expect(s.view()).toMatchObject({ remainingSec: expect.closeTo(1250, 0), checkedAgoSec: 0 })
+    cruiseOnB(s, 59, (xM) => ({ routes: offered(xM) }))
+    expect(s.requests()).toHaveLength(0)
+    cruiseOnB(s, 60, (xM) => ({ routes: offered(xM) }))
+    expect(s.requests().map((r) => [r.atSec, r.effect.purpose, r.effect.baseline])).toEqual([[60, 'poll', true]])
+  })
+
+  it('a slower route picked on purpose is driven too, not the fastest', () => {
+    const s = session()
+    const slower = candidate('C', at(0, 0), 1400)!
+    s.start(slower)
+    s.fix(0)
+    expect(s.state.route).toBe(slower)
+    expect(s.requests()).toHaveLength(0)
+  })
+
+  it('a picked route with no line to drive is ignored: the drive plans its own', () => {
+    const s = session()
+    s.start({ ...sideStreet(), geometry: [at(0, 0)] })
+    expect(s.state.picked).toBeNull()
+    s.fix(0)
+    expect(s.requests()[0]!.effect).toMatchObject({ purpose: 'plan' })
+  })
+
+  it('a first fix away from the picked route asks for a route from there, as without a pick', () => {
+    const s = session()
+    s.start(sideStreet())
+    s.fix(2000, 600)
+    expect(s.state.status).toBe('planning')
+    expect(s.requests()[0]!.effect).toMatchObject({ purpose: 'plan', origin: at(2000, 600) })
+    s.answer([candidate('A', at(0, 0), 1300)!])
+    expect(nameOf(s.state.route!)).toBe('A')
+    expect(s.state.picked).toBeNull()
+  })
+
+  it("checks that offer only the provider's own routes do not lose the side street", () => {
+    const s = session()
+    const picked = sideStreet()
+    s.start(picked)
+    s.fix(0)
+    // Five checks: A and C only, and the current path's own time could not be had
+    // (not asked or failed: null; or answered with another road).
+    let n = 0
+    cruiseOnB(s, 320, (xM) => ({ routes: offered(xM), baseline: ++n % 2 === 0 ? null : offered(xM) }))
+    expect(s.requests()).toHaveLength(5)
+    expect(s.state.route).toBe(picked)
+    expect(s.state.switches).toEqual([])
+    expect(s.spoken()).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    expect(s.state.engine.lostPolls).toBe(0)
+    expect(s.view().offRoute).toBe(false)
+  })
+
+  it("with the side street's own time from the via request, it is compared like for like, and kept while it is faster", () => {
+    const s = session()
+    const picked = sideStreet()
+    s.start(picked)
+    s.fix(0)
+    cruiseOnB(s, 320, (xM) => ({ routes: offered(xM), baseline: [candidate('B', at(xM, 0), 1250 - xM / 15, { source: 'probe' })!] }))
+    expect(s.requests()).toHaveLength(5)
+    expect(s.state.route).toBe(picked)
+    expect(s.state.switches).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay' })
+    expect(s.state.lastDecision!.code).not.toBe('route-unconfirmed')
+    // The side street's fresh time, from the last check (at 300 s, 4.5 km in), is the one shown.
+    expect(s.state.eta!.durationSec).toBeCloseTo(950, 0)
+  })
+
+  it('leaves the side street only for a route that saves enough, confirmed, under the usual rules', () => {
+    const s = session()
+    s.start(sideStreet())
+    s.fix(0)
+    const own = (xM: number) => [candidate('B', at(xM, 0), 1250, { source: 'probe' })!]
+    // The main road becomes 100 s faster than the side street: under the two-minute minimum. Stay.
+    cruiseOnB(s, 130, (xM) => ({ routes: offered(xM, 1150), baseline: own(xM) }))
+    expect(s.state.switches).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ code: 'saving-too-small' })
+    // Then five minutes faster: one check to see it, a second to confirm it, then the switch.
+    cruiseOnB(s, 190, (xM) => ({ routes: offered(xM, 950), baseline: own(xM) }))
+    expect(s.state.switches).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
+    cruiseOnB(s, 250, (xM) => ({ routes: offered(xM, 950), baseline: own(xM) }))
+    expect(s.state.switches).toHaveLength(1)
+    expect(s.state.switches[0]).toMatchObject({ code: 'faster-route' })
+    expect(nameOf(s.state.route!)).toBe('A')
   })
 })
 

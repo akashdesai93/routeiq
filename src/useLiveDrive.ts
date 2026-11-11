@@ -8,6 +8,7 @@ import {
   type LiveView,
   type LngLat,
   type RerouteOptions,
+  type RouteCandidate,
 } from './core/index.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
@@ -29,6 +30,8 @@ export interface ReplayConfig {
 export interface LiveDriveConfig {
   readonly token: string | null
   readonly destination: LngLat
+  /** The route picked on the plan screen: Start drive drives it (a side-street route too). Read at Start only. */
+  readonly route: RouteCandidate | null
   /** The reroute thresholds, shared with the simulated drive's settings box. */
   readonly rerouteOptions: RerouteOptions
   /** The poll interval and the request budget, shared with the simulated drive's. */
@@ -104,7 +107,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [])
 
   const start = useCallback(() => {
-    const { token, destination, replay } = latest.current
+    const { token, destination, route, replay } = latest.current
     if (token === null) return
     runnerRef.current?.runner.dispose()
     const speaker = (speakerRef.current ??= createSpeaker())
@@ -157,7 +160,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     runnerRef.current = { runner, now }
     setReplaying(replaySource !== null)
     setSpeechSupported(speaker.supported)
-    runner.start(destination)
+    runner.start(destination, route)
   }, [optionsOf])
 
   const end = useCallback(() => {

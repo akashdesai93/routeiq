@@ -1,4 +1,4 @@
-import { lineFrom } from './geo.ts'
+import { isValidLngLat, lineFrom } from './geo.ts'
 import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import { rankRoutes } from './rank.ts'
 import {
@@ -138,6 +138,13 @@ export interface LiveState {
   readonly status: LiveStatus
   readonly destination: LngLat | null
   readonly startedAtMs: number | null
+  /**
+   * The route picked on the plan screen, handed over at Start (a side-street
+   * probe route included). The drive starts on it when the first good fix is
+   * on its line; otherwise it asks for a route from where the car is. Kept
+   * until then only.
+   */
+  readonly picked: RouteCandidate | null
   /** Why the drive failed. Null otherwise. */
   readonly message: string | null
   /** A passing note about the position (no fix yet, poor accuracy). Null when there is none. */
@@ -201,6 +208,7 @@ export const LIVE_IDLE: LiveState = {
   status: 'idle',
   destination: null,
   startedAtMs: null,
+  picked: null,
   message: null,
   gpsNote: null,
   lastFix: null,
@@ -232,8 +240,11 @@ export const LIVE_IDLE: LiveState = {
 }
 
 export type LiveEvent =
-  /** The Start tap. */
-  | { readonly type: 'start'; readonly nowMs: number; readonly destination: LngLat }
+  /**
+   * The Start tap. `route`: the route picked on the plan screen, to be driven
+   * (see LiveState.picked). Left out or null: the drive asks for its own.
+   */
+  | { readonly type: 'start'; readonly nowMs: number; readonly destination: LngLat; readonly route?: RouteCandidate | null }
   | { readonly type: 'fix'; readonly nowMs: number; readonly fix: PositionFix }
   | { readonly type: 'position-error'; readonly nowMs: number; readonly kind: PositionErrorKind }
   /**
@@ -374,7 +385,10 @@ export function livePollGate(state: LiveState, nowMs: number, options: Partial<L
   if (state.request !== null) return 'in-flight'
   if (state.hiddenSinceMs !== null) return 'hidden'
   if (!(state.requestsUsed < opts.maxRequests)) return 'budget-spent'
-  const sinceRequestSec = state.lastRequestAtMs === null ? Infinity : (nowMs - state.lastRequestAtMs) / 1000
+  // A drive that started on the route picked on the plan screen has made no request yet:
+  // that route's answer counts as the first one, so the first check is a poll interval later.
+  const lastAskedMs = state.lastRequestAtMs ?? state.lastCheckedAtMs
+  const sinceRequestSec = lastAskedMs === null ? Infinity : (nowMs - lastAskedMs) / 1000
   if (sinceRequestSec < opts.minRequestGapSec) return 'request-gap'
   if (!state.recheck && sinceRequestSec < opts.pollIntervalSec) return 'not-yet'
   if ((nowMs - state.tracking.fix.timeMs) / 1000 > opts.maxFixAgeSec) return 'no-fix'
@@ -388,6 +402,11 @@ const STOP_EFFECTS: readonly LiveEffect[] = [{ type: 'cancel-request' }, { type:
 
 function fail(state: LiveState, message: string): LiveStep {
   return { state: { ...state, status: 'failed', message, request: null, switchBanner: null, undo: null }, effects: STOP_EFFECTS }
+}
+
+/** A route with a line to drive. */
+function drivable(route: RouteCandidate | null | undefined): route is RouteCandidate {
+  return route != null && route.geometry.filter(isValidLngLat).length >= 2
 }
 
 function headingFor(tracking: TrackingState, opts: LiveOptions): number | null {
@@ -504,6 +523,39 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   return maybePoll({ state: next, effects }, nowMs, opts)
 }
 
+/** The drive begins on `route`, from `fix`. */
+function begin(state: LiveState, route: RouteCandidate, candidates: readonly RouteCandidate[], fix: PositionFix, nowMs: number, opts: LiveOptions): LiveStep {
+  const started: LiveState = {
+    ...state,
+    status: 'driving',
+    picked: null,
+    route,
+    tracking: null,
+    request: null,
+    candidates,
+    lastCheckedAtMs: nowMs,
+    eta: { durationSec: route.durationSec, remainingM: route.distanceM },
+    guidance: armGuidance(route.guidance, 0, true),
+    lastDecision: null,
+  }
+  const step = drive(started, fix, nowMs, opts)
+  return { state: step.state, effects: [{ type: 'follow-route', geometry: route.geometry }, ...step.effects] }
+}
+
+/**
+ * The first good fix, with a route picked on the plan screen: the drive starts
+ * on that route, with no request, when the fix is on its line (the tracker's
+ * own test, within its offRouteM). Null when it is not: the car is somewhere
+ * else, and a route is asked for from there as without a pick.
+ */
+function startOnPicked(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOptions): LiveStep | null {
+  const picked = state.picked
+  if (picked === null) return null
+  const onIt = trackFix(null, trackedRoute(picked.geometry), fix, opts.tracking)
+  if (onIt === null || onIt.offFixes > 0) return null
+  return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts)
+}
+
 /** The first route has come back. */
 function planned(state: LiveState, routes: readonly RouteCandidate[] | null, message: string | undefined, nowMs: number, opts: LiveOptions): LiveStep {
   const best = routes === null ? undefined : rankRoutes(routes)[0]?.route
@@ -511,20 +563,7 @@ function planned(state: LiveState, routes: readonly RouteCandidate[] | null, mes
   if (routes === null || best === undefined || fix === null) {
     return fail(state, `Could not find a route from here. ${message ?? 'Try again in a moment.'}`)
   }
-  const started: LiveState = {
-    ...state,
-    status: 'driving',
-    route: best,
-    tracking: null,
-    request: null,
-    candidates: routes,
-    lastCheckedAtMs: nowMs,
-    eta: { durationSec: best.durationSec, remainingM: best.distanceM },
-    guidance: armGuidance(best.guidance, 0, true),
-    lastDecision: null,
-  }
-  const step = drive(started, fix, nowMs, opts)
-  return { state: step.state, effects: [{ type: 'follow-route', geometry: best.geometry }, ...step.effects] }
+  return begin(state, best, routes, fix, nowMs, opts)
 }
 
 /** A check, or a search for a new route, has come back. */
@@ -621,7 +660,10 @@ function checked(
  *
  * - **start**: watch the position, hold the screen awake, and say a few words
  *   at once (the tap is what lets a phone browser speak later).
- * - **fix**: the first good one asks for a route from there. While driving,
+ * - **fix**: the first good one starts the drive on the route picked on the
+ *   plan screen when it is on that route's line (a side-street route too:
+ *   the plan's answer counts as the first, so the first check is a poll
+ *   interval later); otherwise it asks for a route from there. While driving,
  *   each one moves the car (tracking.ts); arriving ends the drive; being off
  *   the route (the tracker's verdict, never one fix) says so and asks for a
  *   new route at once; a turn prompt that has become due is spoken; and a
@@ -645,7 +687,14 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
     case 'start': {
       if (active) return { state, effects: [] }
       return {
-        state: { ...LIVE_IDLE, status: 'locating', destination: event.destination, startedAtMs: event.nowMs, muted: state.muted },
+        state: {
+          ...LIVE_IDLE,
+          status: 'locating',
+          destination: event.destination,
+          startedAtMs: event.nowMs,
+          picked: drivable(event.route) ? event.route : null,
+          muted: state.muted,
+        },
         effects: [
           { type: 'set-muted', muted: state.muted },
           { type: 'prime-speech', text: SPOKEN.started },
@@ -679,6 +728,8 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
         return { state: { ...state, gpsNote: note, tracking }, effects: [] }
       }
       if (state.status === 'locating') {
+        const onPicked = startOnPicked(state, event.fix, event.nowMs, opts)
+        if (onPicked !== null) return onPicked
         const located: LiveState = { ...state, status: 'planning', lastFix: event.fix, gpsNote: null }
         return request(located, 'plan', event.nowMs, opts)
       }
