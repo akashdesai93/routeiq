@@ -599,8 +599,11 @@ How the points are chosen: the fastest candidate's surface-street stretches (eve
 outside its freeway spans, with the first and last kilometer cut off) are taken longest
 first, and each is probed at its middle, square to the route, on both sides. A point that
 lands near any known route is moved further out or dropped, since it would only repeat
-that route. The first side of every stretch comes before any second side, so a small
-budget spreads over the trip. Unknown road kinds count as surface street. Freeway-only
+that route, and a point within the endpoint clearance of the origin or destination in a
+straight line is skipped too (a stretch can bend back toward an end). Within a stretch the
+side with more room from the other known routes goes first. The first side of every stretch
+comes before any second side, so a small budget spreads over the trip. Unknown road kinds
+count as surface street, and so does a freeway span with a NaN bound or no length. Freeway-only
 trips and trips under 3 km get no points. RouteCandidate has no congestion or
 per-segment times yet, so the longest stretch stands in for the slowest.
 
@@ -608,7 +611,7 @@ per-segment times yet, so the longest stretch stands in for the slowest.
 | --- | --- | --- |
 | `maxPoints` | 3 | Most via points returned (each one is a Directions request later) |
 | `minTripM` | 3000 m | Shorter trips get no probes |
-| `endpointClearanceM` | 1000 m | No probing this close to the origin or destination |
+| `endpointClearanceM` | 1000 m | No probing this close to the origin or destination (along the route for the stretch, straight-line for the point) |
 | `minStretchM` | 1500 m | Shortest surface-street stretch worth probing |
 | `offsetsM` | 500, 800 m | Distances from the route tried per side, nearest first |
 | `clearOfRoutesM` | 250 m | A point this close to any known route is not used |
