@@ -205,10 +205,21 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       11a (done, Nov 11, 2026): `selectViaPoints` in `src/core/probe.ts` picks up to
       three points 500 or 800 m to either side of the fastest route's longest
       surface-street stretches, clear of known routes and of both ends, with every
-      threshold in `DEFAULT_PROBE_OPTIONS` (README, Side-street probing). Open for 11b:
-      the Directions request with a via, the `source: 'probe'` tag and the budget.
+      threshold in `DEFAULT_PROBE_OPTIONS` (README, Side-street probing).
       RouteCandidate has no congestion annotation, so "slowest" is approximated by
       "longest"; adding `annotations=congestion` to the adapter would sharpen it.
+      11b (done, Nov 11, 2026, plan screen): `planProbes` cuts the points to
+      `DEFAULT_PROBE_BUDGET` (2 requests per plan, 800 ms after the main routes, none
+      for freeway-only trips), `fetchProbeRoute` asks origin → via → destination on
+      `driving-traffic` with the via as a silent waypoint (`waypoints=0;2`), failures
+      (NoSegment included) are dropped, and `mergeProbeRoutes` adds the new paths,
+      tagged `source: 'probe'`, dropping any that match a known route by path. Ranking
+      is unchanged; RoutePanel marks them "via side streets". e2e:
+      `e2e/sidestreets.spec.ts`. Open for later: probes in the reroute engine (#5);
+      a probe whose via snaps to a dead end can come back as a known route plus a short
+      out-and-back spur, which the 10 m path match does not catch (it is ranked by its
+      worse ETA, so it never wins on that alone); no `radiuses` limit is sent, so a via
+      far off-road snaps to whatever road is nearest.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

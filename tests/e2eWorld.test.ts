@@ -40,4 +40,28 @@ describe('e2e road network', () => {
     expect(result.ok).toBe(true)
     expect(world.lastOffered.map((r) => r.name)).toEqual(['off-route'])
   })
+
+  it('answers a via request along the road nearest the via, S only when the world has it, NoSegment far from every road', () => {
+    const withS = new World(UPTOWN, INDIAN_LAND, { sideStreet: true })
+    withS.directions(UPTOWN, FREE_FLOW, 1)
+    const offered = withS.lastOffered.map((r) => r.name)
+    expect(offered).not.toContain('S')
+    const a = withS.cornersOf('A')
+    const middle = along(a, 12_950)
+    // 500 m to the right of A's middle (west, heading south): 200 m from S, 500 m from A.
+    const west = sideStep(middle.point, middle.headingDeg, -500)
+    const viaS = withS.through(UPTOWN, west, FREE_FLOW, 1)
+    expect(viaS.road).toBe('S')
+    const parsed = parseDirections(viaS.answer)
+    expect(parsed.ok && parsed.routes).toHaveLength(1)
+    // In free flow S is slower than all three of Mapbox's routes.
+    expect(viaS.durationSec!).toBeGreaterThan(Math.max(...withS.lastOffered.map((r) => r.durationSec)))
+    expect(withS.lastOffered.map((r) => r.name)).toEqual(offered)
+    // Without S the same via snaps back onto A.
+    expect(world.through(UPTOWN, west, FREE_FLOW, 1).road).toBe('A')
+    const far = world.through(UPTOWN, sideStep(middle.point, middle.headingDeg, -5000), FREE_FLOW, 1)
+    expect(far.road).toBeNull()
+    const noSegment = parseDirections(far.answer)
+    expect(!noSegment.ok && noSegment.kind).toBe('no-segment')
+  })
 })

@@ -13,13 +13,24 @@
 // road nearest the car, as Mapbox does. A request from off every route (a wrong
 // turn) gets a short connector back onto A, then the rest of A.
 //
+//   S  "Parallel Street": a side street Mapbox never offers among its three. Where A
+//      jogs 300 m east for the middle half of the trip, S keeps straight on, so it is
+//      shorter but slower in free flow. It exists only in a world made with
+//      `{ sideStreet: true }`, and only a request with a via point (a side-street probe,
+//      see `through`) can reach it.
+//
+// A request with a via point is answered the way Mapbox snaps a via onto the
+// nearest road: one route along whichever road passes closest to the via (so a
+// via beside A comes back as A itself), or NoSegment when no road is near.
+//
 // How long each stretch takes is set by a Traffic function, so a scenario can
 // script "a jam on A from the third request on" without touching the geometry.
 // Nothing here is a real road or a real place; only O and D are, and those
 // come from the app (public landmarks in the scenarios).
 
 export type LngLat = [number, number]
-export type RouteName = 'A' | 'B' | 'C' | 'off-route'
+export type RouteName = 'A' | 'B' | 'C' | 'S' | 'off-route'
+type RoadName = 'A' | 'B' | 'C' | 'S'
 
 /** A point in the trip's own frame: `f` is the share of the way from O to D, `side` is meters to the left (+) or right (-). */
 export interface FramePoint {
@@ -32,7 +43,9 @@ export type Traffic = (route: RouteName, at: FramePoint, n: number) => number
 
 // A is the fastest by about a minute in free flow, more than the 30 s within which
 // the signal count breaks ties, so the recommended route is always A.
-const BASE_PACE: Record<RouteName, number> = { A: 1 / 22, B: 1 / 23, C: 1 / 22.5, 'off-route': 1 / 12 }
+// S's own stretch (the middle half, where it leaves A) is a slower street: in free
+// flow S is about 1.5 minutes behind A and last of all four.
+const BASE_PACE: Record<RouteName, number> = { A: 1 / 22, B: 1 / 23, C: 1 / 22.5, S: 1 / 18, 'off-route': 1 / 12 }
 
 /** Free-flowing traffic everywhere: each route at its usual pace. */
 export const FREE_FLOW: Traffic = (route) => BASE_PACE[route]
@@ -41,14 +54,29 @@ const ROAD_NAMES: Record<RouteName, string> = {
   A: 'Main Corridor',
   B: 'East Loop',
   C: 'West Loop',
+  S: 'Parallel Street',
   'off-route': 'Side Street',
 }
 
 // Corners as (share of the trip, meters to the left). Detours scale down on short trips.
-const CORNERS: Record<'A' | 'B' | 'C', readonly (readonly [number, number])[]> = {
+const CORNERS: Record<RoadName, readonly (readonly [number, number])[]> = {
   A: [[0, 0], [0.25, 0], [0.25, 300], [0.75, 300], [0.75, 0], [1, 0]],
   B: [[0, 0], [0.25, 0], [0.25, 300], [0.4, 300], [0.4, 1500], [0.85, 1500], [0.85, 0], [1, 0]],
   C: [[0, 0], [0.25, 0], [0.25, 300], [0.55, 300], [0.55, -1200], [0.9, -1200], [0.9, 0], [1, 0]],
+  S: [[0, 0], [0.25, 0], [0.75, 0], [1, 0]],
+}
+
+/** Mapbox's own answer: the three routes it offers. S is never among them. */
+const OFFERED: readonly RoadName[] = ['A', 'B', 'C']
+
+/** A via point farther than this from every road gets NoSegment (Mapbox's snapping radius stand-in). */
+const VIA_SNAP_M = 1000
+
+/** Where a route runs along A's line: A's own stretches, whichever route drives them. */
+function onA(f: number, f2: number, side: number, side2: number): boolean {
+  if (side !== side2) return false
+  if (side === 300) return f >= 0.25 && f2 <= 0.75
+  return side === 0 && (f2 <= 0.25 || f >= 0.75)
 }
 
 const M_PER_DEG = 111_195
@@ -102,7 +130,10 @@ export class World {
   private readonly frame: Frame
   private readonly roads: readonly Road[]
 
-  constructor(origin: LngLat, destination: LngLat) {
+  private readonly sideStreet: boolean
+
+  constructor(origin: LngLat, destination: LngLat, options: { sideStreet?: boolean } = {}) {
+    this.sideStreet = options.sideStreet === true
     this.origin = origin
     this.destination = destination
     this.frame = frameOf(origin, destination)
@@ -116,7 +147,7 @@ export class World {
       const s = side * scale
       return this.frame.toLngLat(along * ux - s * uy, along * uy + s * ux)
     }
-    this.roads = (['A', 'B', 'C'] as const).map((name) => {
+    this.roads = (['A', 'B', 'C', 'S'] as const).map((name) => {
       const corners = CORNERS[name].map(([f, side], i, all) =>
         i === 0 ? origin : i === all.length - 1 ? destination : at(f, side),
       )
@@ -124,7 +155,7 @@ export class World {
       const legNames = corners.slice(0, -1).map((_, i) => {
         const [f, side] = CORNERS[name][i]!
         const [f2, side2] = CORNERS[name][i + 1]!
-        const alongA = side === side2 && (side === 0 || side === 300)
+        const alongA = onA(f, f2, side, side2)
         const acrossA = f === f2 && (f === 0.25 || f === 0.75) && Math.max(Math.abs(side), Math.abs(side2)) <= 300
         if (alongA) return ROAD_NAMES.A
         if (acrossA) return 'Cross Street'
@@ -148,6 +179,7 @@ export class World {
   directions(from: LngLat, traffic: Traffic, n: number): DirectionsJson {
     const offered: { road: Road; body: RouteJson }[] = []
     for (const road of this.roads) {
+      if (!OFFERED.includes(road.name as RoadName)) continue
       const p = project(this.frame, road.corners, from)
       if (p.offM > ON_ROAD_M) continue
       const rest = restOf(road, p)
@@ -174,7 +206,30 @@ export class World {
   /** What the last answer offered, fastest first: what a driver who follows the app ends up driving. */
   lastOffered: readonly { name: RouteName; corners: readonly LngLat[]; durationSec: number }[] = []
 
-  private road(name: 'A' | 'B' | 'C'): Road {
+  /**
+   * The answer to a request from `from` through `via` (a side-street probe):
+   * one route along the road that passes nearest the via, as Mapbox snaps a
+   * via onto the road network, from the point on it nearest `from`. A via next
+   * to a road Mapbox already offered comes back as that road. NoSegment when
+   * no road is within VIA_SNAP_M. S is a road only in a world made with
+   * `sideStreet`. Leaves lastOffered alone: a probe is not what the car drives.
+   */
+  through(from: LngLat, via: LngLat, traffic: Traffic, n: number): { answer: DirectionsJson | NoSegmentJson; road: RouteName | null; durationSec: number | null } {
+    let best: { road: Road; offM: number } | null = null
+    for (const road of this.roads) {
+      if (road.name === 'S' && !this.sideStreet) continue
+      const offM = project(this.frame, road.corners, via).offM
+      if (best === null || offM < best.offM - 0.01) best = { road, offM }
+    }
+    if (best === null || best.offM > VIA_SNAP_M) {
+      return { answer: { code: 'NoSegment', message: 'Could not find a matching segment for input coordinates', routes: [] }, road: null, durationSec: null }
+    }
+    const rest = restOf(best.road, project(this.frame, best.road.corners, from))
+    const body = this.routeJson(rest, traffic, n)
+    return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: rest.name, durationSec: body.duration }
+  }
+
+  private road(name: RoadName): Road {
     return this.roads.find((r) => r.name === name)!
   }
 
@@ -199,7 +254,9 @@ export class World {
         const mid = this.frame.toFrame([(piece[k - 1]![0] + piece[k]![0]) / 2, (piece[k - 1]![1] + piece[k]![1]) / 2])
         stepM += m
         // A way back after a wrong turn is a slow side street, then A again.
-        const paceOf: RouteName = road.name === 'off-route' && i > 0 ? 'A' : road.name
+        // S drives A's own road before and after its middle half.
+        const onSharedA = road.name === 'S' && (mid.f < 0.25 || mid.f > 0.75)
+        const paceOf: RouteName = (road.name === 'off-route' && i > 0) || onSharedA ? 'A' : road.name
         stepSec += m * traffic(paceOf, mid, n)
         typical += m * BASE_PACE[paceOf]
       }
@@ -382,6 +439,12 @@ export interface DirectionsJson {
   uuid: string
   waypoints: never[]
   routes: RouteJson[]
+}
+/** Mapbox's answer (HTTP 200) when a coordinate is too far from any road. */
+export interface NoSegmentJson {
+  code: 'NoSegment'
+  message: string
+  routes: never[]
 }
 
 /** The point `alongM` meters along a corner list and the heading there, for the fake GPS. */

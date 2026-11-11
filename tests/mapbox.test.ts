@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
 import { parseDirections, type DirectionsResult } from '../src/providers/mapbox/adapter.ts'
-import { buildDirectionsUrl, fetchDirections, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
+import { buildDirectionsUrl, fetchDirections, fetchProbeRoute, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
 
 // Hand-written bodies shaped like Directions API v5 responses. No test here touches the network.
 function fixture(name: string): unknown {
@@ -547,5 +547,51 @@ describe('fetchDirections', () => {
     const result = await fetchDirections({ ...where, origin: [NaN, NaN], fetchImpl })
     expect(failureOf(result).kind).toBe('malformed')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('fetchProbeRoute (side-street probes)', () => {
+  const via = [-80.84, 35.18] as const
+  const where = { origin: UPTOWN_CHARLOTTE.position, via, destination: SOUTHPARK.position, token: TOKEN }
+
+  function answer(status: number, body: unknown) {
+    const urls: string[] = []
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return Promise.resolve(new Response(typeof body === 'string' ? body : JSON.stringify(body), { status }))
+    }) as typeof fetch
+    return { fetchImpl, urls }
+  }
+
+  it('asks driving-traffic for origin, via, destination with the via as a silent waypoint, and returns one route', async () => {
+    const { fetchImpl, urls } = answer(200, OK)
+    const route = await fetchProbeRoute({ ...where, fetchImpl })
+    expect(route).not.toBeNull()
+    expect(urls).toHaveLength(1)
+    const url = new URL(urls[0]!)
+    expect(url.pathname).toContain('/directions/v5/mapbox/driving-traffic/')
+    expect(decodeURIComponent(url.pathname).split('/').at(-1)!.split(';')).toHaveLength(3)
+    expect(url.searchParams.get('waypoints')).toBe('0;2')
+    expect(url.searchParams.get('alternatives')).toBe('false')
+    expect(url.searchParams.get('steps')).toBe('true')
+  })
+
+  it('drops NoSegment, NoRoute, HTTP, network and abort failures as null, never throwing', async () => {
+    const noSegment = { code: 'NoSegment', message: 'Could not find a matching segment for input coordinates' }
+    expect(await fetchProbeRoute({ ...where, ...answer(200, noSegment) })).toBeNull()
+    expect(await fetchProbeRoute({ ...where, ...answer(200, NO_ROUTE) })).toBeNull()
+    expect(await fetchProbeRoute({ ...where, ...answer(429, { message: 'Too Many Requests' }) })).toBeNull()
+    expect(await fetchProbeRoute({ ...where, ...answer(500, 'down') })).toBeNull()
+    const offline = (() => Promise.reject(new TypeError('Failed to fetch'))) as typeof fetch
+    expect(await fetchProbeRoute({ ...where, fetchImpl: offline })).toBeNull()
+    const controller = new AbortController()
+    controller.abort()
+    expect(await fetchProbeRoute({ ...where, signal: controller.signal, ...answer(200, OK) })).toBeNull()
+  })
+
+  it('makes no request for a via that is not a coordinate (it would come back as the plain route)', async () => {
+    const { fetchImpl, urls } = answer(200, OK)
+    expect(await fetchProbeRoute({ ...where, via: [Number.NaN, 35.18], fetchImpl })).toBeNull()
+    expect(urls).toHaveLength(0)
   })
 })

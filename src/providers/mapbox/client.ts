@@ -1,4 +1,4 @@
-import { isValidLngLat, type LngLat } from '../../core/index.ts'
+import { isValidLngLat, type LngLat, type RouteCandidate } from '../../core/index.ts'
 import { tokenErrorHelp } from '../../config.ts'
 import { parseDirections, type DirectionsResult } from './adapter.ts'
 
@@ -159,4 +159,33 @@ export async function fetchDirections(options: FetchDirectionsOptions): Promise<
 function redact(result: DirectionsResult, token: string): DirectionsResult {
   if (result.ok || token === '' || !result.message.includes(token)) return result
   return { ...result, message: result.message.replaceAll(token, '[token]') }
+}
+
+export interface FetchProbeRouteOptions {
+  origin: LngLat
+  /** The point beside the fastest route to go through (see planProbes in core/probe.ts). */
+  via: LngLat
+  destination: LngLat
+  token: string
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * One side-street probe: origin → via → destination on driving-traffic, the
+ * via sent as a silent waypoint (`waypoints=0;2`, see buildDirectionsUrl), so
+ * the answer is one leg with no stop at the via and its ETA is a drive
+ * straight through. Mapbox docs (Directions, `waypoints`, checked Nov 2026):
+ * "guide the path of the route without introducing additional legs".
+ *
+ * Null for anything but a usable route: NoSegment (the via is too far from a
+ * road), NoRoute, an HTTP or network error, rate limiting, an abort. A probe
+ * is extra, so its failure is dropped silently and never reaches the user.
+ */
+export async function fetchProbeRoute(options: FetchProbeRouteOptions): Promise<RouteCandidate | null> {
+  const { origin, via, destination, token, signal, fetchImpl } = options
+  // buildDirectionsUrl leaves a bad via out, which would ask for the plain trip instead.
+  if (!isValidLngLat(via)) return null
+  const result = await fetchDirections({ origin, destination, token, via: [{ point: via }], signal, fetchImpl })
+  return result.ok ? (result.routes[0] ?? null) : null
 }

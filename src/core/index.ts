@@ -9,6 +9,7 @@ export type {
   Place,
   RankedRoute,
   RouteCandidate,
+  RouteSource,
   RouteIntersection,
   RouteSignal,
   SignalCoverage,
@@ -179,8 +180,12 @@ export {
   type HandoffWaypoint,
 } from './handoff.ts'
 export {
+  DEFAULT_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
+  mergeProbeRoutes,
+  planProbes,
   selectViaPoints,
+  type ProbeBudget,
   type ProbeOptions,
   type ProbeSide,
   type ViaPoint,

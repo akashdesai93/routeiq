@@ -168,6 +168,11 @@ export function RoutePanel({
               <span className="route-name">
                 {`Route ${rank}`}
                 {rank === 1 && <span className="route-badge"> Recommended</span>}
+                {route.source === 'probe' && (
+                  <span className="route-source" title="Found by asking for the trip through a point beside the fastest route; Mapbox did not offer it among its own routes.">
+                    via side streets
+                  </span>
+                )}
               </span>
               <span className="route-eta">{formatDuration(route.durationSec)}</span>
               <span className="route-distance">{formatDistance(route.distanceM)}</span>

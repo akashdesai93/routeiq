@@ -43,6 +43,8 @@ const fixture = (name: string) => readFileSync(`tests/fixtures/${name}`, 'utf8')
 export interface Outside {
   /** Traffic on the made-up road network. Default: free flow. */
   traffic?: Traffic
+  /** The road network has Parallel Street (S), a side street Mapbox never offers among its three. Default: no. */
+  sideStreet?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
   mapboxStatus?: number
   /** Answers an Overpass tile query. Default: 504 (busy). */
@@ -77,6 +79,8 @@ export class App {
   directionsRequests = 0
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
+  /** Side-street probes (requests with a via point), in order: the road each one came back on, null for NoSegment. */
+  readonly probes: { forRequest: number; road: string | null; durationSec: number | null }[] = []
   readonly unexpected: string[] = []
   outside: Outside = {}
   private shot = 0
@@ -141,11 +145,15 @@ export class App {
   /** Attaches what the made-up traffic server answered to each route request. */
   async attachAnswers() {
     if (this.answers.length === 0) return
-    const names: Record<string, string> = { A: 'A (Main Corridor)', B: 'B (East Loop)', C: 'C (West Loop)', 'off-route': 'way back' }
+    const names: Record<string, string> = { A: 'A (Main Corridor)', B: 'B (East Loop)', C: 'C (West Loop)', S: 'S (Parallel Street)', 'off-route': 'way back' }
+    const minutes = (sec: number) => `${(sec / 60).toFixed(1)} min`
     const text = this.answers
       .map(({ n, routes }) => {
-        const offered = routes.map((r) => `${names[r.name] ?? r.name} ${(r.durationSec / 60).toFixed(1)} min`).join(', ')
-        return `request ${String(n).padStart(2)}: ${offered}`
+        const offered = routes.map((r) => `${names[r.name] ?? r.name} ${minutes(r.durationSec)}`).join(', ')
+        const probes = this.probes
+          .filter((p) => p.forRequest === n)
+          .map((p) => (p.road === null ? 'NoSegment' : `${names[p.road] ?? p.road} ${minutes(p.durationSec ?? 0)}`))
+        return `request ${String(n).padStart(2)}: ${offered}${probes.length > 0 ? `\n   probes: ${probes.join(', ')}` : ''}`
       })
       .join('\n')
     await this.info.attach('route answers', { body: text, contentType: 'text/plain' })
@@ -258,20 +266,30 @@ export class App {
     const url = new URL(request.url())
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue()
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
-    const { mapboxStatus, traffic = FREE_FLOW, overpass } = this.outside
+    const { mapboxStatus, traffic = FREE_FLOW, overpass, sideStreet = false } = this.outside
 
     if (url.hostname === 'api.mapbox.com') {
       if (mapboxStatus !== undefined) return route.fulfill({ status: mapboxStatus, json: { message: 'Not Authorized - Invalid Token' } })
       if (url.pathname.startsWith('/styles/v1/')) return route.fulfill({ json: BLANK_STYLE })
       if (url.pathname.startsWith('/directions/v5/mapbox/driving-traffic/')) {
         const coords = decodeURIComponent(url.pathname.split('/').at(-1)!).split(';')
-        const [from, to] = coords.map((c) => c.split(',').map(Number) as LngLat)
-        if (from === undefined || to === undefined) return route.fulfill({ status: 422, json: { code: 'InvalidInput' } })
+        const points = coords.map((c) => c.split(',').map(Number) as LngLat)
+        const from = points[0]
+        const to = points.at(-1)
+        if (from === undefined || to === undefined || points.length < 2) return route.fulfill({ status: 422, json: { code: 'InvalidInput' } })
         const key = to.join(',')
         let world = this.worlds.get(key)
         if (world === undefined) {
-          world = new World(from, to)
+          world = new World(from, to, { sideStreet })
           this.worlds.set(key, world)
+        }
+        // A plan-screen side-street probe: one via and no bearings. The drive's own path check
+        // (baselineProbe) also sends vias, but from a moving car, with the heading as `bearings`.
+        if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && !url.searchParams.has('bearings')) {
+          // Through the via, answered with the traffic of the request it belongs to.
+          const probe = world.through(from, points[1]!, traffic, this.directionsRequests)
+          this.probes.push({ forRequest: this.directionsRequests, road: probe.road, durationSec: probe.durationSec })
+          return route.fulfill({ json: probe.answer })
         }
         this.directionsRequests++
         const json = world.directions(from, traffic, this.directionsRequests)
