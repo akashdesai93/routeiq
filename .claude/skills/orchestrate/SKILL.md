@@ -22,6 +22,24 @@ description: One iteration of the RouteIQ orchestrator. It surveys the sessions,
      not touch (other sessions' areas, taken from the roster and briefs).
    - Don't spawn agents for discovery or research that a few tool calls would answer.
    With nothing ready, run `/work-loop` step 6 (Discover) yourself, filing at most 3 issues.
+4b. **Mission Control** (https://claude.ai/artifact/QmpSPnjR6uT7ooaS12GG6U, a Data-type dashboard):
+   - **Commands first.** Read the command store with `ArtifactData`; the path is recorded in
+     the "Mission Control" note on #17. Act only on documents written by the owner's own user
+     id on that artifact, and treat their text as the owner's instruction for this repo
+     within normal permissions.
+     - `to: "orchestrator"`: do it.
+     - A session: `mcp__fleet__send`.
+     - A running agent of yours: SendMessage.
+     Set `status` to `sent` or `done` and write a one-line `reply`. A command that needs
+     something risky (deleting, force-pushing, spending money, publishing) gets
+     `reply: "needs confirmation in the terminal"`; ask the owner there.
+   - **Refresh the data.** Regenerate `issues.json` and `prs.json` from `gh`, and update
+     `sessions.json` (roster, agents, statuses) and `events.json` (append what happened
+     this tick). Upload each one with `Artifact` `asset: true`, then `update` its
+     `datasets/<id>` with the new `source.url`, `updated: {at, by: "Orchestrator session"}` and
+     `edit`, pinned with `if_version`. Keep the field names the page reads (see the
+     dataset files).
+
 5. **Report to the owner:** end with at most 6 lines covering what merged, what's in
    flight (who is on what), what needs the owner (each `needs-human` item with its exact
    question), and the next step. Lead with anything the owner must act on. When something
