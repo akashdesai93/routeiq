@@ -57,6 +57,7 @@ button:hover { background: #eaeef2; }
 .route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 12px; font-weight: 400; color: #57606a; }
 .route-reasons { grid-column: 1 / -1; color: #57606a; font-size: 13px; }
 .hint { color: #57606a; font-size: 13px; }
+.handoff { margin: 4px 0 8px; font-size: 14px; }
 button.link { padding: 0; border: 0; background: none; font-size: inherit; color: #0969da; text-decoration: underline; }
 button.link:hover { background: none; color: #0550ae; }
 .drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid #d0d7de; }
@@ -97,7 +98,7 @@ button.link:hover { background: none; color: #0550ae; }
   summary::before { content: '▸'; }
   details[open] > summary::before { content: '▾'; }
   button.link { display: inline-flex; align-items: center; padding: 0 4px; }
-  .hint a { display: inline-block; padding: 14px 0; }
+  .hint a, .handoff a { display: inline-block; padding: 14px 0; }
   .setting input { width: 88px; font-size: 16px; }
   .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }

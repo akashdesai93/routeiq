@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  CURRENT_LOCATION_ID,
   DEFAULT_TRIP,
   formatLatLng,
   lineFrom,
@@ -242,6 +243,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
             signalDataDate={routing.signalDataDate}
             onStartDrive={startLive}
             canStartDrive={live.canStart}
+            originIsDeviceLocation={pins.origin.id === CURRENT_LOCATION_ID}
             startDriveExtra={import.meta.env.DEV ? <ReplayPanel setup={replaySetup} onChange={setReplaySetup} /> : null}
           >
               <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />

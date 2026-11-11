@@ -587,6 +587,56 @@ fresh route ("current route is no longer offered"); further on the same road the
 was exact at every check. Whether Mapbox really drops the route there or the 10 m
 path match is too strict for that stretch has not been established.
 
+## Route hand-off (Google Maps and Waze)
+
+The selected route in the list has two links, "Open in Google Maps" and "Open in Waze".
+Both open in a new tab (on a phone, the app when it is installed). Google Maps and Waze
+both run on CarPlay, so this is the way to drive a RouteIQ-chosen route in the car before
+RouteIQ has a CarPlay app of its own.
+
+**Google Maps** chooses its own route between two points, so RouteIQ pins it with
+waypoints (`handoffWaypoints`, src/core/handoff.ts, pure). The accepted route is sampled
+every 25 m and compared with each alternative; wherever an alternative leaves it for at
+least 300 m, a point goes on the accepted route 150 m past the split, where the
+alternative cannot be (never in a short stretch the alternative shares with it). One
+point serves every alternative it rules out. When there are more splits than Google
+allows, each alternative's longest divergence is pinned first, so as many alternatives
+as possible are ruled out, and the rest go to the next longest divergences.
+No point goes within 500 m of either end, along the route or in a straight line. Routes
+with no split (identical roads, or no alternatives) get no waypoints.
+
+The link uses the official Maps URLs directions form
+(`https://www.google.com/maps/dir/?api=1&origin=…&destination=…&travelmode=driving&waypoints=…`),
+with coordinates as `lat,lng` to six decimals and every value percent-encoded, so the
+comma is `%2C` and the pipe between waypoints is `%7C`. Limits from the docs: up to three
+waypoints in a mobile browser and nine elsewhere, and 2,048 characters per URL. RouteIQ
+uses three on anything that looks like a phone or tablet, nine otherwise, and if a URL
+would pass 2,048 characters it drops waypoints least decisive first. Source:
+[Google Maps URLs, Directions](https://developers.google.com/maps/documentation/urls/get-started#directions-action)
+(checked Nov 11, 2026).
+
+**Google treats waypoints as stops.** A route through them uses the roads RouteIQ chose,
+but between the points Google picks its own turns, and it announces each point as a stop
+on the way. It pins the road choice, not every turn. Splits RouteIQ never saw (Mapbox
+returns at most three routes) are not pinned either.
+
+**Waze** deep links take a destination and nothing else
+(`https://waze.com/ul?ll=lat%2Clng&navigate=yes`), so the Waze link starts navigation to
+the destination and Waze picks the whole route. Source:
+[Waze deep links](https://developers.google.com/waze/deeplinks) (checked Nov 11, 2026).
+
+| `DEFAULT_HANDOFF_OPTIONS` | Default | Meaning |
+| --- | --- | --- |
+| `maxWaypoints` | 3 | Most waypoints (the UI passes 3 on mobile, 9 elsewhere; never more than 9) |
+| `sampleStepM` | 25 m | Spacing of the samples along the accepted route |
+| `sharedToleranceM` | 30 m | A sample this close to an alternative counts as shared with it |
+| `minDivergenceM` | 300 m | Shortest divergence that counts as a split |
+| `minSharedM` | 200 m | A shared stretch shorter than this (a crossing) does not end a divergence |
+| `afterSplitM` | 150 m | How far past the split the waypoint goes |
+| `endpointClearanceM` | 500 m | No waypoint this close to the origin or destination |
+| `maxUrlLength` | 2048 | Google Maps URL length cap |
+| `coordinateDecimals` | 6 | Decimals in URL coordinates (about 0.1 m) |
+
 ## Side-street probing (planned)
 
 Mapbox Directions returns at most three routes, so a faster cut-through outside them is
@@ -747,6 +797,14 @@ the heading go to Mapbox as the origin of each route request, at most 60 times a
 plus a few when off the route. Spoken text is made on the device by the browser's own
 speech engine; RouteIQ sends it nowhere. The development replay uses a made-up position
 that starts at the origin pin, not the device's.
+
+**Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
+links. The tap opens a Google or Waze page (or app) with the trip in its address: for
+Google, the route's start and end and up to nine points along it; for Waze, the
+destination only. If the origin came from "Use my location", the Google link leaves the
+origin out and Google starts from its own reading of the device's position, so RouteIQ
+does not send that position (the first waypoint is at least 500 m from it). From then on Google's or Waze's own privacy terms apply. RouteIQ logs
+and stores none of it; the links are built on the device.
 
 **What you type.** The text typed into a search field is sent to Mapbox (Search Box
 API) to find places, once typing pauses and there are three characters or more, together
