@@ -58,6 +58,9 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`, `npm run pr
 extracts on disk) and `npm run seed:charlotte` (refreshes the City of Charlotte snapshot);
 see Data sources.
 
+CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, lint and tests on Node 24
+(Ubuntu) on every push to `main` and every pull request.
+
 ## Planning a trip
 
 The panel beside the map (above it on a phone) is the trip input.
