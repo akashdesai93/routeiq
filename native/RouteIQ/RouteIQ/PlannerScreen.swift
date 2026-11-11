@@ -8,6 +8,8 @@ import RouteIQKit
 struct PlannerScreen: View {
     @State private var plan: RoutePlan = .idle
     @State private var selectedId: String?
+    /// Bumped by "Try again". `.task(id:)` cancels the running load and starts a new one.
+    @State private var attempt = 0
 
     private let tokenStatus = MapboxToken.check(Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String)
 
@@ -23,7 +25,7 @@ struct PlannerScreen: View {
             routePanel
                 .frame(maxHeight: 320)
         }
-        .task { await load() }
+        .task(id: attempt) { await load() }
     }
 
     @ViewBuilder
@@ -42,7 +44,7 @@ struct PlannerScreen: View {
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message)
-                    Button("Try again") { Task { await load() } }
+                    Button("Try again") { attempt += 1 }
                 }
                 .padding()
             case .routes(let rows):
@@ -67,6 +69,8 @@ struct PlannerScreen: View {
             destination: DemoTrip.destination.position,
             token: token
         )
+        // A load that was replaced by a newer one leaves the screen to it.
+        if Task.isCancelled { return }
         plan = RoutePlan.from(result)
         selectedId = nil
     }

@@ -13,9 +13,11 @@ options:
 packages:
   # Navigation SDK v3 (guidance, CarPlay) from milestone 3 on. Linked now so
   # that CI proves it resolves and builds without a secret download token.
+  # Pinned exactly, like Maps: each Navigation release pins one exact Maps
+  # version, so the two move together, by hand.
   MapboxNavigation:
     url: https://github.com/mapbox/mapbox-navigation-ios
-    from: 3.34.2
+    exactVersion: 3.34.2
   # The Navigation SDK 3.34.2 pins Maps 11.34.2 exactly; the app uses the
   # Maps SwiftUI API directly for the route map.
   MapboxMaps:
