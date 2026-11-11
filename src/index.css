@@ -81,6 +81,8 @@ button.link:hover { background: none; color: #0550ae; }
 .drive-log-switch { font-weight: 600; background: #dafbe1; }
 .drive-log-note { color: #57606a; }
 .notice { margin: 24px 16px; padding: 16px; border: 1px solid #d4a72c; background: #fff8c5; border-radius: 6px; max-width: 640px; line-height: 1.5; }
+/* Help shown in place of the map takes the map's room, so the side panel stays at the right edge. */
+.main > .notice { flex: 1; align-self: flex-start; max-width: none; }
 /* Phone width: one scrolling column, the trip input above the map and the routes under it.
    .side dissolves so its two parts can sit either side of the map. The same 700px is in DrivePanel.tsx. */
 @media (max-width: 700px) {
@@ -89,6 +91,7 @@ button.link:hover { background: none; color: #0550ae; }
   .side { display: contents; }
   .plan { order: 1; flex: none; font-size: 14px; }
   .map, .main > .notice { order: 2; }
+  .main > .notice { flex: none; align-self: auto; }
   .map { flex: none; height: 46vh; height: 46dvh; min-height: 280px; }
   .panel { order: 3; flex: none; border-top: 1px solid #d0d7de; font-size: 14px; }
   /* Everything that is tapped is at least 44px high. */

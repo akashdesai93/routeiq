@@ -242,7 +242,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore }: 
             onRetrySignals={routing.retrySignals}
             signalDataDate={routing.signalDataDate}
             onStartDrive={startLive}
-            canStartDrive={live.canStart}
+            canStartDrive={live.canStart && !routing.tokenRejected}
             originIsDeviceLocation={pins.origin.id === CURRENT_LOCATION_ID}
             startDriveExtra={import.meta.env.DEV ? <ReplayPanel setup={replaySetup} onChange={setReplaySetup} /> : null}
           >
