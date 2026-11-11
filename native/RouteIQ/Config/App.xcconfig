@@ -1,0 +1,8 @@
+// Build settings shared by Debug and Release.
+//
+// MBX_ACCESS_TOKEN is the Mapbox PUBLIC token (pk.) the app runs with. It is
+// never committed: CI writes Secrets.xcconfig from the MAPBOX_PUBLIC_TOKEN
+// repository secret. Without it the app builds and opens, then says the
+// token is missing.
+MBX_ACCESS_TOKEN =
+#include? "Secrets.xcconfig"
