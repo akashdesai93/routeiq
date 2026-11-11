@@ -29,7 +29,8 @@ if (!existsSync(vite)) {
 execFileSync(process.execPath, [vite, 'build', '--outDir', www, '--emptyOutDir', '--logLevel', 'warn'], {
   cwd: repo,
   stdio: 'inherit',
-  env: { ...process.env, VITE_MAPBOX_TOKEN: '' },
+  // PAGES_BASE is the GitHub Pages build's sub-path; the shell always serves from the root.
+  env: { ...process.env, VITE_MAPBOX_TOKEN: '', PAGES_BASE: '' },
 });
 
 await build({

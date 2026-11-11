@@ -2,8 +2,17 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+// The path the site is served under. "/" for local dev, preview and e2e; the GitHub Pages
+// workflow sets PAGES_BASE=/routeiq/ (the site lives at https://<owner>.github.io/routeiq/).
+// Code that fetches the app's own files builds the URL from import.meta.env.BASE_URL.
+const base = process.env.PAGES_BASE || '/'
+if (!base.startsWith('/') || !base.endsWith('/')) {
+  throw new Error(`PAGES_BASE must start and end with "/" (got "${base}")`)
+}
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [react()],
   server: {
     // Bind to localhost only, so the dev server is not reachable from your network.

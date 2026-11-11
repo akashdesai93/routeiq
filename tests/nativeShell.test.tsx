@@ -464,11 +464,11 @@ describe('the shell token', () => {
   })
 
   it('in the shell, a rejected token points at "Change token", not at .env.local', () => {
-    expect(tokenErrorHelp(401, true)).toContain('Change token')
-    expect(tokenErrorHelp(403, true)).toContain('URL restrictions')
-    expect(tokenErrorHelp(401, true)).not.toContain('.env.local')
-    expect(tokenErrorHelp(500, true)).toBeNull()
-    expect(tokenErrorHelp(401, false)).toContain('.env.local')
+    expect(tokenErrorHelp(401, undefined, true)).toContain('Change token')
+    expect(tokenErrorHelp(403, undefined, true)).toContain('URL restrictions')
+    expect(tokenErrorHelp(401, undefined, true)).not.toContain('.env.local')
+    expect(tokenErrorHelp(500, undefined, true)).toBeNull()
+    expect(tokenErrorHelp(401, undefined, false)).toContain('.env.local')
   })
 })
 

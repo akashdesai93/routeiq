@@ -1,6 +1,6 @@
 import { signalTilesForRoute, type RouteCandidate, type SignalData } from './core/index.ts'
 import { isOsmSignalTile, osmSignalPoints, type OsmSignalTile } from './providers/osm/adapter.ts'
-import { OSM_BUNDLE_PATH } from './providers/osm/bundle.ts'
+import { osmBundleUrl } from './providers/osm/bundle.ts'
 import { createBundleLayer } from './providers/osm/bundleLayer.ts'
 import { createOverpassClient, isOverpassPause } from './providers/osm/client.ts'
 import {
@@ -70,7 +70,7 @@ export async function loadSignalData(
  */
 export const signalSources: SignalSources = {
   tiles: createTileSource({
-    bundle: createBundleLayer({ baseUrl: `${import.meta.env?.BASE_URL ?? '/'}${OSM_BUNDLE_PATH}` }),
+    bundle: createBundleLayer({ baseUrl: osmBundleUrl(import.meta.env?.BASE_URL ?? '/') }),
     cache: tileStoreFrom(indexedDbStore('routeiq-osm-signals', 'tiles', isOsmSignalTile)),
     network: overpassLayer(
       createOverpassClient({ pauseStore: indexedDbStore('routeiq-overpass-pause', 'pause', isOverpassPause) }),
