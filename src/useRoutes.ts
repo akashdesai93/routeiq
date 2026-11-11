@@ -32,6 +32,8 @@ export interface RoutesState {
   loading: boolean
   /** User-readable; null when there is nothing wrong. */
   error: string | null
+  /** True when Mapbox refused the token (401 or 403): every route request will fail the same way. */
+  tokenRejected: boolean
   select: (id: string) => void
   retry: () => void
   /** Signals on the selected route, in driving order, for the map. */
@@ -149,6 +151,7 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
     selectedId,
     loading: token !== null && result === null,
     error: result !== null && !result.ok ? result.message : null,
+    tokenRejected: result !== null && !result.ok && result.kind === 'token',
     select,
     retry,
     selectedSignals: (selectedId !== null && counted.signalsByRouteId.get(selectedId)) || NO_SIGNALS,

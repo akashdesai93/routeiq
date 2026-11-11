@@ -16,5 +16,11 @@ test('with a token Mapbox rejects, it says what to fix', async ({ app, page }) =
   await app.open()
   await expect(page.getByText('Mapbox rejected the token (401)').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('Recommended')).toHaveCount(0)
+  // Every route request would be refused the same way, so no drive can be started.
+  await expect(page.getByRole('button', { name: 'Start drive' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Start simulated drive' })).toBeDisabled()
+  // The help takes the map's place: the side panel stays at the right edge.
+  const side = (await page.locator('.side').boundingBox())!
+  expect(Math.round(side.x + side.width)).toBe(page.viewportSize()!.width)
   await app.snap('setup help: token rejected')
 })
