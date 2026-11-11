@@ -44,10 +44,10 @@ For each open, non-draft PR on `akashdesai93/routeiq`
      CI permissions or secrets. Name the PR in the next status update to the owner.
 6. Record each outcome on the status board (see the `status` skill).
 
-Never use `--admin`, never force-push, and never merge red CI.
+Never use `--admin`, never force-push, and never merge red CI. If GitHub Actions is down
+(runs queued with no jobs), ask the owner before merging on a local verify.
 
-**Temporary exception (owner, 2026-11-11):** while GitHub Actions is stuck account-wide
-(runs queued with 0 jobs), a PR may merge on a green **local verify** in a clean worktree
-(typecheck, lint with 0 errors, all tests) plus an independent review whose verdict is
-MERGE. Note `merged on local verify (Actions down)` in the merge comment. This ends
-as soon as Actions runs jobs again.
+**After every merge:** strip `ready`, `in-progress`, `review` and `blocked` from the closed
+issues (through the REST API, since `gh issue edit` hits a Projects-classic error). Then
+check `gh run list --branch main --limit 3`. If CI on main is red, stop merging, send a
+PushNotification to the owner, and file a p1 issue for it.
