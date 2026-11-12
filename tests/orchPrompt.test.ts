@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { dispatchComment, parseTemplate, renderPrompt, type RoleTemplate } from '../scripts/orch/prompt.mjs'
@@ -86,5 +87,26 @@ describe('dispatchComment', () => {
     expect(dispatchComment(load('builder'), { name: 'cloud-builder-84', issues: '84,85', by: 'local-orchestrator' })).toBe(
       'dispatch: cloud-builder-84 (cloud)\nrole: builder\nworking on: #84, #85\nby: local-orchestrator\n',
     )
+  })
+})
+
+// The owner's PC checks the repo out with CRLF (core.autocrlf), and prompt.mjs refused every
+// template there: "the template must start with a role template header".
+describe('a Windows checkout (CRLF)', () => {
+  const crlf = (text: string) => text.replace(/\r?\n/g, '\r\n')
+
+  it.each(roles)('%s parses and renders the same from CRLF files', (role) => {
+    const text = readFileSync(`${ROLES}/${role}.md`, 'utf8')
+    const tpl = parseTemplate(crlf(text))
+    if ('error' in tpl) throw new Error(`${role}: ${tpl.error}`)
+    expect(tpl).toEqual(load(role))
+    const input = { name: `cloud-${role}-1`, issues: '84', prs: '127', note: 'one\r\ntwo' }
+    expect(renderPrompt(tpl, input, crlf(rules))).toEqual(renderPrompt(load(role), { ...input, note: 'one\ntwo' }, rules))
+  })
+
+  it('keeps the templates and the orch scripts LF on every checkout (.gitattributes)', () => {
+    const files = [`${ROLES}/builder.md`, '.claude/orch/rules.md', 'scripts/orch/prompt.mjs', 'scripts/orch/lib/status.mjs', 'tests/orch/night-2026-11-12.json']
+    const out = execFileSync('git', ['check-attr', 'eol', '--', ...files], { encoding: 'utf8' })
+    for (const f of files) expect(out, f).toContain(`${f}: eol: lf`)
   })
 })
