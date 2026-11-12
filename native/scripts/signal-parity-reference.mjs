@@ -47,7 +47,6 @@ async function signalData(routes) {
     data: {
       primary: osmSignalPoints([...loaded.tiles.values(), ...loaded.partial.values()]),
       primaryTileIds: new Set(loaded.tiles.keys()),
-      gapFill: null,
     },
     missingTileIds: [...loaded.missing],
   }
