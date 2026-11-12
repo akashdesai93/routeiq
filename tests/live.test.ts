@@ -693,6 +693,12 @@ describe('checks that change nothing', () => {
     expect(s.spoken()).toEqual([])
   })
 
+  it('a check where the route driven is the fastest says so with a known saving of 0, for the diagnostics (#175)', () => {
+    const s = driving()
+    cruise(s, 130, (xM) => routesAt(xM, { A: 1300, B: 1420 }))
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'current-best', routes: 2, savingSec: 0 })
+  })
+
   it('staying is never spoken', () => {
     const s = driving()
     // A faster route that saves too little, at every check.
@@ -818,7 +824,7 @@ describe('switching by itself', () => {
     expect(effects.map((e) => e.type)).toEqual(['follow-route', 'speak'])
     expect(s.spoken().at(-1)).toBe(SPOKEN.keptPrevious)
     expect(s.state).toMatchObject({ switchBanner: null, undo: null, switches: [], declinedSwitches: 1 })
-    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous' })
+    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous', routes: null, savingSec: null })
     // As if the switch had not been made: no cooldown, but B is declined for noReturnSec (600 s).
     expect(s.state.engine.lastSwitchAtSec).toBeNull()
     expect(s.state.engine.declined).toHaveLength(1)

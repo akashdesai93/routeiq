@@ -264,7 +264,7 @@ public struct LiveState: Hashable, Sendable {
         public var atMs: Double
         /// How many routes that check's answer had; nil when none came back (or the previous route was kept).
         public var routes: Int?
-        /// What the alternative the engine considered saves against the route driven, like for like; nil when it could not compare.
+        /// What the alternative the engine considered saves against the route driven, like for like; 0 when none was faster (current-best); nil when it could not compare.
         public var savingSec: Double?
     }
 
@@ -1018,7 +1018,7 @@ public enum Live {
         next.request = nil
         next.engine = decision.nextState
         next.probes = Probe.rememberCheckProbes(state.probes, probes, decision, routes, alreadyCounted: probesCounted)
-        next.lastDecision = LiveState.Decision(action: decision.action, code: .reroute(decision.code), reason: reason, atMs: nowMs, routes: routes?.count, savingSec: decision.considered?.savingSec)
+        next.lastDecision = LiveState.Decision(action: decision.action, code: .reroute(decision.code), reason: reason, atMs: nowMs, routes: routes?.count, savingSec: decision.considered?.savingSec ?? (decision.code == .currentBest ? 0 : nil))
         guard let routes else { return LiveStep(state: next, effects: []) }
 
         next.candidates = routes

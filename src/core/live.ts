@@ -224,8 +224,9 @@ export interface LiveState {
   /**
    * The last decision. `routes`: how many routes that check's answer had; null when no answer
    * came back (or the driver kept the previous route). `savingSec`: what the alternative the
-   * engine considered saves against the route driven, like for like (RerouteAlternative.savingSec):
-   * negative when it is slower, null when the engine could not compare (unknown, never 0).
+   * engine considered saves against the route driven, like for like (RerouteAlternative.savingSec);
+   * 0 when the engine compared and none was faster ('current-best'); null when it could not
+   * compare or weighed no faster route (unknown, never 0).
    */
   readonly lastDecision: {
     readonly action: 'stay' | 'switch'
@@ -814,7 +815,7 @@ function checked(
     request: null,
     engine: decision.nextState,
     probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted),
-    lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs, routes: routes === null ? null : routes.length, savingSec: decision.considered?.savingSec ?? null },
+    lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs, routes: routes === null ? null : routes.length, savingSec: decision.considered?.savingSec ?? (decision.code === 'current-best' ? 0 : null) },
   }
   if (routes === null) return { state: next, effects: [] }
 

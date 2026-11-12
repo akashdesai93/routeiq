@@ -80,7 +80,7 @@ export interface DriveDiagnostics {
    * A drive check was decided (LiveState.lastDecision). `code`: its outcome, a word from
    * CHECK_OUTCOMES. `routes`: how many routes its answer had, null when none came back.
    * `savingSec`: what the alternative the engine considered saves against the route driven,
-   * like for like; negative when slower, null when the engine could not compare. The log
+   * like for like; 0 when none was faster, null when the engine could not compare. The log
    * tallies the outcomes, keeps the largest saving seen and notes when the outcome changes.
    */
   checked(code: unknown, routes: number | null, savingSec: number | null): void

@@ -788,6 +788,15 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.spoken(), [])
     }
 
+    // it('a check where the route driven is the fastest says so with a known saving of 0, for the diagnostics (#175)')
+    func testChecksThatChangeNothing_currentBestHasAKnownSavingOfZero() throws {
+        let s = driving()
+        cruise(s, 130) { xM in routesAt(xM, [.A: 1300, .B: 1420]) }
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.currentBest))
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertEqual(s.state.lastDecision?.savingSec, 0)
+    }
+
     // it('staying is never spoken')
     func testChecksThatChangeNothing_stayingIsNeverSpoken() throws {
         let s = driving()
@@ -933,6 +942,8 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertEqual(s.state.declinedSwitches, 1)
         XCTAssertEqual(s.state.lastDecision?.code, .keptPrevious)
+        XCTAssertNil(s.state.lastDecision?.routes)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         // As if the switch had not been made: no cooldown, but B is declined for noReturnSec (600 s).
         XCTAssertNil(s.state.engine.lastSwitchAtSec)
         XCTAssertEqual(s.state.engine.declined.count, 1)

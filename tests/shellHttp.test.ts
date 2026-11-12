@@ -424,13 +424,19 @@ describe('what each drive check concluded, in the diagnostics (so "was there a f
     expect(checkEvents[2]).toContain('check: the check failed (no answer)')
   })
 
-  it('keeps an unknown outcome as "other", a slower alternative as 0, and nothing that could be a place', () => {
+  it('says 0 s when every check found yours the fastest (a drive with nothing better, not "unknown")', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (let i = 0; i < 38; i++) log.checked('current-best', 3, 0)
+    expect(log.text()).toContain('best saving another route offered: 0 s')
+  })
+
+  it('keeps an unknown outcome as "other", and nothing that could be a place', () => {
     const log = createDriveDiagnostics(() => 0)
     log.checked('<script>', 3, null)
-    log.checked({ code: 'current-best' }, 99, -35.2)
+    log.checked({ code: 'current-best' }, 99, 12.6)
     const text = log.text()
     expect(text).toContain('checks: 2: other 2')
-    expect(text).toContain('best saving another route offered: 0 s')
+    expect(text).toContain('best saving another route offered: 13 s')
     expect(text).not.toMatch(/\d\.\d|-\d|script/)
   })
 

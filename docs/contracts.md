@@ -141,5 +141,5 @@ the declarations that changed.
   event now also turns down a route that is still being confirmed.
 - **7** (Nov 12, 2026, #175): `LiveState.lastDecision` gains `routes` (how many routes the
   check's answer had; null when none came back or the previous route was kept) and `savingSec`
-  (the considered alternative's like-for-like saving, `RerouteAlternative.savingSec`; null when
-  the engine could not compare). Read by the drive diagnostics; the reroute engine is unchanged.
+  (the considered alternative's like-for-like saving, `RerouteAlternative.savingSec`; 0 for
+  `current-best`, null when the engine could not compare). Read by the drive diagnostics; the reroute engine is unchanged.

@@ -1166,7 +1166,8 @@ plugin `RouteIQNative` is present, `src/device/native`):
   drive check concluded: a tally of the outcomes in words ("yours was the fastest",
   "another was faster, by less than the minimum saving", "waiting for the next check to
   confirm it" ...) and the best saving another route offered, in whole seconds, from the
-  reroute engine's own like-for-like comparison (unknown when it could not compare). Counts
+  reroute engine's own like-for-like comparison of the alternative it weighed (0 when yours
+  was the fastest, unknown when it could not compare). Counts
   and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
