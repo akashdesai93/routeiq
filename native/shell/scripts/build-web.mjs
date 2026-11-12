@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { BRIDGE_FILE, findTokens, injectBridge, usesRootPaths } from './web-checks.mjs';
+import { BRIDGE_FILE, findTokens, hasSimHook, injectBridge, SIM_FILE, usesRootPaths } from './web-checks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(root, '../..');
@@ -53,18 +53,23 @@ if (!existsSync(path.join(tiles, 'index.json'))) throw new Error('www/seed/osm-s
 const tileCount = readdirSync(tiles).filter((name) => name.endsWith('.json')).length - 1;
 if (tileCount < 1) throw new Error('www/seed/osm-signals has an index but no tiles.');
 
-// No token in anything that ships.
+// No token in anything that ships, and nothing of the simulator drive
+// (sim/prepare.mjs adds that afterwards, for the run in the iOS Simulator only).
 const leaks = [];
+const simHooks = [];
 const walk = (dir) => {
   for (const name of readdirSync(dir)) {
     const file = path.join(dir, name);
     if (statSync(file).isDirectory()) walk(file);
     else if (/\.(js|mjs|css|html|json|map|txt)$/.test(name)) {
-      for (const hit of findTokens(readFileSync(file, 'utf8'))) leaks.push(`${path.relative(www, file)}: ${hit}`);
+      const text = readFileSync(file, 'utf8');
+      for (const hit of findTokens(text)) leaks.push(`${path.relative(www, file)}: ${hit}`);
+      if (name === SIM_FILE || hasSimHook(text)) simHooks.push(path.relative(www, file));
     }
   }
 };
 walk(www);
 if (leaks.length > 0) throw new Error(`A Mapbox token was built into www/. Nothing may ship with one:\n  ${leaks.join('\n  ')}`);
+if (simHooks.length > 0) throw new Error(`The simulator drive's script is in the web build. It belongs in a simulator build only:\n  ${simHooks.join('\n  ')}`);
 
 console.log(`Web app built into www/: no token, bridge script added, ${tileCount} signal tiles.`);
