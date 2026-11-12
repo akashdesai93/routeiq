@@ -21,7 +21,8 @@ export function nativePositionSource(plugin: RouteIQNativePlugin, now: () => num
     start(onFix, onError) {
       let stopped = false
       const fixes = plugin.addListener('fix', (fix) => {
-        if (stopped) return
+        // A made-up position (a test drive that was not ended) is never taken for the GPS.
+        if (stopped || fix?.simulated === true) return
         if (!validFix(fix)) {
           onError('unavailable')
           return

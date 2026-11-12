@@ -87,6 +87,11 @@ export function ShellApp({ store }: { store: TextStore }) {
       <App
         key={status.token}
         status={status}
+        driveExtra={
+          <button type="button" className="live-diagnostics" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
+            Diagnostics
+          </button>
+        }
         barExtra={
           <span className="shell-actions">
             <button type="button" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
@@ -99,7 +104,7 @@ export function ShellApp({ store }: { store: TextStore }) {
         }
       />
       {/* Beside the app, not in place of it: opening it must not end a drive. */}
-      {diagnostics && <DriveDiagnosticsPanel onClose={() => setDiagnostics(false)} />}
+      {diagnostics && <DriveDiagnosticsPanel store={store} onClose={() => setDiagnostics(false)} />}
     </>
   )
 }

@@ -1078,10 +1078,24 @@ plugin `RouteIQNative` is present, `src/device/native`):
   messages, an abort cancels the native request. The native side takes
   `https://api.mapbox.com/` addresses only, follows no redirect, gives up after 20 s
   and never logs an address. Search and map tiles stay on the web view.
-- **Drive diagnostics** (top bar, shell only): an in-memory log with a Copy button of
-  what iOS let the app do: fixes and ticks received and the longest wait between them,
-  route requests with their times, spoken lines started and finished, and when the app
-  went to the background. Counts and timings only (`src/device/native/diagnostics.ts`).
+- **Drive diagnostics** (top bar, and "Diagnostics" in the drive view; shell only): a log
+  with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
+  ticks received and the longest wait between them, route requests with their times,
+  spoken lines started and finished, and when the app went to the background. Counts and
+  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  storage when a drive ends and every 30 s during one, and shown as "Last drive" after
+  the app was closed (`src/device/native/lastDrive.ts`).
+- **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
+  selected route in place of the GPS, so a drive can be tried at home with the phone
+  locked. Presets: follow the route, a wrong turn after 1 min (a made-up side street
+  square to the route, at least 600 m and 45 s long, so the tracker calls it off the
+  route), turn around after 1 min; at 1x (15 m/s) or 3x speed, on the real clock. The
+  web side writes the script (`src/drive/testDrive.ts`, `DEFAULT_TEST_DRIVE_OPTIONS`);
+  the plugin's `startSimulatedRoute` moves the car on a native timer, one fix a second
+  marked `simulated`. The real GPS stays on to keep the app running, and its positions
+  are discarded. The drive view shows a SIMULATED GPS badge and the diagnostics say so.
+  Route requests are real and count against the request budget. The browser's
+  development replay is separate and unchanged.
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
@@ -1237,9 +1251,12 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings in memory (fixes, ticks, route requests, spoken lines, app in front or
-not): no position, no address, no token. It leaves the phone only if you copy it and
-send it yourself.
+and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
+position, no address, no token. The last drive's text is also kept in the app's storage
+on the phone, and a text that looked as if it held a position, a token or an address is
+not written. It leaves the phone only if you share or copy it and send it yourself. In
+a test drive the positions are made up from the selected route; the phone's own
+position is discarded while one runs and reaches neither the drive nor Mapbox.
 
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for

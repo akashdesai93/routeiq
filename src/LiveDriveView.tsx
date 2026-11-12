@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { formatDistance, formatDuration, type ArrowKind, type LiveState, type LiveView } from './core/index.ts'
 import { REPLAY_MULTIPLIERS, type ReplayMultiplier } from './drive/replay.ts'
 
@@ -17,6 +18,8 @@ interface LiveDriveViewProps {
   /** True during a development replay: the view says so. */
   replaying?: boolean
   dev?: LiveDevControls | null
+  /** #86: shown under the status line while driving (the iPhone app's SIMULATED badge and its Diagnostics button). */
+  extra?: ReactNode
   onKeepPrevious: () => void
   onMute: (muted: boolean) => void
   onEnd: () => void
@@ -113,6 +116,7 @@ export function LiveDriveView({
   speechSupported = true,
   replaying = false,
   dev = null,
+  extra = null,
   onKeepPrevious,
   onMute,
   onEnd,
@@ -243,6 +247,8 @@ export function LiveDriveView({
           )}
           {replaying && ' · GPS replay (simulated position)'}
         </p>
+        {/* #86: the one entry point for the iPhone app's extras. */}
+        {extra}
         {dev !== null && replaying && (
           <div className="live-dev" role="group" aria-label="Replay controls (development)">
             {REPLAY_MULTIPLIERS.map((m) => (

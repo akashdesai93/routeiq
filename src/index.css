@@ -154,6 +154,14 @@ button.link:hover { background: none; color: #0550ae; }
 .token-screen p { margin: 8px 0; }
 .token-actions { display: flex; gap: 8px; }
 .shell-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* The iPhone shell's extras in the drive view (#86): the SIMULATED badge of a test drive and the Diagnostics button. */
+.live-extra { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+.sim-badge { padding: 4px 10px; border: 2px solid #bf8700; border-radius: 6px; background: #fff8c5; color: #4d2d00; font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
+.live-diagnostics { min-height: 36px; margin-left: auto; }
+.testdrive button[aria-pressed='true'], .diagnostics-which button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
+.testdrive .drive-row { flex-wrap: wrap; }
+.diagnostics-which { display: flex; gap: 8px; flex-wrap: wrap; }
+.diagnostics-which button { min-height: 36px; }
 /* The iPhone shell's "Drive diagnostics" (DriveDiagnosticsPanel.tsx): a sheet over the lower part of the screen. */
 .diagnostics { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: 80%; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #ffffff; border-top: 1px solid #8c959f; box-shadow: 0 -4px 12px rgba(31, 35, 40, 0.15); font-size: 14px; }
 .diagnostics-head { display: flex; gap: 8px; align-items: center; }
