@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { currentPosition, LOCATION_TIMEOUT_MS, type GeolocationLike, type LocationResult } from '../src/device/geolocation.ts'
+import { describe, expect, it, vi } from 'vitest'
+import type { PositionFix } from '../src/core/index.ts'
+import { currentPosition, geolocationSource, LOCATION_TIMEOUT_MS, type GeolocationLike, type LocationResult } from '../src/device/geolocation.ts'
 
 type Options = Parameters<GeolocationLike['getCurrentPosition']>[2]
 
@@ -86,5 +87,39 @@ describe('currentPosition', () => {
       },
     }
     expect(failureOf(await currentPosition({ geolocation: throwing, secureContext: true })).kind).toBe('unavailable')
+  })
+})
+
+describe('geolocationSource', () => {
+  it('stamps each fix with the session clock by default, which never steps back with the wall clock (#30)', () => {
+    let push: ((position: { coords: { longitude: number; latitude: number; accuracy: number } }) => void) | null = null
+    const geolocation: GeolocationLike = {
+      getCurrentPosition() {},
+      watchPosition(success) {
+        push = success
+        return 1
+      },
+      clearWatch() {},
+    }
+    let wall = 1_800_000_000_000
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => wall)
+    try {
+      const fixes: PositionFix[] = []
+      const stop = geolocationSource({ geolocation, secureContext: true }).start((fix) => fixes.push(fix), () => {})
+      const coords = { longitude: -80.8528, latitude: 35.2258, accuracy: 12.5 }
+      for (const step of [1000, 1000, -30_000, 1000, 1000]) {
+        wall += step
+        push!({ coords })
+      }
+      stop()
+      const times = fixes.map((f) => f.timeMs)
+      // Every fix is newer than the one before, the one after the 30 s step back too.
+      for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!)
+      // And time goes on at the wall clock's pace on either side of the step.
+      expect(times[1]! - times[0]!).toBe(1000)
+      expect(times[4]! - times[3]!).toBe(1000)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
