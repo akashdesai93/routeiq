@@ -653,12 +653,14 @@ faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 
 | `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
 | `freewayLeadDistanceM` | 1200 m |
 | `routeLostPolls` (checks with no route along the road ahead, none between them finding the current route) | 3 |
+| `routeLostWindowSec` (a "no route" answer older than this no longer counts) | 900 s |
 | `offRouteM` | 50 m |
 | `sameRouteToleranceM` (a point is on the current route: where an alternative turns off) | 10 m |
 | `matchToleranceM`, `matchMinOverlap` (a fresh route IS the current one) | 20 m, 0.95 |
 | `matchMaxGapM` (longest stretch apart, and largest difference in length) | 400 m |
 | `matchMaxDivergenceM` (farthest a point of a stretch apart may be from the other line) | 50 m |
 | `matchIgnoreStartM` (not compared after the query point) | 150 m |
+| `matchStartSearchM` (where the fresh route starts is looked for on this first stretch of the path ahead, first) | 200 m |
 | `baselineViaSpacingM`, `baselineMaxViaPoints` (asking for the current path) | 3000 m, 6 |
 | `returnOverlapFraction` | 0.5 |
 | `requireTypicalDuration` | true |
@@ -775,6 +777,30 @@ and around the closure: "another road". That says nothing either way, so the eng
 be, so such a closure never added up). The closure is taken only once three checks in all
 have put a point on it; until then, or if none does, the driver finds out at the closure
 and the off-route rule takes over from there. `tests/reroute.test.ts` pins these cases.
+
+**Old "no route" answers age out (#68).** Each "no route" answer is kept with the time
+of its check, and only those from the last 15 minutes (`routeLostWindowSec`) count
+toward the three. Without it, one answer early in a long drive, then a quarter of an
+hour of "another road" answers, then two more, made three, though the first was about a
+road long since passed. The window only ever takes answers away, so it can delay a
+closure switch, never bring one sooner: three answers within 15 minutes switch exactly
+as before. At the 60 s check interval that is room for 15 checks; a poll interval set
+above 7.5 minutes would let no three answers fit, and a closure would then be found at
+the closure itself (off route). The e2e scenario "when a block ahead is closed, it
+reroutes around it" drives it end to end: a block of Main Corridor closes, Mapbox stops
+offering it, the drive's check of its own path comes back "no route" three times, and
+the drive changes to East Loop with "The road ahead on your route looks closed."
+
+**Routes that cross themselves (#74).** Where the fresh route starts is looked for on the
+first 200 m of the path ahead (`matchStartSearchM`, from 50 m behind the car), and on the
+rest only when nothing there is within 20 m (`matchToleranceM`). It used to be the nearest point of the whole
+path: under a cloverleaf bridge the later pass over it can be a meter nearer the snapped
+start than the road being driven, the comparison then started after the loop, the
+lengths differed by more than 400 m, and the current route went "unconfirmed" (a spent
+check, and a lost confirmation). 200 m is shorter than a cloverleaf loop; a loop back to the same spot within 150 m of the car would still be in the window.
+The tracker had the same flaw on a drive's first fix only (later fixes already take the
+pass that fits the progress so far): of passes about as near (15 m), it now takes the
+first in driving order.
 
 **Matching cost (#51).** The comparison walks both lines in 10 m steps. Each step looks
 only at the segments of the other line in the 3 x 3 grid cells (50 m wide, a bounding-box
