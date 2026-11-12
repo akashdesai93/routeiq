@@ -78,7 +78,7 @@ export function renderPrompt(tpl, input, rulesText) {
   }
   const rules = rulesText.replace(/\{\{name\}\}/g, name).trim()
   const text = tpl.body
-    .replace(/\{\{rules\}\}/g, rules)
+    .replace(/\{\{rules\}\}/g, () => rules) // a function: `$&`, `$1`, `$$` in the rules stay text
     .replace(/\{\{(name|issues|prs|note)\}\}/g, (_, k) => values[k])
     .replace(/\n{3,}/g, '\n\n')
     .trim()
