@@ -1121,6 +1121,20 @@ comes, the answer is taken like any check (minimum saving, confirmation, cooldow
 not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
 
+**A request that never answers** (#29). Only one route request is out at a time, so a
+connection that hangs (a dead zone) would hold back every check after it. A request not
+answered within 30 seconds (`requestTimeoutSec`, counted from when it was sent and
+covering everything one check asks) is given up: it is cancelled, and taken as a failed
+answer. A check then changes nothing but the engine's failed-poll counter, the quiet
+line says "Staying: could not check for faster routes (The route request timed out.)",
+and the next check goes out at the usual minute; an answer that turns up later is
+ignored. A search for a new route off the route is asked again after `replanGapSec`. A
+first route that never comes ends the start with "Could not find a route from here. The
+route request timed out.", as a failed one does. The limit is generous on purpose: a
+browser keeps a request going for minutes, while the iPhone shell's own limit is 20 s a
+request, and a check can be two or three requests one after another. In a replay the
+limit is stretched by the replay speed, like the request gap.
+
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
 Nov 11, 2026: both instruction parameters need `steps=true`, no profile is excluded,

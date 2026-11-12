@@ -72,6 +72,8 @@ export function replayLiveOptions(multiplier: number): Partial<LiveOptions> {
     // What is there to be read or pressed stays up as long as it would in real time.
     switchBannerSec: d.switchBannerSec * multiplier,
     pausedNoteSec: d.pausedNoteSec * multiplier,
+    // A real request gets as long in real time as on the road before it is given up.
+    requestTimeoutSec: d.requestTimeoutSec * multiplier,
   }
 }
 

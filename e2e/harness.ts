@@ -52,6 +52,12 @@ export interface Outside {
    * the way a slow answer from Mapbox would. Default: answered at once.
    */
   holdProbes?: boolean
+  /**
+   * These Directions requests (by `n`, as the traffic scripts count them) are
+   * never answered: the connection hangs, as one can in a dead zone. The page
+   * gives up on its own or not at all; `settle` does not wait for them.
+   */
+  hangRequests?: readonly number[]
   /** Answers an Overpass tile query. Default: 504 (busy). */
   overpass?: (query: string) => { status: number; body?: unknown }
 }
@@ -117,6 +123,11 @@ export class App {
   readonly abortedProbes: number[] = []
   private held: (() => Promise<void>)[] = []
   private readonly heldRequests = new Map<Request, number>()
+  /** Requests left hanging (Outside.hangRequests) that the page has not cancelled yet. */
+  private readonly hanging = new Set<Request>()
+  /** The `n` of every hanging request the page cancelled itself. */
+  readonly cancelledHanging: number[] = []
+  private readonly hangingN = new Map<Request, number>()
   readonly unexpected: string[] = []
   outside: Outside = {}
   private shot = 0
@@ -143,6 +154,7 @@ export class App {
     page.on('requestfailed', (request) => {
       const index = this.heldRequests.get(request)
       if (index !== undefined) this.abortedProbes.push(index)
+      if (this.hanging.delete(request)) this.cancelledHanging.push(this.hangingN.get(request)!)
     })
     await page.addInitScript(installBrowserStubs)
     if (options.shell === true) await page.addInitScript(installShellStubs)
@@ -214,7 +226,7 @@ export class App {
     const minutes = (sec: number) => `${(sec / 60).toFixed(1)} min`
     const text = this.answers
       .map(({ n, routes }) => {
-        const offered = routes.map((r) => `${names[r.name] ?? r.name} ${minutes(r.durationSec)}`).join(', ')
+        const offered = routes.length === 0 ? '(never answered: left hanging)' : routes.map((r) => `${names[r.name] ?? r.name} ${minutes(r.durationSec)}`).join(', ')
         const probes = this.probes
           .filter((p) => p.forRequest === n)
           .map((p) => (p.road === null ? 'NoSegment' : `${names[p.road] ?? p.road} ${minutes(p.durationSec ?? 0)}`))
@@ -326,9 +338,11 @@ export class App {
         status: (document.querySelector('.live-status')?.textContent ?? '').split(' · ')[0]!,
         arrived: document.querySelector('[aria-label="Drive summary"]') !== null,
       }))
-      quiet = look.inflight === 0 ? quiet + 1 : 0
+      // A request left hanging on purpose is not waited for: only the page can end it.
+      const waiting = look.inflight > this.hanging.size
+      quiet = waiting ? 0 : quiet + 1
       if (quiet >= 2) return look
-      if (look.inflight > 0) await new Promise((r) => setTimeout(r, 5))
+      if (waiting) await new Promise((r) => setTimeout(r, 5))
     }
     throw new Error('A request in the page never finished')
   }
@@ -394,6 +408,12 @@ export class App {
           this.pathChecks.push({ n: this.directionsRequests + 1, road: null, vias: points.length - 2 })
         }
         this.directionsRequests++
+        if (this.outside.hangRequests?.includes(this.directionsRequests) === true) {
+          this.answers.push({ n: this.directionsRequests, routes: [] })
+          this.hanging.add(request)
+          this.hangingN.set(request, this.directionsRequests)
+          return
+        }
         const json = world.directions(from, traffic, this.directionsRequests)
         this.answers.push({ n: this.directionsRequests, routes: world.lastOffered.map((r) => ({ name: r.name, durationSec: r.durationSec })) })
         return route.fulfill({ json })

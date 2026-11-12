@@ -58,6 +58,28 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   await expect(page.getByLabel('Drive summary')).toBeVisible()
 })
 
+test('when a route check never answers, it gives up on it and the next checks still find the faster route', async ({ app }) => {
+  // The drive's first check (request 2, a minute in) hangs, as a request can in a dead zone.
+  // From the second check on, the direct route jams; the East Loop goes round it.
+  app.outside.hangRequests = [2]
+  app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ snapAtSec: [70, 92] })
+  await app.snap('arrived: the summary lists the switch')
+
+  // The page itself cancelled the hung check (after requestTimeoutSec), and kept checking.
+  expect(app.cancelledHanging).toEqual([2])
+  expect(app.directionsRequests).toBeGreaterThanOrEqual(4)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switched to a faster route')
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toHaveLength(1)
+  expect(spoken).toContain('Turn left onto East Loop.')
+  expect(spoken).not.toContain(OFF_ROUTE)
+})
+
 test('when nothing is faster, it never switches', async ({ app }) => {
   // Traffic wobbles by up to 6 % from check to check, and the GPS wanders up to 8 m off the road.
   app.outside.traffic = NOISY_BUT_NOTHING_FASTER

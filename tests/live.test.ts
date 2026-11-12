@@ -7,6 +7,7 @@ import {
   liveStep,
   liveView,
   POSITION_ERROR_MESSAGES,
+  REQUEST_TIMED_OUT,
   SPOKEN,
   synthesizeAnnouncements,
   WAKE_LOCK_WARNING,
@@ -117,6 +118,7 @@ describe('starting', () => {
       stationaryPauseSec: 120,
       maxRequests: 60,
       switchBannerSec: 8,
+      requestTimeoutSec: 30,
     })
   })
 
@@ -376,12 +378,13 @@ describe('poll cadence', () => {
 
   it('waits for the answer of one check before sending another', () => {
     const s = driving()
-    for (let t = 1; t <= 200; t++) {
+    // Up to the request time limit (requestTimeoutSec; past it, see "a request that never answers").
+    for (let t = 1; t <= 89; t++) {
       s.setTime(t)
       s.fix(15 * t)
       s.tick()
     }
-    // The check of second 60 was never answered: no other was sent.
+    // The check of second 60 was not answered: no other was sent.
     expect(s.requests().map((p) => p.atSec)).toEqual([0, 60])
     expect(livePollGate(s.state, s.nowMs())).toBe('in-flight')
     expect(s.view().checking).toBe(true)
@@ -444,6 +447,141 @@ describe('poll cadence', () => {
       requestsUsed: 3,
       maxRequests: 3,
     })
+  })
+})
+
+describe('a request that never answers (#29)', () => {
+  /** Drives at 15 m/s from now to `untilSec` with a fix and a tick every second, answering nothing. */
+  function silent(s: ReturnType<typeof session>, untilSec: number) {
+    for (let t = s.nowSec + 1; t <= untilSec; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+    }
+  }
+
+  it('a check that never answers is given up after requestTimeoutSec, and the checks after it still go out', () => {
+    const s = driving()
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    s.tick()
+    expect(s.state.request).toMatchObject({ purpose: 'poll' }) // the fetch now hangs
+    const hung = s.state.request!.id
+    const before = s.requests().length
+    // The repro from #29: 15 minutes of driving with that check never answered.
+    for (let t = 61; t <= 960; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null && s.state.request.id !== hung) s.answer(routesAt(15 * t, { A: 1300 }))
+    }
+    expect(s.requests().length - before).toBeGreaterThan(0)
+    // Cancelled once, 30 s after it was sent, and the next check came at the usual minute.
+    expect(s.of('cancel-request').map((e) => e.atSec)).toEqual([90])
+    expect(s.requests().map((p) => p.atSec).slice(0, 4)).toEqual([0, 60, 120, 180])
+  })
+
+  it('it counts as a failed check: the engine counts it, says why, and nothing else changes', () => {
+    const s = driving()
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    s.tick()
+    const before = s.state
+    const hung = s.state.request!.id
+    silent(s, 89)
+    expect(s.state.request).not.toBeNull()
+    expect(s.view().checking).toBe(true)
+    s.setTime(90)
+    const effects = s.tick()
+    expect(effects).toEqual([{ type: 'cancel-request' }])
+    expect(s.state.request).toBeNull()
+    expect(s.state.engine).toEqual({ ...before.engine, failedPolls: 1 })
+    expect(s.state.lastDecision).toMatchObject({ code: 'poll-failed', reason: `Staying: could not check for faster routes (${REQUEST_TIMED_OUT})` })
+    expect(s.view()).toMatchObject({ checking: false, statusLine: `Staying: could not check for faster routes (${REQUEST_TIMED_OUT})` })
+    expect(s.state.route).toBe(before.route)
+    expect(s.state.lastCheckedAtMs).toBe(before.lastCheckedAtMs)
+    expect(s.state.requestsUsed).toBe(before.requestsUsed)
+    expect(s.spoken()).toEqual([])
+    // Its answer, if it ever comes, is ignored: the request it belonged to is gone.
+    const followed = s.of('follow-route').length
+    s.send({ type: 'routes', nowMs: s.nowMs(), requestId: hung, routes: routesAt(1350, { A: 1300, B: 600 }) })
+    expect(s.state.route).toBe(before.route)
+    expect(s.of('follow-route')).toHaveLength(followed)
+    // Every check hangs: each is a failed poll in a row, and the drive carries on.
+    silent(s, 300)
+    expect(s.state.engine.failedPolls).toBe(4)
+    expect(s.of('cancel-request').map((e) => e.atSec)).toEqual([90, 150, 210, 270])
+  })
+
+  it('an answer just before the limit is used as usual', () => {
+    const s = driving()
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    s.tick()
+    silent(s, 89)
+    s.answer(routesAt(1335, { A: 1300 }))
+    expect(s.state.lastDecision!.code).not.toBe('poll-failed')
+    expect(s.state.lastCheckedAtMs).toBe(s.nowMs())
+    expect(s.state.engine.failedPolls).toBe(0)
+    expect(s.of('cancel-request')).toHaveLength(0)
+  })
+
+  it('a first route that never comes ends the start with a message, as a failed one does', () => {
+    const s = session()
+    s.start()
+    s.fix(0)
+    expect(s.state.status).toBe('planning')
+    s.setTime(29)
+    s.tick()
+    expect(s.state.status).toBe('planning')
+    s.setTime(30)
+    s.tick()
+    expect(s.state.status).toBe('failed')
+    expect(s.state.message).toBe(`Could not find a route from here. ${REQUEST_TIMED_OUT}`)
+    expect(s.of('cancel-request')).toHaveLength(1)
+  })
+
+  it('a search for a new route that hangs is given up, and another is asked for', () => {
+    const s = driving()
+    cruise(s, 20)
+    // Off to the side, square to the road: the car leaves the route.
+    for (let t = 21; t <= 40; t++) {
+      s.setTime(t)
+      s.fix(300, 40 * (t - 20))
+      s.tick()
+    }
+    const replans = () => s.requests().filter((r) => r.effect.purpose === 'replan')
+    expect(replans()).toHaveLength(1)
+    const sentAt = replans()[0]!.atSec
+    for (let t = 41; t <= sentAt + 60; t++) {
+      s.setTime(t)
+      s.fix(300, 40 * (t - 20))
+      s.tick()
+    }
+    expect(s.of('cancel-request').map((e) => e.atSec)).toContain(sentAt + 30)
+    expect(replans().length).toBeGreaterThan(1)
+  })
+
+  it('the limit is a setting: a bad value falls back to the default, never to 0', () => {
+    for (const requestTimeoutSec of [0, -5, Number.NaN]) {
+      const s = driving({ requestTimeoutSec })
+      cruise(s, 59)
+      s.setTime(60)
+      s.fix(900)
+      s.tick()
+      silent(s, 89)
+      expect(s.state.request, String(requestTimeoutSec)).not.toBeNull()
+    }
+    const s = driving({ requestTimeoutSec: 5 })
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    s.tick()
+    silent(s, 65)
+    expect(s.of('cancel-request').map((e) => e.atSec)).toEqual([65])
   })
 })
 
