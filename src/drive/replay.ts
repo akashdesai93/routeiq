@@ -1,4 +1,4 @@
-import { alongRouteM, isValidLngLat, localProjector, pointAtDistance, pointToSegment, type LngLat, type PositionFix } from '../core/index.ts'
+import { alongRouteM, isValidLngLat, nearestAlongM, pointAtDistance, type LngLat, type PositionFix } from '../core/index.ts'
 import type { LocationErrorKind, PositionSource } from '../device/geolocation.ts'
 
 /**
@@ -104,18 +104,6 @@ const M_PER_DEGREE = 111_195
 /** The point `eastM` east and `northM` north of `p`. */
 function offset(p: LngLat, eastM: number, northM: number): LngLat {
   return [p[0] + eastM / (M_PER_DEGREE * Math.cos((p[1] * Math.PI) / 180)), p[1] + northM / M_PER_DEGREE]
-}
-
-/** Meters along `route` of its point closest to `p`. */
-function nearestAlongM(route: readonly LngLat[], p: LngLat): number {
-  const project = localProjector(p)
-  const along = alongRouteM(route)
-  let best = { distanceM: Infinity, alongM: 0 }
-  for (let i = 1; i < route.length; i++) {
-    const hit = pointToSegment([0, 0], project(route[i - 1]!), project(route[i]!))
-    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, alongM: along[i - 1]! + hit.t * (along[i]! - along[i - 1]!) }
-  }
-  return best.alongM
 }
 
 /**
