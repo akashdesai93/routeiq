@@ -145,6 +145,41 @@ and `decideReroute` each match the current route against the fresh ones (see #31
 `withSignalCounts` clusters all 1190 signal points again for each of the three routes
 (`src/core/signals.ts:525`).
 
+### After #96: each match and each grouping done once per check
+
+Profiled with `node --cpu-prof` on the whole check: matching fresh routes against the road
+ahead (`matchRest`: its segment grids and its walks) was 43% of the time, and grouping the
+signal points 15%. Per check the same pairs of lines were matched 8 times (3 in
+`baselineProbe`, 3 in `decideReroute`'s `closestToPath`, 2 more in its `isCurrent`).
+
+- A match is worked out once per check and then looked up (`src/core/reroute.ts`,
+  `aheadMatcher`): by the geometry arrays of the route driven and the fresh route, where
+  the road ahead was cut and the match thresholds. Both `baselineProbe` (when the answer
+  arrives) and `decideReroute` use the same cut (`state.request.alongM`), so the second
+  one finds it. `baselineProbe` also shares a pair's set-up and grids between
+  `matchRest` and `compareRest`, and measures the road ahead once for its via points.
+- `withSignalCounts` groups the primary points once per call (again only for a route that
+  adds fallback points of its own), and `signalTilesForRoute` is worked out once per
+  geometry.
+- The decisions are the same: `tests/reroute.test.ts` ("a match looked up is the match
+  worked out") drives through changing routes, positions and thresholds on the same arrays
+  and compares every answer with the same call on new copies of every line;
+  `tests/signals.test.ts` compares counting routes together with counting each alone.
+
+`scripts/perf/check.mjs` now gives every sample new geometry arrays (as a real check gets
+new routes), and decides from where the check was asked (as `src/live/runner.ts` does),
+so that it times the work and not a lookup. Measured with that same script on `main` at
+`f5d55b9` and on the #96 branch, three rounds each, alternated (ranges of the rounds):
+
+| Whole check | `main` median | `main` p95 | #96 median | #96 p95 |
+| --- | ---: | ---: | ---: | ---: |
+| current route among the fresh routes | 35.7-36.2 ms | 37.8-47.1 ms | 19.3-21.9 ms | 21.3-26.5 ms |
+| current route not among them | 29.4-30.8 ms | 33.7-38.4 ms | 21.0-22.5 ms | 22.9-30.3 ms |
+
+What is left in a check (median, current route among the fresh ones): `JSON.parse` 2.9 ms,
+the adapter 1.8 ms, `baselineProbe` 7 ms (the one match that is really worked out),
+tiles 1.1 ms, `withSignalCounts` 4.4 ms, `liveStep` 0.5 ms, map data 1.3 ms.
+
 Per plan:
 
 | Call | Median | p95 |
@@ -208,7 +243,7 @@ Desktop numbers, on the synthetic 60 km / 3000-vertex route. "Now" is what was m
 | Data handed to the map per fix | 1 kB (the car only) | 66.4 kB | over |
 | Component renders per fix: `MapView`, `LiveDriveView` | 1 each | 1 each (2 in a browser) | ok |
 | Component renders per fix: hidden panels (`PlanPanel`, `RoutePanel`, `DrivePanel`) | 0 | 0 (#95) | ok |
-| Whole check per 60 s, p95 | 50 ms (aim for 25 ms) | 49.4 ms | at the limit |
+| Whole check per 60 s, p95 | 50 ms (aim for 25 ms) | 21-27 ms (#96; was 38-47 ms measured the same way) | ok |
 | Any single call in a plan, p95 | 50 ms | 545 ms (`mergeProbeRoutes`) | over |
 | Directions requests per drive hour | 65 | at most 60 + 5 | ok |
 | Directions requests per plan | 3 | 1 + up to 2 | ok |
