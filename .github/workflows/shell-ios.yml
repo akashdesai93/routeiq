@@ -8,7 +8,8 @@ name: Shell iOS (unsigned ipa)
 # token in it: the app asks for one on the phone. The build fails if a token
 # is found in the web bundle or in the finished app.
 #
-# Called by gate.yml on pull requests and pushes to main that touch the shell or the web app
+# Called by gate.yml on pull requests that touch the shell's own inputs, and on pushes to main
+# that touch the shell or the web app
 # (the path list is in gate.yml, under `changes`), and its result counts towards the
 # `required` check. It has no triggers of its own, so each change runs once; it can
 # also be started by hand.

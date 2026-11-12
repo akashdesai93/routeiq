@@ -12,10 +12,12 @@ job is named `required`, and that is the only check branch protection asks for.
 | job in `gate.yml` | runs | what it does |
 | --- | --- | --- |
 | `web` (`ci.yml`) | always | typecheck, lint, unit tests (with the counted-work guards), production build, bundle-size budget, `npm audit` (warns only) |
-| `e2e` (`e2e.yml`) | always | the end-to-end scenarios, report uploaded as `e2e-report` |
+| `e2e` (`e2e.yml`) | always | the end-to-end scenarios, dealt over five runners (`e2e/shard.mjs`: each scenario in exactly one shard, a drive weighted as ten short scenarios); fails when any shard fails |
+| `e2e-report` (`e2e-report.yml`) | after `e2e`, also when it failed | merges the shards' reports into the one `e2e-report` artifact; evidence only, not part of `required` |
 | `native-core` (`native-core.yml`) | when the Swift package, `native/scripts`, the signal tiles or `tests/fixtures` change | `swift build`, `swift test`, the packer's test |
 | `native-app` (`native-app.yml`) | when the native app or what it bundles changes | unsigned `.ipa` on macOS (`RouteIQ-native-unsigned`) |
-| `shell-ios` (`shell-ios.yml`) | when `native/shell`, `src`, `public` or the web build files change | unsigned `.ipa` on macOS (`RouteIQ-unsigned`) |
+| `shell-web` (`shell-web.yml`) | when `native/shell`, `src`, `public` or the web build files change | on Linux: the shell's unit tests, the web app built into `www/` with no token and the bridge script, the Xcode project generated and patched, a token search |
+| `shell-ios` (`shell-ios.yml`) | pull requests: when `native/shell` or the web build files (`package*.json`, `vite.config.ts`, `tsconfig*.json`) change; pushes to `main`: also for `src`, `public`, `index.html` | unsigned `.ipa` on macOS (`RouteIQ-unsigned`); the newest green `main` run always has a current one |
 | `required` | always (`if: always()`) | passes when every job that had to run succeeded; fails when one failed, was cancelled, or was skipped although it had to run |
 
 The exact path lists are in `gate.yml` under `changes`. A change to `gate.yml` itself runs

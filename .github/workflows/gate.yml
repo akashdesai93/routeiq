@@ -7,7 +7,8 @@ name: Gate
 #
 # - The cheap checks always run: web (typecheck, lint, unit tests, build, bundle budget)
 #   and the end-to-end scenarios.
-# - The Swift package tests and the two macOS builds run only when their paths change.
+# - The Swift package tests and the two macOS builds run only when their paths change
+#   (the shell's .ipa build: see `changes`).
 # - `required` passes when every job that had to run succeeded, and fails when one failed,
 #   was cancelled, or was skipped although it had to run.
 #
@@ -39,7 +40,8 @@ jobs:
     outputs:
       native-core: ${{ steps.filter.outputs.native-core }}
       native-app: ${{ steps.filter.outputs.native-app }}
-      shell-ios: ${{ steps.filter.outputs.shell-ios }}
+      shell-web: ${{ steps.shell.outputs.shell-web }}
+      shell-ios: ${{ steps.shell.outputs.shell-ios }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,17 +67,40 @@ jobs:
               - 'native/RouteIQCore/Sources/**'
               - '.github/workflows/native-app.yml'
               - '.github/workflows/gate.yml'
-            shell-ios:
+            # What goes into the iPhone shell's .ipa. shell-native: the shell's own inputs,
+            # which the macOS build compiles. shell-webapp: the web app, which the shell
+            # only bundles as files (checked on Linux by shell-web).
+            shell-native:
               - 'native/shell/**'
-              - 'src/**'
-              - 'public/**'
-              - 'index.html'
               - 'package.json'
               - 'package-lock.json'
               - 'vite.config.ts'
               - 'tsconfig*.json'
               - '.github/workflows/shell-ios.yml'
+              - '.github/workflows/shell-web.yml'
               - '.github/workflows/gate.yml'
+            shell-webapp:
+              - 'src/**'
+              - 'public/**'
+              - 'index.html'
+
+      # shell-web (Linux, seconds) runs for any change to the shell or the web app.
+      # shell-ios (the macOS .ipa build, about 90 s) runs on a pull request only when the
+      # shell's own inputs change, and on a push to main for any change to the shell or the
+      # web app, so the newest main always has a current RouteIQ-unsigned build.
+      - id: shell
+        env:
+          NATIVE: ${{ steps.filter.outputs.shell-native }}
+          WEBAPP: ${{ steps.filter.outputs.shell-webapp }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          any=false
+          if [ "$NATIVE" = true ] || [ "$WEBAPP" = true ]; then any=true; fi
+          ios=$NATIVE
+          if [ "$EVENT" = push ] && [ "$any" = true ]; then ios=true; fi
+          echo "shell-web=$any" >> "$GITHUB_OUTPUT"
+          echo "shell-ios=$ios" >> "$GITHUB_OUTPUT"
+          echo "shell: native inputs $NATIVE, web app $WEBAPP, event $EVENT -> shell-web $any, shell-ios $ios"
 
   web:
     uses: ./.github/workflows/ci.yml
@@ -104,6 +129,11 @@ jobs:
       MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
       MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
 
+  shell-web:
+    needs: changes
+    if: needs.changes.outputs.shell-web == 'true'
+    uses: ./.github/workflows/shell-web.yml
+
   shell-ios:
     needs: changes
     if: needs.changes.outputs.shell-ios == 'true'
@@ -114,7 +144,7 @@ jobs:
   # would skip this one, and GitHub counts a skipped required check as passed.
   required:
     name: required
-    needs: [changes, web, e2e, native-core, native-app, shell-ios]
+    needs: [changes, web, e2e, native-core, native-app, shell-web, shell-ios]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
