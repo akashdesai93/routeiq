@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_HANDOFF_OPTIONS,
@@ -9,21 +7,13 @@ import {
   GOOGLE_MAPS_MAX_WAYPOINTS_MOBILE,
   googleMapsUrl,
   handoffWaypoints,
-  localProjector,
-  pointToSegment,
   wazeUrl,
   type HandoffWaypoint,
   type LngLat,
   type RouteCandidate,
 } from '../src/core/index.ts'
-import { parseDirections } from '../src/providers/mapbox/adapter.ts'
 import { at, candidate, type RouteName } from './helpers/driveWorld.ts'
-
-function fixtureRoutes(name: string): readonly RouteCandidate[] {
-  const result = parseDirections(JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8')))
-  if (!result.ok) throw new Error(`expected routes, got ${result.kind}`)
-  return result.routes
-}
+import { fixtureRoutes, lineDistanceM } from './helpers/fixtures.ts'
 
 function world(name: RouteName, durationSec = 1200): RouteCandidate {
   const route = candidate(name, at(0, 0), durationSec)
@@ -39,15 +29,6 @@ function custom(id: string, corners: readonly (readonly [number, number])[]): Ro
 /** The main road A with a 500 m detour north between startX and endX. */
 const detour = (id: string, startX: number, endX: number) =>
   custom(id, [[0, 0], [startX, 0], [startX, 500], [endX, 500], [endX, 0], [20000, 0]])
-
-function lineDistanceM(point: LngLat, line: readonly LngLat[]): number {
-  const project = localProjector(point)
-  let best = Infinity
-  for (let i = 1; i < line.length; i++) {
-    best = Math.min(best, pointToSegment(project(point), project(line[i - 1]!), project(line[i]!)).distanceM)
-  }
-  return best
-}
 
 function expectWellPlaced(points: readonly HandoffWaypoint[], accepted: RouteCandidate, alternatives: readonly RouteCandidate[] = []) {
   const clear = DEFAULT_HANDOFF_OPTIONS.endpointClearanceM
