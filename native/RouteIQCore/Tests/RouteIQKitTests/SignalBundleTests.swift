@@ -188,11 +188,27 @@ final class SignalBundleTests: XCTestCase {
 /// The same signal counts as the web app, on the same bundle: the expected
 /// values come from the web app's own TypeScript (bundle layer, tile source,
 /// withSignalCounts), written by native/scripts/signal-parity-reference.mjs.
+/// Both sides read a frozen copy of the bundle, Fixtures/signal-bundle (the index
+/// and the tiles these routes touch), so the monthly refresh of
+/// public/seed/osm-signals cannot change the answer (#193).
 final class SignalBundleParityTests: XCTestCase {
+    static var fixtures: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
+    }
+
     static func reference() throws -> JSONValue {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/signal-parity.json")
-        return try JSONValue.parse(Data(contentsOf: url))
+        try JSONValue.parse(Data(contentsOf: fixtures.appendingPathComponent("signal-parity.json")))
+    }
+
+    static func frozenBundle() throws -> SignalBundle {
+        let folder = fixtures.appendingPathComponent("signal-bundle")
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            .filter { $0.hasSuffix(".json") && $0 != "index.json" }
+            .sorted()
+        return try SignalBundle(
+            indexJSON: Data(contentsOf: folder.appendingPathComponent("index.json")),
+            tileFiles: names.map { try Data(contentsOf: folder.appendingPathComponent($0)) }
+        )
     }
 
     static func lngLat(_ v: JSONValue) -> LngLat {
@@ -217,14 +233,15 @@ final class SignalBundleParityTests: XCTestCase {
 
     func testEverySetCountsExactlyAsTheWebAppDoes() throws {
         let reference = try Self.reference()
-        XCTAssertEqual(reference["bundleDataDate"]?.numberValue, RepoBundle.shared.dataDate, "reference is from another bundle")
+        let bundle = try Self.frozenBundle()
+        XCTAssertEqual(reference["bundleDataDate"]?.numberValue, bundle.dataDate, "reference is from another bundle")
         let sets = try XCTUnwrap(reference["sets"]?.arrayValue)
         XCTAssertEqual(sets.count, 7)
         var coverages = Set<String>()
         for set in sets {
             let name = set["name"]!.stringValue!
             let routes = set["routes"]!.arrayValue!.map(Self.route)
-            let loaded = RepoBundle.shared.signalData(for: routes)
+            let loaded = bundle.signalData(for: routes)
             XCTAssertEqual(loaded.missingTileIds, set["missingTileIds"]!.arrayValue!.map { $0.stringValue! }, name)
             XCTAssertEqual(Double(loaded.data.primary.count), set["primaryPointCount"]!.numberValue!, name)
             let counted = Signals.withSignalCounts(routes, loaded.data)
