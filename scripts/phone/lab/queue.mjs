@@ -4,7 +4,7 @@
 // the end the best verified build is put back: the last one whose runs all passed, or the
 // rollback build. docs/phone-lab.md, "The rule for every build that goes on the phone".
 //
-//   node scripts/phone/lab/queue.mjs plan.json [--wait-unlocked <hours>]
+//   node scripts/phone/lab/queue.mjs plan.json [--wait-unlocked <hours> --until HH:MM] [--voice-ok]
 //
 // plan.json:
 //   {
@@ -19,11 +19,19 @@
 //
 // --wait-unlocked: first wait, up to that many hours, for the phone to be unlocked. It only
 // reads one value every 10 minutes; it presses nothing and starts nothing on a locked phone.
+// It needs --until HH:MM (the PC's time), the end of the window the owner gave: an unlock after
+// that may be the owner picking up the phone to leave, and nothing must start then.
+// The window on #17 ("lab-window: until HH:MM UTC") is in UTC; --until and quiet hours are on
+// the PC's clock. Convert the window's end to the PC's time for --until.
+// Before it installs anything it checks the lab window on #17 (preflight.mjs): no open window,
+// or one that ended while it waited, and nothing is installed or run.
+// --voice-ok: passed on to every run (the owner allowed speaking during quiet hours).
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { findPmd3, sleep } from './phone.mjs'
+import { ghJson, preflight, readLabWindow, waitAllowance } from './preflight.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '..', '..', '..')
@@ -113,12 +121,29 @@ function runScenario(args, out) {
   return { code: r.status ?? 2, summary }
 }
 
+/** A reason the queue may not start installing now (no open lab window on #17), or null. */
+export function labStartProblem(gh, repo, now) {
+  const read = readLabWindow(gh, repo, new Date(now).toISOString())
+  if ('error' in read) return read.error
+  const r = preflight({ now: new Date(now).toISOString(), hour: new Date(now).getHours(), window: read.window })
+  return r.ok ? null : r.problems.join(' ')
+}
+
 async function main(argv) {
-  const planFile = argv.find((a) => !a.startsWith('--'))
   const waitAt = argv.indexOf('--wait-unlocked')
   const waitHours = waitAt === -1 ? 0 : Number(argv[waitAt + 1])
+  const untilAt = argv.indexOf('--until')
+  const voiceOk = argv.includes('--voice-ok')
+  const values = new Set([waitAt, untilAt].filter((i) => i >= 0).map((i) => i + 1))
+  const planFile = argv.find((a, i) => !a.startsWith('--') && !values.has(i))
   if (planFile === undefined || !existsSync(planFile) || !(waitHours >= 0)) {
-    console.error('Usage: node scripts/phone/lab/queue.mjs plan.json [--wait-unlocked <hours>]')
+    console.error('Usage: node scripts/phone/lab/queue.mjs plan.json [--wait-unlocked <hours> --until HH:MM] [--voice-ok]')
+    console.error('  --until is on the PC\'s clock, not UTC: convert the end of the #17 lab window (UTC) first.')
+    return 64
+  }
+  const allowance = waitAllowance(waitHours, untilAt === -1 ? null : argv[untilAt + 1], new Date())
+  if ('error' in allowance) {
+    console.error(allowance.error)
     return 64
   }
   const plan = readPlan(readFileSync(planFile, 'utf8'))
@@ -136,8 +161,8 @@ async function main(argv) {
   }
 
   if (isLocked(pmd3) !== false) {
-    const deadline = Date.now() + waitHours * 3_600_000
-    console.log(`${clock()} the phone is locked (or cannot be asked). ${waitHours > 0 ? `Looking again every 10 minutes for ${waitHours} h.` : 'Nothing was run.'}`)
+    const deadline = Date.now() + allowance.ms
+    console.log(`${clock()} the phone is locked (or cannot be asked). ${allowance.ms > 0 ? `Looking again every 10 minutes for ${Math.round(allowance.ms / 6e4)} min.` : 'Nothing was run.'}`)
     let open = false
     while (Date.now() < deadline && !open) {
       await sleep(Math.min(UNLOCK_POLL_MS, Math.max(1000, deadline - Date.now())))
@@ -154,6 +179,16 @@ async function main(argv) {
     }
   }
 
+  // The owner's window (docs/phone-lab.md, rule 1), checked after any wait, right before the
+  // first install: a window that ended while the phone was locked allows nothing.
+  const slug = process.env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'
+  const stop = labStartProblem(ghJson, slug, new Date())
+  if (stop !== null) {
+    console.error(stop)
+    finish([], 'unchanged: nothing was installed or run', stop)
+    return 2
+  }
+
   const results = []
   for (const build of plan.builds) {
     const result = { name: build.name, ipa: build.ipa, keep: build.keep, installed: build.ipa === null, installNote: '', runs: [] }
@@ -168,7 +203,7 @@ async function main(argv) {
     }
     for (const args of build.runs) {
       const label = args.filter((a) => a !== '--scenario').join(' ')
-      const run = runScenario(args, out)
+      const run = runScenario(voiceOk ? [...args, '--voice-ok'] : args, out)
       result.runs.push({ label, ...run })
       console.log(`${clock()} ${label}: ${run.code === 0 ? 'passed' : run.code === 1 ? 'FAILED' : 'incomplete'}`)
       // A build that does not start is not worth a drive.

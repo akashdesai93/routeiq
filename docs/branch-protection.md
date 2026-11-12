@@ -17,7 +17,7 @@ job is named `required`, and that is the only check branch protection asks for.
 | `native-core` (`native-core.yml`) | when the Swift package, `native/scripts`, the signal tiles or `tests/fixtures` change | `swift build`, `swift test`, the packer's test |
 | `native-app` (`native-app.yml`) | when the native app or what it bundles changes | unsigned `.ipa` on macOS (`RouteIQ-native-unsigned`) |
 | `shell-ios` (`shell-ios.yml`) | pull requests: when `native/shell` or the web build files (`package*.json`, `vite.config.ts`, `tsconfig*.json`) change; pushes to `main`: also for `src`, `public`, `index.html` | unsigned `.ipa` on macOS (`RouteIQ-unsigned`); the newest green `main` run always has a current one |
-| `required` | always (`if: always()`) | passes when every job that had to run succeeded; fails when one failed, was cancelled, or was skipped although it had to run |
+| `required` | always (`if: always()`) | passes when every job that had to run succeeded; fails when one failed, was cancelled, or was skipped although it had to run. On a pull request it also holds the PR gates (`scripts/orch/gates.mjs`): it fails while the PR has `do-not-merge` or `needs-human`, while it has `needs-phone` (or a body line starting with `PHONE CHECK NEEDED`) without `phone-verified`, and while `main` has changed an area the PR changes since the `main` commit this run tested |
 | `shell-unit` | every push to `main` | the shell's Node unit tests (`native/shell`, `npm test`) on Linux; on pull requests they run inside `shell-ios` |
 | `merge-message` | every pull request | fails when the title or a commit carries a skip-ci marker, which the squash merge would copy to `main` (GitHub then starts no workflow for that commit) |
 
@@ -25,6 +25,21 @@ On a push to `main` the unit tests of every area run whatever the push touched (
 pull requests that were each green can break `main` together, and the merge commit after
 them need not touch the area they broke. So `native-core` and `shell-unit` run on every
 push to `main`; only the macOS builds stay path-filtered there.
+
+`gates.yml` keeps those PR gates current without re-running the whole Gate: when a PR gains or
+loses one of those labels or its body is edited, and when a push to `main` changes an area an
+open PR also changes, it re-runs only the `required` job of that PR's newest Gate run
+(about 15 s). A run still in progress is waited for (up to 4 min) and re-run anyway, because
+its `required` finishes before `e2e-report` and may already have read the old labels. A fork's
+pull request gets a read-only token, so `gates.yml` cannot re-run anything for it: check its
+labels by hand before landing (none of tonight's PRs come from forks). The areas, in which two changes can break each other: web app, iPhone shell
+(`native/shell`), Swift core (`native/RouteIQCore`, `docs/contracts`), native app, design, CI.
+README, PLAN, `docs/` and `.claude/` are in none, so a docs merge never makes a PR stale.
+
+**Open PRs from before the gates.** A re-run uses the `gate.yml` of the run it re-runs, so a PR
+whose last Gate run predates the gate steps has none of them, and its old green `required`
+ignores the labels. When the gates land, update the branch of every open PR (each gets a new
+Gate run), or check its hold and phone labels by hand until it has one.
 
 `main-red.yml` follows the Gate on `main`: when the newest finished run failed or was
 cancelled it opens the issue **main is red** (label `p1`, link to the run), or comments on
@@ -66,7 +81,7 @@ request with `gate.yml` is merged). The script sends this to
 ```json
 {
   "required_status_checks": {
-    "strict": true,
+    "strict": false,
     "checks": [{ "context": "required", "app_id": 15368 }]
   },
   "enforce_admins": true,
@@ -86,7 +101,7 @@ request with `gate.yml` is merged). The script sends this to
 | setting | value | why |
 | --- | --- | --- |
 | required status check | `required`, reported by GitHub Actions (app 15368) | the gate above |
-| strict | on | the branch must contain the newest `main` before it merges, so what was tested is what lands |
+| strict | **off** | strict would make every PR update after every merge, docs included. Instead the PR gate "up to date by area" fails `required` only when `main` changed an area the PR also changes after its checks ran (#91 and #121 broke `main` as two green PRs in one package). This doc said `true` until 2026-11-12; the setting on GitHub was `false` |
 | pull request required | yes, 0 approvals | a solo owner cannot approve their own pull request; the review is the orchestrator's independent agent |
 | dismiss stale reviews | off | there are no approvals to dismiss |
 | `enforce_admins` | on | the rule applies to the owner's token too: no direct pushes |
@@ -101,11 +116,12 @@ And to `PATCH repos/akashdesai93/routeiq`: `allow_squash_merge: true`,
 ### What this changes day to day
 
 - **No direct pushes to `main`,** docs and skill edits included. Branch, open a pull
-  request, and merge it with `gh pr merge N --squash --auto`: it merges by itself once
-  `required` is green.
-- **"Branch is out of date"** (strict): after another pull request merges, bring the next
-  one up to date with `gh pr update-branch N`, then the gate runs again and auto-merge
-  finishes it. Merge one at a time.
+  request; the lander merges it with the REST merge in `.claude/skills/pr-watch/SKILL.md`
+  (squash, `sha` pinned to the reviewed head, explicit message) once `required` is green.
+- **"update the branch"** (the area gate): after another pull request merges in the same area,
+  bring the next one up to date (`gh pr update-branch N`, or in the cloud
+  `gh api -X PUT repos/akashdesai93/routeiq/pulls/N/update-branch`); the gate runs again.
+  Land one at a time.
 - **The head branch is deleted** on GitHub when its pull request merges. Start the next
   piece of work from `origin/main`.
 - **Never `--admin`.** With `enforce_admins` it would not work anyway.

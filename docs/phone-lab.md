@@ -18,6 +18,48 @@ node scripts/phone/lab/run.mjs --scenario locked-wrong-turn
 > **The phone speaks during a drive scenario**, at its media volume: "RouteIQ started", turns, "New
 > route". Turn the volume down before a night run if that matters.
 
+## Preflight and hard rules
+
+The phone is the owner's. The first night the lab used its real position once, locked it with
+its passcode by pressing a button over USB, spoke aloud at night, started when nobody had said
+it could, met a password prompt nobody could answer, and tested stale builds. So:
+
+1. **Only inside a window the owner opened.** The orchestrator posts
+   `lab-window: until HH:MM UTC` on #17 (add `· voice ok` if the phone may speak) when the
+   owner says so. No window, no run: `queue.mjs` reads #17 itself right before its first
+   install (after any wait for an unlock) and installs nothing without an open window, or when
+   it cannot read #17. The window is in UTC; `--until` and quiet hours are on the PC's clock.
+2. **Quiet hours, 22:00 to 07:00 on the PC's clock:** `run.mjs` refuses every scenario that is
+   not listed as silent (`SILENT_SCENARIOS` in `preflight.mjs`: only `starts-and-plans`; a new
+   scenario counts as speaking until it is listed) unless `--voice-ok` is given, which needs the
+   owner's `voice ok`.
+3. **Never start on an unlock by itself.** `queue.mjs --wait-unlocked` needs `--until HH:MM`,
+   the end of the owner's window; an unlock after that may be the owner taking the phone with
+   them.
+4. **No hardware buttons, no touches, no forced sleep** outside `--lock --owner-unlocks-after`.
+   `tests/phoneLabPreflight.test.ts` fails if a lab script sends a button press.
+5. **Location is only ever the simulated drive** (the runner keeps one connection, and the app
+   starts a lab drive only at the simulated start).
+6. **Only the PR's current code:** test a build whose commit is the PR's head
+   (`phone-queue.json` from `node scripts/orch/state.mjs --out tmp/orch` has both); the
+   preflight refuses another one (`--build-sha`, `--head-sha`, each at least 7 hex characters).
+7. **A prompt for a password, a code or trust, on the PC or the phone: stop.** Post
+   `state: blocked` and what it asked. Never type into it and never retry in a loop.
+8. **The lab agent does not wake itself to poll.** The queue script waits without a model; the
+   agent runs once per window.
+
+Before each session:
+
+```powershell
+node scripts/phone/lab/preflight.mjs --scenario locked-wrong-turn --build-sha <built> --head-sha <PR head>
+```
+
+It checks 1, 2 and 6 and reminds you of the rest; exit 0 means go. Results go on the PR as
+`phone-result: pass <sha7> · <scenarios> · <one line>` (or `fail`), and on a pass the lab adds
+the `phone-verified` label, which the Gate needs for a `needs-phone` PR
+(`docs/orchestrator.md`). Nothing personal in that comment: no position, no device name, no
+screenshot with a map.
+
 ## What the owner has to do
 
 Once: nothing more than what `docs/phone-install.md` and `docs/phone-sim-location.md` already
@@ -270,7 +312,7 @@ The phone is the owner's. It must never be left without a RouteIQ that works.
 
 ```powershell
 node scripts/phone/lab/queue.mjs plan.json                      # now
-node scripts/phone/lab/queue.mjs plan.json --wait-unlocked 12   # when the phone is next unlocked
+node scripts/phone/lab/queue.mjs plan.json --wait-unlocked 8 --until 06:30   # when the phone is next unlocked, before 06:30
 ```
 
 ```json
@@ -291,7 +333,7 @@ rollback build, which is then started to see its routes. A build with `"keep": f
 throwaway (a pull request's code plus the lab, built only to be measured) and is never the one
 left on the phone. A run with `--lock` is refused.
 
-`--wait-unlocked` reads one value from the phone every 10 minutes, presses nothing and starts
+`--wait-unlocked <hours> --until HH:MM` reads one value from the phone every 10 minutes, presses nothing and starts
 nothing while it is locked. When the phone is unlocked it waits two more minutes and looks again
 before it begins, because someone who has just picked the phone up is using it. The queue's
 default drive is the in-app test drive, so the phone's own position is not changed; the phone

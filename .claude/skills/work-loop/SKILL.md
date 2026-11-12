@@ -75,10 +75,14 @@ yours, drop your label change and pick again.
 
 - Commit in the worktree in the style `Add <feature>` (end with the Co-Authored-By line),
   then `git push -u origin <branch>`.
-- `gh pr create` with a body that says what changed, how it was verified (paste the
-  one-line verify summary) and `Closes #N`, and ends with the Claude Code attribution line.
+- `gh pr create` (in the cloud: `gh api -X POST repos/akashdesai93/routeiq/pulls`) with a body
+  that says what changed, how it was verified (paste the one-line verify summary) and
+  `Closes #N`, and ends with the Claude Code attribution line. Open it ready, never as a
+  draft; add `do-not-merge` while it is unfinished. If the change has to be seen on the real
+  iPhone (anything in `native/`, the look of a screen, GPS, voice, background behaviour), add
+  `needs-phone` and a `## Phone check` section with the exact steps.
 - Label the issue `review` and remove `in-progress`. **Don't merge your own PR.** The
-  orchestrator's `/pr-watch` reviews it independently and merges it.
+  reviewer role's `/pr-watch` reviews it independently and lands it.
 - Post `/status` to the board (#17) with the PR link.
 - Leave the worktree with `ExitWorktree` (keep it, since the PR may need changes).
 
@@ -108,6 +112,13 @@ owner (the `needs-human` list), and what comes next. Then pace yourself:
 - if you are waiting on the owner (only `needs-human`/`review` left, nothing to discover),
   schedule 1800–3600 s;
 - if CI or a PR check is running, schedule the time it usually takes.
+
+## Claim before you fix
+
+Anything that is not your issue (main is red, a broken test, a shared helper) gets claimed
+before you touch it: on its issue (for main, the `main is red` issue) add `in-progress` and
+the `claude-loop: claimed by <name>` comment. A claim younger than 2 h belongs to someone
+else: review their PR instead of opening a second fix (#138 and #139 fixed the same break).
 
 ## Hard limits
 
