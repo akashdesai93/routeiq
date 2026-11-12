@@ -54,6 +54,14 @@ describe('renderPrompt', () => {
     expect(renderPrompt(builder(), { name: 'cloud-b', issues: '1', note: 'a\nb\nc\nd\ne\nf\ng' }, rules)).toHaveProperty('error')
   })
 
+  it('passes shell snippets in the rules through untouched ($&, $1, $$, $` and $\')', () => {
+    const shell = "Run `gh api $R/pulls --jq '$&'`, then `echo $1 $$` and `x=$`y` and cost $'."
+    const out = renderPrompt(builder(), { name: 'cloud-builder-84', issues: '84' }, shell)
+    if ('error' in out) throw new Error(out.error)
+    expect(out.text).toContain(shell)
+    expect(out.text).not.toContain('{{rules}}')
+  })
+
   it('gives standing roles their default names', () => {
     const out = renderPrompt(load('reviewer'), {}, rules)
     expect(out).toMatchObject({ name: 'cloud-reviewer' })

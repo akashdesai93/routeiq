@@ -37,8 +37,8 @@ Write bodies to a scratch file first (rtk can drop text piped on stdin).
 
 **`main` is protected** (`docs/branch-protection.md`). The orchestrator no longer pushes
 docs or skill commits to `main`: every change of its own, however small, goes on a
-`claude/orch-<slug>` branch in a worktree, through a PR, merged with
-`gh pr merge N --squash --auto` once the single required check `required` is green. Batch
+`claude/orch-<slug>` branch in a worktree, through a PR, landed with the REST merge in
+`pr-watch` (explicit commit message, pinned `sha`) once the single required check `required` is green. Batch
 small doc and skill edits into one PR per tick rather than one PR per line.
 
 ## 1. Survey
