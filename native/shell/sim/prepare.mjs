@@ -19,7 +19,7 @@ import { build } from 'esbuild';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { build, parse } from 'plist';
+import * as plist from 'plist';
 import { injectSim, SIM_FILE } from '../scripts/web-checks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,9 +27,9 @@ const port = Number(process.env.SIM_PORT ?? 8521);
 
 /** The app may load plain http from this machine, and nothing else changes. */
 export function allowLocalHttp(xml) {
-  const info = parse(xml);
+  const info = plist.parse(xml);
   info.NSAppTransportSecurity = { NSAllowsLocalNetworking: true };
-  return build(info);
+  return plist.build(info);
 }
 
 async function prepareWww() {

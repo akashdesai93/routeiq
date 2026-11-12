@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { build, parse } from 'plist';
+import * as plist from 'plist';
 import { hasSimHook, injectBridge, injectSim, SIM_FILE } from '../scripts/web-checks.mjs';
 import { patchInfoPlist } from '../scripts/info-plist.mjs';
 import { allowLocalHttp } from '../sim/prepare.mjs';
@@ -91,9 +91,9 @@ test('route requests go to the stub without the token; with a real token the map
 });
 
 test('only the simulator build may load plain http, and only from this machine', () => {
-  const phone = patchInfoPlist(build({ CFBundleDisplayName: 'RouteIQ' }));
-  assert.equal(parse(phone).NSAppTransportSecurity, undefined);
-  assert.deepEqual(parse(allowLocalHttp(phone)).NSAppTransportSecurity, { NSAllowsLocalNetworking: true });
+  const phone = patchInfoPlist(plist.build({ CFBundleDisplayName: 'RouteIQ' }));
+  assert.equal(plist.parse(phone).NSAppTransportSecurity, undefined);
+  assert.deepEqual(plist.parse(allowLocalHttp(phone)).NSAppTransportSecurity, { NSAllowsLocalNetworking: true });
 });
 
 const DIAGNOSTICS = `RouteIQ drive diagnostics
