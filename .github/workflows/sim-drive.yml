@@ -1,0 +1,171 @@
+name: Simulator drive (screenshots and video)
+
+# Runs the real iPhone shell app (native/shell) in the iOS Simulator, feeds it
+# a simulated GPS drive with a wrong turn, and uploads screenshots, a video
+# and the app's Drive diagnostics as the artifact "sim-drive".
+#
+# No secret is needed: route requests are answered by a stub server on the
+# runner from the made-up road network of the e2e scenarios, and the map is a
+# drawing of those roads. With the optional secret MAPBOX_PUBLIC_TOKEN_SIM the
+# map is Mapbox's own (route requests still go to the stub).
+#
+# The simulator build carries a page script and a plain-http exception that
+# the phone build must never have: native/shell/sim/prepare.mjs adds them
+# here, and shell-ios.yml fails if its app has either.
+on:
+  workflow_dispatch:
+    inputs:
+      gps:
+        description: "How the GPS is fed: 'start' (simctl location start, the simulator moves by itself) or 'set' (the script sets a position each second)"
+        default: start
+        type: choice
+        options: [start, set]
+      device:
+        description: 'Simulator device name (empty: a plain iPhone on the newest iOS runtime)'
+        default: ''
+  pull_request:
+    paths:
+      - 'native/shell/**'
+      - 'src/device/native/**'
+      - '.github/workflows/sim-drive.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-drive-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drive:
+    name: Drive the app in the iOS Simulator
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: native/shell
+    env:
+      # Never a token in the web build, whatever the repository's settings hold.
+      VITE_MAPBOX_TOKEN: ''
+      SIM_PORT: '8521'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          # The exact syntax of this Xcode's simctl, for whoever adapts sim/drive.mjs.
+          xcrun simctl location 2>&1 | head -40 || true
+          xcrun simctl io 2>&1 | head -30 || true
+
+      - name: Pick and boot an iPhone simulator
+        env:
+          WANTED_DEVICE: ${{ inputs.device }}
+        run: |
+          xcrun simctl list devices available
+          picked=$(xcrun simctl list devices available -j | node sim/pick-device.mjs "$WANTED_DEVICE")
+          echo "picked: $picked"
+          udid=$(printf '%s' "$picked" | cut -f1)
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          echo "Simulator: $(printf '%s' "$picked" | cut -f2,3)" >> "$GITHUB_STEP_SUMMARY"
+          # Boots in the background while the app builds.
+          xcrun simctl boot "$udid"
+
+      - name: Install the web app's dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Install the shell's dependencies
+        run: npm ci
+
+      - name: Unit tests (with the simulator drive's own)
+        run: npm test
+
+      - name: Build the web app into www/ (no token)
+        run: npm run build
+
+      - name: Add the simulator drive's page script
+        env:
+          MAPBOX_PUBLIC_TOKEN_SIM: ${{ secrets.MAPBOX_PUBLIC_TOKEN_SIM }}
+        run: |
+          if [ -z "$MAPBOX_PUBLIC_TOKEN_SIM" ]; then
+            echo "::notice::No MAPBOX_PUBLIC_TOKEN_SIM secret: the map is a drawing of the made-up roads."
+          fi
+          node sim/prepare.mjs www
+
+      - name: Generate the Xcode project and allow http to this machine
+        run: |
+          npm run ios:generate
+          node sim/prepare.mjs plist
+
+      - name: Build for the simulator, unsigned
+        run: |
+          mkdir -p build
+          status=0
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -derivedDataPath build/sim-derived \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build > build/xcodebuild-sim.log 2>&1 || status=$?
+          grep -E "(error|warning): " build/xcodebuild-sim.log | sort -u | head -100 || true
+          tail -20 build/xcodebuild-sim.log
+          if [ "$status" -ne 0 ]; then
+            echo "::error::xcodebuild failed with status $status"
+            exit "$status"
+          fi
+          APP=build/sim-derived/Build/Products/Debug-iphonesimulator/App.app
+          test -f "$APP/public/routeiq-sim.js"
+          grep -q 'routeiq-sim.js' "$APP/public/index.html"
+          plutil -extract NSAppTransportSecurity json -o - "$APP/Info.plist"
+          lipo -info "$APP/App"
+
+      - name: Install the app in the simulator
+        run: |
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          # Simulator.app's window is what the lock test's menu command needs; the rest works without it.
+          open -a Simulator --args -CurrentDeviceUDID "$SIM_UDID" || true
+          xcrun simctl install "$SIM_UDID" build/sim-derived/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl listapps "$SIM_UDID" | grep -A3 'dev.routeiq.shell' | head -8
+
+      - name: Drive
+        id: drive
+        env:
+          GPS_MODE: ${{ inputs.gps || 'start' }}
+        run: |
+          status=0
+          node sim/drive.mjs --udid "$SIM_UDID" --out build/sim-drive --gps "$GPS_MODE" --port "$SIM_PORT" || status=$?
+          if [ -f build/sim-drive/summary.md ]; then cat build/sim-drive/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+          ls -lh build/sim-drive || true
+          if [ "$status" -eq 1 ]; then echo "::error::The drive ran, but a check did not hold (see the summary)."; fi
+          if [ "$status" -ge 2 ]; then echo "::error::The drive could not be made (see the summary and the screenshots)."; fi
+          exit "$status"
+
+      - name: Simulator log of the app (on failure)
+        if: failure()
+        run: |
+          mkdir -p build/sim-drive
+          xcrun simctl spawn "$SIM_UDID" log show --last 15m --style compact --predicate 'process == "App"' 2>/dev/null | tail -400 > build/sim-drive/app-log.txt || true
+          xcrun simctl io "$SIM_UDID" screenshot build/sim-drive/zz-at-failure.png || true
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-drive
+          path: |
+            native/shell/build/sim-drive/
+            native/shell/build/xcodebuild-sim.log
+          if-no-files-found: warn
+          retention-days: 14

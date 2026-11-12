@@ -151,6 +151,17 @@ jobs:
             exit 1
           fi
           echo "no Mapbox token in the app"
+          # Nothing of the simulator drive (native/shell/sim, sim-drive.yml): not its page
+          # script, and not its exception for plain http.
+          if LC_ALL=C grep -r -a -l 'routeiq-sim' "$APP"; then
+            echo "::error::the simulator drive's script is in the phone app (files listed above)"
+            exit 1
+          fi
+          if plutil -extract NSAppTransportSecurity json -o - "$APP/Info.plist" > /dev/null 2>&1; then
+            echo "::error::the phone app has an App Transport Security exception"
+            exit 1
+          fi
+          echo "nothing of the simulator drive in the app"
 
       - name: Package Payload/App.app as an ipa
         run: |

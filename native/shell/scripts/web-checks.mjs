@@ -43,3 +43,39 @@ export function usesRootPaths(html) {
   const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
   return refs.length > 0 && refs.every((ref) => ref.startsWith('/') && !ref.startsWith('//'));
 }
+
+/**
+ * The simulator drive's page script (sim/, the CI run in the iOS Simulator):
+ * it answers route requests from a made-up road network on the build machine
+ * and presses Start drive by itself. Only sim/prepare.mjs adds it to www/,
+ * after this build, and it must never be in an app that goes on a phone.
+ */
+export const SIM_FILE = 'routeiq-sim.js';
+
+/**
+ * True when a built file loads or mentions the simulator drive's script. The
+ * phone build fails on it (build-web.mjs), and the finished app is searched
+ * again in .github/workflows/shell-ios.yml.
+ * @param {string} text
+ */
+export function hasSimHook(text) {
+  return text.includes('routeiq-sim');
+}
+
+/**
+ * Adds the simulator drive's script to a built index.html, right after the
+ * bridge script (it wraps the plugin the bridge puts on the page). `base` is
+ * where the stub server listens; only this machine itself is accepted.
+ * @param {string} html
+ * @param {string} base
+ * @param {string} [token] a real public token for the map, when the run has one
+ * @returns {string}
+ */
+export function injectSim(html, base, token = '') {
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}$/.test(base)) throw new Error('The stub server must be on this machine: http://127.0.0.1:<port>');
+  if (token !== '' && !/^pk\.[A-Za-z0-9._-]+$/.test(token)) throw new Error('The map token for the simulator must be a public token (pk.)');
+  if (hasSimHook(html)) throw new Error('index.html already loads the simulator drive script');
+  if (!html.includes(BRIDGE_TAG)) throw new Error('index.html has no bridge script: run "npm run build" first');
+  const tokenPart = token === '' ? '' : ` data-token="${token}"`;
+  return html.replace(BRIDGE_TAG, `${BRIDGE_TAG}\n    <script src="/${SIM_FILE}" data-base="${base}"${tokenPart}></script>`);
+}
