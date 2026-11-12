@@ -3,8 +3,8 @@ import XCTest
 import RouteIQCore
 
 // Mirrors tests/reroute.test.ts, assertion for assertion, except the describe
-// "line helpers the engine and the simulated drive share" (in GeoTests.swift) and
-// "side streets found by probes during a drive", which needs probe.ts (ported with Probe.swift).
+// "line helpers the engine and the simulated drive share" (in GeoTests.swift).
+// "side streets found by probes during a drive" is RerouteSideStreetTests, at the end.
 // Scripted drives through the reroute engine on a fake clock and a made-up road
 // network (see DriveWorld.swift). No network, no timers; every position is invented.
 
@@ -1584,5 +1584,236 @@ final class RerouteLeadFromTheCarTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(on.considered).turnInM, 500, accuracy: 0.5)
         XCTAssertEqual(try XCTUnwrap(try decide(.nan).considered).turnInM, 700, accuracy: 0.5)
         XCTAssertEqual(try XCTUnwrap(try decide(-50).considered).turnInM, 700, accuracy: 0.5)
+    }
+}
+
+// MARK: - describe('side streets found by probes during a drive (PLAN step 11c, #5)')
+
+final class RerouteSideStreetTests: XCTestCase {
+    // Each check, the provider offers A (the route being driven) and B from the car, never the
+    // side street S (500 m south of A from 6 to 14 km). A is held up (5 minutes over its typical
+    // time), so one probe goes out through the via point checkProbes picks, answered the way Mapbox
+    // snaps a via: along a road within 250 m of it (viaRadiusM), here only S, or NoSegment. A probed
+    // route is asked through a via, so the current path is asked the same way too (its path check,
+    // through vias where S leaves it), and the engine compares S with that time only.
+    //
+    // `bias`: how much lower a time asked through via points comes back than the same path asked
+    // as an ordinary route (measured 3 to 13 % with 2 to 10 vias, README). The real times are etaA
+    // and etaS; the provider answers A's ordinary check with etaA, and both via-asked requests with
+    // the time times (1 - bias).
+
+    private func distanceToS(_ p: LngLat) -> Double {
+        let project = Geo.localProjector(p)
+        let xy = DriveWorld.lineOf(.S).map(project)
+        var best = Double.infinity
+        for i in stride(from: 1, to: xy.count, by: 1) { best = min(best, Geo.pointToSegment(XY(0, 0), xy[i - 1], xy[i]).distanceM) }
+        return best
+    }
+
+    private struct ProbedDrive {
+        var polls: Int
+        var etaA: Double
+        var etaS: Double
+        var bias: Double = 0
+        var startAlongM: Double = 1000
+        /// Checks (0 for the first) at which the probe fails (NoSegment, a network error).
+        var probeFailsAt: [Int] = []
+        /// Checks at which the path check for the current path fails, so there is no like-for-like time.
+        var pathCheckFailsAt: [Int] = []
+        /// Leave the path check out altogether, and compare S with A's ordinary time (the unlike comparison this rules out).
+        var unlike = false
+        /// The path check's time for A, when it reads otherwise than etaA x (1 - bias).
+        var pathCheckSec: Double? = nil
+        var options: RerouteOptions = .default
+    }
+
+    private struct ProbedRecord {
+        let decision: RerouteDecision
+        let vias: [LngLat]
+        let found: Bool
+    }
+
+    private struct ProbedResult {
+        let records: [ProbedRecord]
+        let switchedTo: (poll: Int, route: RouteCandidate)?
+        let memory: CheckProbeMemory
+    }
+
+    private func probedDrive(_ d: ProbedDrive) -> ProbedResult {
+        let route = DriveWorld.candidate(.A, DriveWorld.at(0, 0), 2400)!
+        let heldUp: DriveWorld.Patch = { $0.typicalDurationSec = d.etaA - 300 }
+        // Math.round of a positive number.
+        let viaAsked = { (sec: Double) in (sec * (1 - d.bias) + 0.5).rounded(.down) }
+        var state = RerouteState.initial
+        var memory = CheckProbeMemory.initial
+        var records: [ProbedRecord] = []
+        for poll in 0..<d.polls {
+            let alongM = d.startAlongM + Double(poll) * 300
+            let here = Geo.pointAtDistance(route.geometry, alongM)!.point
+            let fresh = [DriveWorld.candidate(.A, here, d.etaA, heldUp), DriveWorld.candidate(.B, here, d.etaA + 200)].compactMap { $0 }
+            let vias = Probe.checkProbes(CheckProbeInput(route: route.geometry, alongM: alongM, fresh: fresh, memory: memory, allowed: 1))
+            // Past the point where S leaves A, this network has no road from the car onto S: no route that way.
+            let probed: [RouteCandidate] = vias.compactMap { via in
+                if d.probeFailsAt.contains(poll) || distanceToS(via) > 250 { return nil }
+                guard var side = DriveWorld.candidate(.S, here, viaAsked(d.etaS), { $0.typicalDurationSec = d.etaS }) else { return nil }
+                side.via = via
+                return side
+            }
+            let candidates = Probe.mergeCheckProbes(fresh, nil, probed)
+            let found = candidates.count > fresh.count
+            // The path check a probe needs: the current path asked through via points, as the shell asks it.
+            let pathCheck: [RouteCandidate]? = !found || d.pathCheckFailsAt.contains(poll) || d.unlike
+                ? nil
+                : [DriveWorld.candidate(.A, here, d.pathCheckSec ?? viaAsked(d.etaA), heldUp)!]
+            let decision = Reroute.decideReroute(
+                state,
+                RerouteObservation(nowSec: Double(poll) * 60, route: DrivenRoute(route), positionAlongM: alongM, speedMps: 5, candidates: candidates, baseline: pathCheck),
+                options: d.options
+            )
+            records.append(ProbedRecord(decision: decision, vias: vias, found: found))
+            state = decision.nextState
+            memory = Probe.rememberCheckProbes(memory, vias.count, decision, candidates)
+            if decision.action == .switchRoute {
+                let to = candidates.first { $0.id == decision.toRouteId }!
+                return ProbedResult(records: records, switchedTo: (poll, to), memory: memory)
+            }
+        }
+        return ProbedResult(records: records, switchedTo: nil, memory: memory)
+    }
+
+    private func codes(_ records: [ProbedRecord]) -> [String] { records.map { $0.decision.code.rawValue } }
+
+    // it('a side street that saves 3 minutes is found by a probe and switched to on the second check in a row, like any route')
+    func testSideStreetsFoundByProbes_aSideStreetThatSaves3MinutesIsFoundByAProbeAndSwitchedToOnTheSecondCheckInARow() throws {
+        let r = probedDrive(ProbedDrive(polls: 6, etaA: 2000, etaS: 1820))
+        XCTAssertEqual(codes(r.records), ["confirming", "faster-route"])
+        XCTAssertTrue(r.records.allSatisfy(\.found))
+        XCTAssertEqual(r.records[0].decision.reason, "Staying: faster route saves 3 minutes, confirming, check 1 of 2")
+        // The second check asked through the same via, so the same side street could come back and be confirmed.
+        XCTAssertEqual(r.records[1].vias, r.records[0].vias)
+        let switchedTo = try XCTUnwrap(r.switchedTo)
+        XCTAssertEqual(DriveWorld.nameOf(switchedTo.route), .S)
+        XCTAssertEqual(switchedTo.route.source, .probe)
+        let considered = try XCTUnwrap(r.records[1].decision.considered)
+        XCTAssertEqual(considered.savingSec, 180)
+        XCTAssertEqual(considered.requiredLeadM, 400)
+        XCTAssertEqual(considered.onFreeway, false)
+        // Where S leaves A: 6 km, from the car 1.3 km along.
+        XCTAssertEqual(considered.turnInM, 4700, accuracy: 0.5)
+        XCTAssertEqual(r.records[1].decision.reason, "Switching: saves 3 minutes, turn in 2.9 miles")
+        // A switch drops the via: the next check starts from the new route.
+        XCTAssertEqual(r.memory, CheckProbeMemory(used: 2, round: 2, keep: nil))
+    }
+
+    // it('an equal-time side street never switches, however low the via-asked time comes back (#81)')
+    func testSideStreetsFoundByProbes_anEqualTimeSideStreetNeverSwitchesHoweverLowTheViaAskedTimeComesBack() {
+        // 10 % low: S reads 1800 s against A's ordinary 2000 s, which would pass both minimums. Compared
+        // with A asked the same way (1800 s), it saves nothing.
+        for bias in [0.03, 0.1, 0.13] {
+            let r = probedDrive(ProbedDrive(polls: 10, etaA: 2000, etaS: 2000, bias: bias))
+            XCTAssertNil(r.switchedTo, "bias \(bias)")
+            XCTAssertGreaterThan(r.records.filter(\.found).count, 0)
+            XCTAssertFalse(r.records.contains { $0.decision.code == .confirming })
+        }
+    }
+
+    // it('a path check that reads higher than the ordinary time never makes a side street look faster (#82 review)')
+    func testSideStreetsFoundByProbes_aPathCheckThatReadsHigherThanTheOrdinaryTimeNeverMakesASideStreetLookFaster() throws {
+        // A: 2000 s ordinary, 2150 s through the path check; S 1960 s. Against the ordinary time S saves
+        // only 40 s, so it never switches: the lower of the two is the one measured against.
+        let r = probedDrive(ProbedDrive(polls: 10, etaA: 2000, etaS: 1960, pathCheckSec: 2150))
+        XCTAssertNil(r.switchedTo)
+        let onS = r.records.filter(\.found)
+        XCTAssertGreaterThan(onS.count, 0)
+        XCTAssertEqual(Set(codes(onS)), Set(["saving-too-small"]))
+        XCTAssertEqual(try XCTUnwrap(onS[0].decision.considered).savingSec, 40)
+    }
+
+    // it('a real 3-minute side street still switches with the via bias, compared like for like')
+    func testSideStreetsFoundByProbes_aReal3MinuteSideStreetStillSwitchesWithTheViaBiasComparedLikeForLike() throws {
+        let r = probedDrive(ProbedDrive(polls: 6, etaA: 2000, etaS: 1820, bias: 0.1))
+        XCTAssertEqual(codes(r.records), ["confirming", "faster-route"])
+        // 1800 s against 1638 s: the saving is measured on the via-asked times of both.
+        XCTAssertEqual(try XCTUnwrap(r.records[1].decision.considered).savingSec, 162)
+        XCTAssertEqual(DriveWorld.nameOf(try XCTUnwrap(r.switchedTo).route), .S)
+    }
+
+    // it('without a like-for-like time on a check, a side street cannot count, not even towards confirmation')
+    func testSideStreetsFoundByProbes_withoutALikeForLikeTimeOnACheckASideStreetCannotCountNotEvenTowardsConfirmation() throws {
+        // The path check fails on check 1: S is unconfirmed there, the count starts over, and the switch comes on check 3.
+        let r = probedDrive(ProbedDrive(polls: 8, etaA: 2000, etaS: 1820, pathCheckFailsAt: [1]))
+        XCTAssertEqual(codes(r.records), ["confirming", "probe-unconfirmed", "confirming", "faster-route"])
+        XCTAssertEqual(r.records[1].decision.reason, "Staying: a side street may be faster, but its time could not be compared like for like")
+        XCTAssertNil(r.records[1].decision.nextState.pending)
+        XCTAssertEqual(try XCTUnwrap(r.switchedTo).poll, 3)
+        // No path check at all: never, whatever S seems to save against A's ordinary time.
+        let never = probedDrive(ProbedDrive(polls: 10, etaA: 2000, etaS: 1500, unlike: true))
+        XCTAssertNil(never.switchedTo)
+        XCTAssertEqual(Set(codes(never.records.filter(\.found))), Set(["probe-unconfirmed"]))
+    }
+
+    // it('a side street that saves only 60 s never triggers a switch, however often it is found')
+    func testSideStreetsFoundByProbes_aSideStreetThatSavesOnly60sNeverTriggersASwitchHoweverOftenItIsFound() throws {
+        let r = probedDrive(ProbedDrive(polls: 12, etaA: 2000, etaS: 1940))
+        XCTAssertNil(r.switchedTo)
+        // Nothing is being confirmed, so the two sides of the road take turns: S is south, found every other check.
+        XCTAssertEqual(r.records.map(\.found), (0..<12).map { $0 % 2 == 0 })
+        let onS = r.records.filter(\.found)
+        XCTAssertEqual(Set(codes(onS)), Set(["saving-too-small"]))
+        XCTAssertEqual(Set(codes(r.records.filter { !$0.found })), Set(["current-best"]))
+        XCTAssertEqual(onS[0].decision.reason, "Staying: faster route saves only 60 seconds")
+        XCTAssertEqual(try XCTUnwrap(onS[0].decision.considered).savingSec, 60)
+    }
+
+    // it('a side street is held to 5 % of the time left as well: 2.5 minutes on a 60-minute trip is not enough')
+    func testSideStreetsFoundByProbes_aSideStreetIsHeldTo5PercentOfTheTimeLeftAsWell() {
+        let r = probedDrive(ProbedDrive(polls: 8, etaA: 3600, etaS: 3450))
+        XCTAssertNil(r.switchedTo)
+        XCTAssertEqual(Set(codes(r.records.filter(\.found))), Set(["saving-share-too-small"]))
+    }
+
+    // it('a side street found on one check and missed on the next starts the confirmation over')
+    func testSideStreetsFoundByProbes_aSideStreetFoundOnOneCheckAndMissedOnTheNextStartsTheConfirmationOver() throws {
+        let r = probedDrive(ProbedDrive(polls: 8, etaA: 2000, etaS: 1820, probeFailsAt: [1]))
+        XCTAssertEqual(r.records.map(\.found), [true, false, true, true])
+        // The check that missed it had no winner (B is slower): the count starts again.
+        XCTAssertEqual(codes(r.records), ["confirming", "current-best", "confirming", "faster-route"])
+        XCTAssertEqual(try XCTUnwrap(r.switchedTo).poll, 3)
+    }
+
+    // it('needs as many checks in a row as confirmPolls says, for a side street too')
+    func testSideStreetsFoundByProbes_needsAsManyChecksInARowAsConfirmPollsSaysForASideStreetToo() throws {
+        let r = probedDrive(ProbedDrive(polls: 8, etaA: 2000, etaS: 1820, options: RerouteOptions(confirmPolls: 3)))
+        XCTAssertEqual(codes(r.records), ["confirming", "confirming", "faster-route"])
+        XCTAssertEqual(try XCTUnwrap(r.switchedTo).poll, 2)
+    }
+
+    // it('a side street whose turn-off is too close is refused, whatever it saves')
+    func testSideStreetsFoundByProbes_aSideStreetWhoseTurnOffIsTooCloseIsRefusedWhateverItSaves() throws {
+        // The first check (5.4 km along A) probes the north side; the second, from 5.7 km, finds S,
+        // which turns off 300 m ahead: under the 400 m lead. After that its turn-off is behind the car.
+        let r = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1700, startAlongM: 5400))
+        XCTAssertEqual(r.records.map(\.found), [false, true, false, false])
+        XCTAssertEqual(r.records[1].decision.code, .tooLate)
+        let reason = r.records[1].decision.reason
+        XCTAssertNotNil(reason.range(of: "^Staying: faster route turns off in .+, too late to take safely$", options: .regularExpression), reason)
+        XCTAssertEqual(try XCTUnwrap(r.records[1].decision.considered).turnInM, 300, accuracy: 0.5)
+        XCTAssertNil(r.switchedTo)
+    }
+
+    // it('a route that is not held up is not probed: no jam reported and under 2 minutes over its typical time')
+    func testSideStreetsFoundByProbes_aRouteThatIsNotHeldUpIsNotProbed() {
+        let route = DriveWorld.candidate(.A, DriveWorld.at(0, 0), 2400)!
+        let here = DriveWorld.at(1000, 0)
+        let vias = { (typicalDurationSec: Double) in
+            Probe.checkProbes(CheckProbeInput(
+                route: route.geometry, alongM: 1000,
+                fresh: [DriveWorld.candidate(.A, here, 2000) { $0.typicalDurationSec = typicalDurationSec }!, DriveWorld.candidate(.B, here, 2200)!],
+                memory: .initial, allowed: 1
+            ))
+        }
+        XCTAssertEqual(vias(2000), [])
+        XCTAssertEqual(vias(1881), [])
+        XCTAssertEqual(vias(1880).count, 1)
     }
 }
