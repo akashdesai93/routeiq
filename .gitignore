@@ -55,3 +55,6 @@ blob-report/
 
 # Design screenshots (npm run design:shots)
 design-shots/
+
+# Fleet state (node scripts/orch/state.mjs --out tmp/orch)
+tmp/
