@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "routeiq/signal-index.schema.json",
+  "title": "OsmBundleIndex",
+  "description": "public/seed/osm-signals/index.json, version 2 (src/providers/osm/bundle.ts). A tile in covered and in files: read <tileId>.json. In covered only: known to hold no signals. Not in covered: the bundle does not speak for it; a file for it is a lower bound.",
+  "type": "object",
+  "required": ["version", "source", "dataDate", "extracts", "covered", "files", "nodeCount", "attribution", "license"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 2 },
+    "source": { "type": "string" },
+    "dataDate": { "description": "The oldest of the extracts' dates, milliseconds since 1970; every bundled tile carries it as fetchedAt.", "type": "number", "minimum": 0 },
+    "extracts": { "type": "array", "items": { "$ref": "#/$defs/extract" } },
+    "covered": { "$ref": "#/$defs/tileRows" },
+    "files": { "$ref": "#/$defs/tileRows" },
+    "nodeCount": { "type": "integer", "minimum": 0 },
+    "attribution": { "type": "string" },
+    "license": { "type": "string" }
+  },
+  "$defs": {
+    "extract": {
+      "title": "OsmExtractInfo",
+      "type": "object",
+      "required": ["name", "dataDate"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "dataDate": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tileRows": {
+      "title": "TileRows",
+      "description": "Key: the row (the tile id's y). Value: inclusive runs of x, [x0, x1, x0, x1, ...], in order, not touching.",
+      "type": "object",
+      "patternProperties": {
+        "^-?\\d+$": { "type": "array", "items": { "type": "integer" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

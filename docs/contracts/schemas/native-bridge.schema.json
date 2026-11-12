@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "routeiq/native-bridge.schema.json",
+  "title": "RouteIQNative plugin payloads",
+  "description": "What crosses the bridge between the web app and the iPhone shell's Swift plugin RouteIQNative (src/device/native/plugin.ts). Events: fix, locationError, tick (no payload, about once a second while the location stream is on), appState. Calls: httpGet (to https://api.mapbox.com/ only) and its answer. A value the phone does not know is left out.",
+  "$defs": {
+    "fix": {
+      "title": "NativeFix",
+      "description": "The 'fix' event, and the answer to getCurrentPosition.",
+      "type": "object",
+      "required": ["lng", "lat"],
+      "properties": {
+        "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "accuracy": { "description": "Radius of the fix, meters.", "type": "number" },
+        "speed": { "description": "Meters per second.", "type": "number" },
+        "course": { "description": "Degrees clockwise from true north.", "type": "number" },
+        "timestamp": { "description": "When the phone took the fix, milliseconds since 1970.", "type": "number" }
+      }
+    },
+    "locationError": {
+      "title": "NativeLocationError",
+      "description": "The 'locationError' event. 'denied', or anything else for no position right now.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "type": "string" } }
+    },
+    "appState": {
+      "description": "The 'appState' event. Anything but these three is read as unknown.",
+      "type": "object",
+      "properties": { "state": { "type": "string", "enum": ["active", "inactive", "background"] } }
+    },
+    "httpGetRequest": {
+      "type": "object",
+      "required": ["id", "url", "timeoutMs"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "Names the request for httpCancel.", "type": "string" },
+        "url": { "type": "string", "pattern": "^https://api\\.mapbox\\.com/" },
+        "timeoutMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "httpGetResponse": {
+      "description": "Any HTTP status resolves; no answer rejects with one of httpGetErrorCode.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "integer" },
+        "body": { "type": "string" },
+        "ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "httpGetErrorCode": { "type": "string", "enum": ["not-allowed", "cancelled", "timeout", "network"] }
+  }
+}
