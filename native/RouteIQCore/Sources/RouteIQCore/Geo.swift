@@ -46,8 +46,15 @@ public enum GeoError: Error, Equatable {
 /// Geometry helpers, ported from src/core/geo.ts.
 public enum Geo {
     static let earthRadiusM = 6_371_008.8
-    /// Meters per degree of latitude (and of longitude at the equator).
-    static let mPerDegree = earthRadiusM * Double.pi / 180
+    /// Meters in one degree of latitude (and of longitude at the equator).
+    public static let mPerDegree = earthRadiusM * Double.pi / 180
+
+    /// Degrees of longitude that span as much ground as `latDegrees` of
+    /// latitude, at latitude `lat`. A degree of longitude shrinks toward the
+    /// poles; the floor near them keeps the answer finite.
+    public static func lngDegreesFor(_ latDegrees: Double, _ lat: Double) -> Double {
+        latDegrees / JS.max(0.01, cos(JS.min(89.9, abs(lat)) * Double.pi / 180))
+    }
 
     public static func isValidLngLat(_ p: LngLat) -> Bool {
         p.lng.isFinite && p.lat.isFinite && p.lng >= -180 && p.lng <= 180 && p.lat >= -90 && p.lat <= 90
@@ -118,6 +125,36 @@ public enum Geo {
         return SegmentHit(distanceM: hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)), t: t)
     }
 
+    /// True when P lies within `toleranceM` of some segment of the line (flat
+    /// plane). A line of fewer than two points is near nothing.
+    public static func nearLine(_ p: XY, _ line: [XY], _ toleranceM: Double) -> Bool {
+        guard line.count >= 2 else { return false }
+        for i in 1..<line.count where pointToSegment(p, line[i - 1], line[i]).distanceM <= toleranceM {
+            return true
+        }
+        return false
+    }
+
+    /// Meters along `line` (as alongRouteM counts them) of the line's point
+    /// closest to `p`. The first of equally close points wins. 0 for a line of
+    /// fewer than two points.
+    public static func nearestAlongM(_ line: [LngLat], _ p: LngLat) -> Double {
+        let project = localProjector(p)
+        let along = alongRouteM(line)
+        var bestDistanceM = Double.infinity
+        var bestAtM = 0.0
+        if line.count >= 2 {
+            for i in 1..<line.count {
+                let hit = pointToSegment(XY(0, 0), project(line[i - 1]), project(line[i]))
+                if hit.distanceM < bestDistanceM {
+                    bestDistanceM = hit.distanceM
+                    bestAtM = along[i - 1] + hit.t * (along[i] - along[i - 1])
+                }
+            }
+        }
+        return bestAtM
+    }
+
     /// True when every point lies inside the box (edges included).
     public static func allWithin(_ points: [LngLat], _ box: BBox) -> Bool {
         points.allSatisfy { $0.lng >= box.west && $0.lng <= box.east && $0.lat >= box.south && $0.lat <= box.north }
@@ -168,5 +205,123 @@ public enum Geo {
         // Standing exactly on a vertex: do not list it twice.
         if let next = rest.first, next.lng == at.point.lng, next.lat == at.point.lat { return rest }
         return [at.point] + rest
+    }
+}
+
+/// Counts the work of matching (findCurrentRoute, sameRouteGeometry, coversRoute and mergeProbeRoutes), for tests and benchmarks:
+/// point-to-segment distance checks, and entries put in a segment grid. A
+/// count, not a time, so that it is the same on every machine.
+public final class MatchMeter {
+    public var segmentChecks: Int
+    public var gridEntries: Int
+
+    public init(segmentChecks: Int = 0, gridEntries: Int = 0) {
+        self.segmentChecks = segmentChecks
+        self.gridEntries = gridEntries
+    }
+}
+
+/// A bounding-box index of a line's segments: square cells as wide as `reachM`,
+/// each listing the segments that pass through it (a long segment is cut into
+/// pieces no longer than a cell). A point then looks at the segments of the
+/// 3 x 3 cells around it. Built once per line and comparison. (geo.ts segmentGrid)
+final class SegmentGrid {
+    struct Cell: Hashable {
+        let x: Double
+        let y: Double
+    }
+
+    let line: [XY]
+    let cellM: Double
+    var cells: [Cell: [Int]] = [:]
+    let meter: MatchMeter?
+    /// Which segments this query has measured already (a segment can be listed in several of its cells).
+    var seen: [Int]
+    var query = 0
+
+    init(_ line: [XY], reachM: Double, meter: MatchMeter?) {
+        self.line = line
+        self.meter = meter
+        let cellM = JS.max(1, reachM)
+        self.cellM = cellM
+        seen = Array(repeating: 0, count: line.count)
+        func cellOf(_ v: Double) -> Double { (v / cellM).rounded(.down) }
+        for i in stride(from: 1, to: line.count, by: 1) {
+            let a = line[i - 1]
+            let b = line[i]
+            let pieces = JS.max(1, (hypot(a.x - b.x, a.y - b.y) / cellM).rounded(.up))
+            var k = 0.0
+            while k < pieces {
+                let x0 = a.x + (b.x - a.x) * k / pieces
+                let y0 = a.y + (b.y - a.y) * k / pieces
+                let x1 = a.x + (b.x - a.x) * (k + 1) / pieces
+                let y1 = a.y + (b.y - a.y) * (k + 1) / pieces
+                var ix = cellOf(JS.min(x0, x1))
+                let ixEnd = cellOf(JS.max(x0, x1))
+                while ix <= ixEnd {
+                    var iy = cellOf(JS.min(y0, y1))
+                    let iyEnd = cellOf(JS.max(y0, y1))
+                    while iy <= iyEnd {
+                        let key = Cell(x: ix, y: iy)
+                        // A segment's pieces come one after another, so it can only be listed twice at the end.
+                        if cells[key] == nil {
+                            cells[key] = [i]
+                            meter?.gridEntries += 1
+                        } else if cells[key]!.last != i {
+                            cells[key]!.append(i)
+                            meter?.gridEntries += 1
+                        }
+                        iy += 1
+                    }
+                    ix += 1
+                }
+                k += 1
+            }
+        }
+    }
+
+    /// Looks at the segments of the 3 x 3 cells around p; `visit` gets the segment index and
+    /// its distance, and returns true to stop.
+    func search(_ p: XY, _ visit: (Int, Double) -> Bool) {
+        query += 1
+        func cellOf(_ v: Double) -> Double { (v / cellM).rounded(.down) }
+        var ix = cellOf(p.x - cellM)
+        let ixEnd = cellOf(p.x + cellM)
+        while ix <= ixEnd {
+            var iy = cellOf(p.y - cellM)
+            let iyEnd = cellOf(p.y + cellM)
+            while iy <= iyEnd {
+                for i in cells[Cell(x: ix, y: iy)] ?? [] {
+                    if seen[i] == query { continue }
+                    seen[i] = query
+                    meter?.segmentChecks += 1
+                    if visit(i, Geo.pointToSegment(p, line[i - 1], line[i]).distanceM) { return }
+                }
+                iy += 1
+            }
+            ix += 1
+        }
+    }
+
+    /// The distance from `p` to the line when it is at most the grid's reach, infinity when
+    /// it is farther. Stops looking at the first segment within `enoughM`.
+    func distanceWithin(_ p: XY, _ enoughM: Double) -> Double {
+        var best = Double.infinity
+        search(p) { _, d in
+            best = JS.min(best, d)
+            return best <= enoughM
+        }
+        return best <= cellM ? best : .infinity
+    }
+
+    /// The index `i` of a segment (line[i - 1] to line[i]) within `withinM` of `p`, the first
+    /// one found; 0 when there is none. `withinM` must not be more than the grid's reach.
+    func segmentWithin(_ p: XY, _ withinM: Double) -> Int {
+        var found = 0
+        search(p) { i, d in
+            if d <= withinM { found = i }
+            return found != 0
+        }
+        return found
     }
 }

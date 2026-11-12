@@ -17,10 +17,12 @@ same JSON fixtures straight from `tests/fixtures`.
 | `Signals.swift` | `signals.ts` | `signals.test.ts` |
 | `Rank.swift` | `rank.ts` | `rank.test.ts` |
 | `Select.swift` | `select.ts` | `signals.test.ts` (sameRouteGeometry, resolveSelectedId) |
-| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` |
+| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` (all but the "side streets found by probes" describe, which needs `probe.ts`) |
+| `Guidance.swift` | `guidance.ts` | `guidance.test.ts` |
+| `Contract.swift` | `contract.ts` (`CORE_CONTRACT_VERSION`) | checked against `docs/contracts/core-contract.json` |
 | `Format.swift` | `format.ts`, `facts.ts` | `routeFacts.test.ts`, `signals.test.ts` (formatSignalCount) |
 | `TestPoints.swift` | `testPoints.ts` | `core.test.ts` |
-| `Directions.swift`, `JSONValue.swift` | `providers/mapbox/adapter.ts` | `mapbox.test.ts` (parseDirections) |
+| `Directions.swift`, `JSONValue.swift` | `providers/mapbox/adapter.ts` (with guidance and per-segment traffic) | `mapbox.test.ts` (parseDirections), `guidance.test.ts` (adapter) |
 | `RouteIQKit/DirectionsClient.swift` | `providers/mapbox/client.ts` (fetchDirections) | `mapbox.test.ts` (fetchDirections), with a fake transport |
 | `RouteIQKit/SignalBundle.swift` | `providers/osm/bundle.ts`, `bundleLayer.ts`, `signalData.ts` (bundle only) | Parity: `Tests/RouteIQKitTests/Fixtures/signal-parity.json`, the web app's own counts on the real bundle |
 | `JS.swift` | (none) | JavaScript number and string semantics the TypeScript relies on |
@@ -28,27 +30,37 @@ same JSON fixtures straight from `tests/fixtures`.
 ## Contract version
 
 The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/contract.ts`, and
-[docs/contracts.md](../../docs/contracts.md)). The current version is **1**.
+[docs/contracts.md](../../docs/contracts.md)). `Contract.coreContractVersion` is the version this
+port was brought up to: **5**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
+and fails when the web app's version moves on, so a bump is never missed here. Version 2 differed
+from version 1 only in the iPhone shell's plugin, which this package does not contain; version 3
+adds the reroute changes of #74 and #68 (`matchStartSearchM`, `routeLostWindowSec`, `lostAtSec`); version 4
+changed only live-drive shapes (`LiveOptions.requestTimeoutSec`, `LiveState.pickedAtMs`, the Start
+event's `routeFetchedAtMs`) and version 5 only `LiveSwitch.savingSec` and the drive log (`DriveLog`):
+neither the live drive nor the drive log is ported yet.
 
-This port does not match version 1 yet. It predates the first frozen version and lags `main`
-(#33). Among the things missing:
-- `RouteCandidate.segmentTraffic`, `RouteCandidate.source` and `RouteCandidate.via`;
-- `RerouteState.declined` and `declineRoute`;
-- `RerouteOptions.matchMaxDivergenceM`, `RerouteObservation.drivenSinceM` and the like-for-like
-  rule for probed routes (`probe-unconfirmed`);
-- the guidance steps;
-- the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`);
-- the place book.
+What of version 5 is ported (#33, in stages):
+- **Routes:** `RouteCandidate` with `guidance`, `source`, `via` and `segmentTraffic`;
+  `GuidanceStep`, `GuidanceAnnouncement`, `SegmentTraffic`, `CongestionLevel`, `RouteSource`.
+- **Signal tiles and bundle:** `SignalBundle` (RouteIQKit). OpenStreetMap only: the City of
+  Charlotte gap-fill is gone (`SignalSource` is `primary` or `fallback`), as on the web (#13).
+- **Reroute engine:** `RerouteOptions` (with the `match*` and `baseline*` thresholds),
+  `RerouteState` (with `declined` and `lostAtSec`), `RerouteObservation` (with `baseline` and `drivenSinceM`),
+  `RerouteDecision` (with `current`) and every `RerouteCode`, including `route-unconfirmed`,
+  `probe-unconfirmed` and `driver-declined`; `declineRoute`, `baselineProbe`, `MatchMeter`.
 
-When it catches up, write the version it matches here. From then on, compare
-`docs/contracts/core-contract.json` (`declarations`, one line per type) with the Swift types when
-the version changes. The `history` there lists every version with its hash.
+When the version changes, compare `docs/contracts/core-contract.json` (`declarations`, one line
+per type) with the Swift types. The `history` there lists every version with its hash.
 
 Not ported yet:
 
-- `places.ts` and `search.ts`: saved places and search sessions, needed when the app gets a Plan
-  screen.
-- the web app's live-drive modules being added on `main`.
+- `speechQueue.ts`, `tracking.ts`, `probe.ts`, `handoff.ts` (stage B of #33), and the probe
+  describe of `reroute.test.ts`, which needs `probe.ts`.
+- `live.ts`, the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`): stage C.
+- `places.ts` and `search.ts`: saved places (the `PlaceBook` contract) and search sessions,
+  needed when the app gets a Plan screen.
+- `buildDirectionsUrl`'s via points, `radiuses` and `annotations=congestion,duration`
+  (`providers/mapbox/client.ts`): `DirectionsRequest.swift` still builds the plain request.
 
 ## The signal parity reference
 
@@ -87,7 +99,7 @@ cd native\RouteIQCore
 swift test --build-system native
 ```
 
-On 2026-11-11 all 159 tests passed there in about 9 s. The suite also caught each of three
+On 2026-11-11 all 159 tests passed there in about 9 s (before #33). The suite also caught each of three
 bugs planted on purpose:
 - the minimum saving set to 119 s
 - Swift rounding in place of JavaScript rounding in the route id hash

@@ -128,6 +128,27 @@ package enum JS {
         a < b ? -1 : (a > b ? 1 : 0)
     }
 
+    /// `String.prototype.trim`: drops JavaScript white space and line
+    /// terminators (Unicode Zs, tab, vertical tab, form feed, no-break space,
+    /// BOM, line feed, carriage return, U+2028, U+2029) from both ends. Not
+    /// Swift's `.whitespacesAndNewlines`, which also drops U+0085 and keeps the BOM.
+    package static func trim(_ s: String) -> String {
+        func isSpace(_ u: Unicode.Scalar) -> Bool {
+            switch u.value {
+            case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xA0, 0xFEFF, 0x2028, 0x2029: return true
+            default: return u.properties.generalCategory == .spaceSeparator
+            }
+        }
+        let scalars = Array(s.unicodeScalars)
+        var start = 0
+        var end = scalars.count
+        while start < end && isSpace(scalars[start]) { start += 1 }
+        while end > start && isSpace(scalars[end - 1]) { end -= 1 }
+        var out = String.UnicodeScalarView()
+        out.append(contentsOf: scalars[start..<end])
+        return String(out)
+    }
+
     /// A string as a JavaScript Map or Set key: equal only when the UTF-16
     /// code units are equal. Swift's String equality also merges canonically
     /// equivalent strings ("é" and "e" + combining accent), JavaScript's does not.

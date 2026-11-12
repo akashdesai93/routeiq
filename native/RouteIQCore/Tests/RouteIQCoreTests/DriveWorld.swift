@@ -53,9 +53,12 @@ enum DriveWorld {
         return line
     }
 
-    /// The routes of the network, in the TS key order (allCases is ROUTE_NAMES).
+    /// The routes of the network, in the TS key order, then the side streets
+    /// (the TS `RouteName | SideStreetName`). ROUTE_NAMES leaves the side streets out.
     enum RouteName: String, CaseIterable, Hashable {
         case A, B, C, D, BA, E
+        /// A side street (SIDE_STREETS): leaves A at 6 km, runs 500 m south of it, rejoins at 14 km.
+        case S
     }
 
     /// The routes of the network, each from the start (0, 0) to the end (20 km, 0):
@@ -75,9 +78,13 @@ enum DriveWorld {
         ],
         .BA: [Corner(0, 0), Corner(5000, 0), Corner(5000, 1000), Corner(10000, 1000), Corner(10000, 0), Corner(20000, 0)],
         .E: [Corner(0, 0), Corner(18500, 0), Corner(18500, 300), Corner(19500, 300), Corner(19500, 0), Corner(20000, 0)],
+        // SIDE_STREETS: the provider never offers these among its routes (side-street
+        // probing): only a request through a via point beside A finds them.
+        .S: [Corner(0, 0), Corner(6000, 0), Corner(6000, -500), Corner(14000, -500), Corner(14000, 0), Corner(20000, 0)],
     ]
 
-    static let ROUTE_NAMES: [RouteName] = RouteName.allCases
+    /// The provider's routes, without the side streets, so drive() never offers one by itself.
+    static let ROUTE_NAMES: [RouteName] = [.A, .B, .C, .D, .BA, .E]
 
     static let LINES: [RouteName: [LngLat]] = {
         var lines: [RouteName: [LngLat]] = [:]
@@ -86,6 +93,9 @@ enum DriveWorld {
         }
         return lines
     }()
+
+    /// The whole line of a route or side street, from the start (0, 0) to the end (20 km, 0).
+    static func lineOf(_ name: RouteName) -> [LngLat] { LINES[name] ?? [] }
 
     /// Where on a line the point lies, in meters from the line's start. Nil when it is more than a meter off it.
     static func alongOf(_ line: [LngLat], _ point: LngLat) -> Double? {
@@ -180,6 +190,9 @@ enum DriveWorld {
         var eta: (RouteName, PollContext) -> Double?
         /// Changes a poll's candidates before the engine sees them; nil makes the poll fail.
         var tamper: (([RouteCandidate], PollContext) -> [RouteCandidate]?)? = nil
+        /// What a request for the current path itself answers at a poll
+        /// (RerouteObservation.baseline), given the poll's candidates. Nil: not asked.
+        var baseline: (([RouteCandidate], PollContext) -> [RouteCandidate]?)? = nil
         var options: RerouteOptions = .default
     }
 
@@ -247,9 +260,14 @@ enum DriveWorld {
                 candidates = offered
             }
 
+            var asked: [RouteCandidate]?
+            if let candidates, let baseline = script.baseline { asked = baseline(candidates, context) }
             let decision = Reroute.decideReroute(
                 state,
-                RerouteObservation(nowSec: nowSec, route: route, positionAlongM: alongM, speedMps: script.speedMps, candidates: candidates),
+                RerouteObservation(
+                    nowSec: nowSec, route: route, positionAlongM: alongM, speedMps: script.speedMps,
+                    candidates: candidates, baseline: asked
+                ),
                 options: script.options
             )
             records.append(PollRecord(nowSec: nowSec, on: on, decision: decision, stateBefore: state))

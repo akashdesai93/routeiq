@@ -90,6 +90,36 @@ final class GeoTests: XCTestCase {
         XCTAssertEqual(Geo.pointToSegment(XY(3, 4), XY(0, 0), XY(0, 0)), SegmentHit(distanceM: 5, t: 0))
     }
 
+    // it('nearLine is true only within the tolerance of some segment, edge included')
+    func testSignalMatchingGeo_nearLineIsTrueOnlyWithinTheToleranceOfSomeSegmentEdgeIncluded() {
+        let line = [XY(0, 0), XY(100, 0), XY(100, 100)]
+        XCTAssertTrue(Geo.nearLine(XY(50, 10), line, 10))
+        XCTAssertFalse(Geo.nearLine(XY(50, 10.5), line, 10))
+        XCTAssertTrue(Geo.nearLine(XY(110, 50), line, 10)) // beside the second segment
+        XCTAssertFalse(Geo.nearLine(XY(0, 0), [XY(0, 0)], 10)) // a single point has no segment
+    }
+
+    // it('nearestAlongM gives the meters along the line of the closest point, the first pass on a tie')
+    func testSignalMatchingGeo_nearestAlongMGivesTheMetersAlongTheLineOfTheClosestPointTheFirstPassOnATie() {
+        let at = Self.signalAt
+        let line = [at(0, 0), at(400, 0), at(400, 300)]
+        XCTAssertEqual(Geo.nearestAlongM(line, at(150, 20)), 150, accuracy: 0.5)
+        XCTAssertEqual(Geo.nearestAlongM(line, at(450, 100)), 500, accuracy: 0.5)
+        XCTAssertEqual(Geo.nearestAlongM(line, at(-50, 0)), 0, accuracy: 0.5e-6)
+        // Out and back: both passes are as close, the first one counts.
+        XCTAssertEqual(Geo.nearestAlongM([at(0, 0), at(400, 0), at(0, 0)], at(100, 5)), 100, accuracy: 0.5)
+        XCTAssertEqual(Geo.nearestAlongM([at(0, 0)], at(100, 5)), 0)
+    }
+
+    // it('lngDegreesFor widens a span by latitude and stays finite at the pole')
+    func testSignalMatchingGeo_lngDegreesForWidensASpanByLatitudeAndStaysFiniteAtThePole() {
+        XCTAssertEqual(Geo.lngDegreesFor(1, 0), 1, accuracy: 0.5e-12)
+        XCTAssertEqual(Geo.lngDegreesFor(1, 60), 2, accuracy: 0.5e-9)
+        XCTAssertEqual(Geo.lngDegreesFor(1, -60), 2, accuracy: 0.5e-9)
+        XCTAssertEqual(Geo.lngDegreesFor(1, 90), 100, accuracy: 0.5e-9)
+        XCTAssertEqual(Geo.lngDegreesFor(1, -90), 100, accuracy: 0.5e-9)
+    }
+
     // MARK: - describe('line helpers the engine and the simulated drive share')
 
     // it('pointAtDistance walks the line and reports the heading')
@@ -132,5 +162,17 @@ final class GeoTests: XCTestCase {
         XCTAssertEqual(Geo.bearingDeg(Self.at(0, 0), Self.at(100, 0)), 90, accuracy: 0.5)
         XCTAssertEqual(Geo.bearingDeg(Self.at(0, 0), Self.at(0, -100)), 180, accuracy: 0.5)
         XCTAssertEqual(Geo.bearingDeg(Self.at(0, 0), Self.at(-100, 0)), 270, accuracy: 0.5)
+    }
+}
+
+// The contract version this port claims to match, read from the web app's own
+// snapshot (docs/contracts/core-contract.json), so a bump on the web side that
+// is not ported here fails the Swift tests instead of passing unnoticed.
+final class ContractVersionTests: XCTestCase {
+    func testContract_matchesTheVersionOfTheWebAppsContractSnapshot() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let snapshot = try JSONValue.parse(Data(contentsOf: root.appendingPathComponent("docs/contracts/core-contract.json")))
+        XCTAssertEqual(snapshot["version"]?.numberValue, Double(Contract.coreContractVersion))
     }
 }
