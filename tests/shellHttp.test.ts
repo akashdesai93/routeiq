@@ -5,7 +5,7 @@ import { createDriveDiagnostics, FIX_GAP_EVENT_MS, TICK_GAP_EVENT_MS, type Reque
 import { NATIVE_HTTP_GRACE_MS, NATIVE_HTTP_TIMEOUT_MS, nativeTransport } from '../src/device/native/http.ts'
 import { nativeDeviceFor, startNativeShell } from '../src/device/native/index.ts'
 import type { RouteIQNativePlugin } from '../src/device/native/plugin.ts'
-import { buildDirectionsUrl, fetchDirections, setDirectionsTransport } from '../src/providers/mapbox/client.ts'
+import { buildDirectionsUrl, directionsRequestKind, fetchDirections, setDirectionsTransport } from '../src/providers/mapbox/client.ts'
 import { SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
 
 const UPTOWN = UPTOWN_CHARLOTTE.position
@@ -357,5 +357,39 @@ describe('drive diagnostics', () => {
     expect(text).not.toContain('Tryon')
     expectHarmless(text)
     expect(ticks).toBe(0)
+  })
+})
+
+describe('side-street probes in the drive diagnostics (#5 review)', () => {
+  it('the kind of a request is read off its URL: a probe, a path check, or anything else', () => {
+    const o: [number, number] = [-80.8431, 35.2271]
+    const d: [number, number] = [-80.8561, 35.0015]
+    const probe = buildDirectionsUrl(o, d, 'pk.test', { originHeadingDeg: 90, via: [{ point: [-80.85, 35.1], radiusM: 250 }] })!
+    const path = buildDirectionsUrl(o, d, 'pk.test', { via: [{ point: [-80.85, 35.1], bearingDeg: 180 }, { point: [-80.85, 35.05] }] })!
+    const onePath = buildDirectionsUrl(o, d, 'pk.test', { via: [{ point: [-80.85, 35.1], bearingDeg: 180 }] })!
+    expect(directionsRequestKind(probe)).toBe('probe')
+    expect(directionsRequestKind(path)).toBe('path')
+    expect(directionsRequestKind(onePath)).toBe('path')
+    expect(directionsRequestKind(buildDirectionsUrl(o, d, 'pk.test')!)).toBe('routes')
+    expect(directionsRequestKind('not a url')).toBe('routes')
+  })
+
+  it('probes and path checks are marked in the log and counted, and nothing of the URL is kept', async () => {
+    const log = createDriveDiagnostics(() => 1_000_000)
+    const { plugin, gets } = fakePlugin()
+    const transport = nativeTransport(plugin, { log, ...noTimers })
+    const o: [number, number] = [-80.8431, 35.2271]
+    const d: [number, number] = [-80.8561, 35.0015]
+    void transport(buildDirectionsUrl(o, d, 'pk.test', { originHeadingDeg: 90, via: [{ point: [-80.85, 35.1], radiusM: 250 }] })!).catch(() => {})
+    void transport(buildDirectionsUrl(o, d, 'pk.test', { via: [{ point: [-80.85, 35.1], bearingDeg: 180 }] })!).catch(() => {})
+    void transport(buildDirectionsUrl(o, d, 'pk.test')!).catch(() => {})
+    expect(gets).toHaveLength(3)
+    const text = log.text()
+    expect(text).toMatch(/request 1 \(probe\) sent/)
+    expect(text).toMatch(/request 2 \(path check\) sent/)
+    expect(text).toMatch(/request 3 sent/)
+    expect(text).toContain('of those: 1 side-street probes (no road or no route is a normal answer for one), 1 path checks')
+    expect(text).not.toContain('pk.test')
+    expect(text).not.toContain('35.1')
   })
 })

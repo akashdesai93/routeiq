@@ -1,12 +1,17 @@
 import type { Page } from '@playwright/test'
 import { expect, INDIAN_LAND, test, UPTOWN } from './harness.ts'
-import { JAM_WHERE_ALL_THREE_SHARE } from './world/traffic.ts'
+import { JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
 
 // Side-street probing on the plan screen (PLAN step 11b). Mapbox offers three
 // routes at most; the made-up network here also has Parallel Street (S), which
 // Mapbox never offers. After the three routes are on screen the app asks for
 // the trip again through a point beside the fastest one, finds S, and ranks it
 // like any other route: on ETA.
+//
+// And during a drive (PLAN step 11c, #5): each check for a faster route may also
+// ask through one point beside the road ahead, so a side street the plan did not
+// recommend can still be found when a jam builds, and the reroute engine judges
+// it by its usual rules (2 minutes and 5 % saved, two checks in a row, lead).
 
 const SIDE = 'via side streets'
 const OFF_ROUTE = 'You are off the route. Finding a new one.'
@@ -295,9 +300,93 @@ test('when I start on the side-street route, it drives the side street', async (
   expect(app.answers.filter((a) => a.n > plannedRequests && a.routes.length > 1).every((a) => a.routes.every((r) => r.name !== 'S'))).toBe(true)
   expect(app.pathChecks.length).toBeGreaterThan(0)
   expect(app.pathChecks.every((c) => c.road === 'S')).toBe(true)
-  // Probes are a plan-screen thing for now (#5): the drive made none.
-  expect(app.probes).toHaveLength(probesBefore)
+  // Parallel Street is not held up (the jam is on Main Corridor), so the drive's checks made no
+  // side-street probes (#5): a probe is only worth a request on a route that is losing time.
+  expect(app.probes.slice(probesBefore)).toEqual([])
   await expect(page.getByLabel('Drive summary')).toBeVisible()
+})
+
+/** The drive's probes that came back on Parallel Street, with what Main Corridor took at the same check. */
+function sideStreetFinds(app: { probes: { forRequest: number; duringDrive: boolean; road: string | null; durationSec: number | null }[]; answers: { n: number; routes: { name: string; durationSec: number }[] }[] }) {
+  return app.probes
+    .filter((p) => p.duringDrive && p.road === 'S')
+    .map((p) => ({ n: p.forRequest, sideSec: p.durationSec!, mainSec: app.answers.find((a) => a.n === p.forRequest)?.routes.find((r) => r.name === 'A')?.durationSec ?? null }))
+}
+
+test('when a jam builds during the drive, a side street found mid-drive takes me round it', async ({ app, page }) => {
+  // Planned in free flow: Main Corridor is recommended and Parallel Street is shown last.
+  // From the drive's first check, Main Corridor jams (3x) where Mapbox's three routes all run.
+  app.outside.sideStreet = true
+  app.outside.traffic = jamWhereAllThreeShare(3)
+  await app.open({ fakeClock: true })
+  await expect(page.locator('.route-source', { hasText: SIDE })).toBeVisible({ timeout: 15_000 })
+  await app.routesReady()
+  const routes = page.locator('ol.routes > li')
+  await expect(routes.first()).not.toContainText(SIDE)
+  await expect(routes.first().getByRole('button')).toHaveAttribute('aria-pressed', 'true')
+  await app.snap('planned in free flow: Main Corridor recommended, Parallel Street last')
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A', snapAtSec: [600] })
+  await app.snap('arrived by Parallel Street: the summary lists the switch')
+
+  expect(log.arrived).toBe(true)
+  // Mapbox never offered Parallel Street during the drive; only the drive's own probes found it.
+  const offered = app.answers.filter((a) => !app.pathChecks.some((c) => c.n === a.n))
+  expect(offered.every((a) => a.routes.every((r) => r.name !== 'S'))).toBe(true)
+  const finds = sideStreetFinds(app)
+  expect(finds.length).toBeGreaterThanOrEqual(2)
+  // One probe per check at most, from the car with its heading.
+  const perCheck = new Map<number, number>()
+  for (const p of app.probes.slice(probesBefore)) perCheck.set(p.forRequest, (perCheck.get(p.forRequest) ?? 0) + 1)
+  expect(Math.max(...perCheck.values())).toBe(1)
+  expect(app.probes.slice(probesBefore).every((p) => p.duringDrive && p.radiuses === RADIUSES)).toBe(true)
+
+  // One switch, onto the side street, after it held up for two checks in a row, with a way to undo it.
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switched to a faster route via side streets')
+  expect(log.banners[0]!.text).toContain('Keep previous route')
+  const spoken = await app.spoken()
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toHaveLength(1)
+  expect(switches[0]).toMatch(/^Switching to a faster route via side streets\. Saves \d+ minutes\. Turn in [\d.]+ miles\.$/)
+  const saved = Number(/Saves (\d+) minutes/.exec(switches[0]!)![1])
+  expect(saved).toBeGreaterThanOrEqual(2)
+  // It waited for the confirmation: the check before the switch said so.
+  expect(log.statusLines.some((l) => /^Staying: faster route saves [\d.]+ minutes, confirming, check 1 of 2$/.test(l.text))).toBe(true)
+  // The driver then stays on Parallel Street to the end: no Cross Street jog of Main Corridor after the switch.
+  const after = spoken.slice(spoken.indexOf(switches[0]!) + 1)
+  expect(after.some((line) => line.includes('Cross Street'))).toBe(false)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+  await expect(page.getByLabel('Drive summary')).toBeVisible()
+})
+
+test('when a side street found mid-drive saves only about a minute, it stays on my route', async ({ app, page }) => {
+  // The same jam, but 2x: Parallel Street is faster now, by about a minute, under the 2 minutes a switch needs.
+  app.outside.sideStreet = true
+  app.outside.traffic = jamWhereAllThreeShare(2)
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await expect(page.locator('ol.routes > li').first()).not.toContainText(SIDE)
+
+  const log = await app.drive({ road: 'A', snapAtSec: [200] })
+  await app.snap('arrived on Main Corridor: no switch')
+
+  expect(log.arrived).toBe(true)
+  // The probes did find the side street, and it was faster, by under 2 minutes.
+  const finds = sideStreetFinds(app).filter((f) => f.mainSec !== null && f.sideSec < f.mainSec)
+  expect(finds.length).toBeGreaterThanOrEqual(1)
+  for (const f of finds) expect(f.mainSec! - f.sideSec).toBeLessThan(120)
+  // The engine said why it stayed, and it never switched.
+  expect(log.statusLines.some((l) => /^Staying: faster route saves only [\d.]+ (minute|minutes|seconds)$/.test(l.text))).toBe(true)
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken).not.toContain(OFF_ROUTE)
+  // Main Corridor's own turns, the Cross Street jog included, all the way.
+  expect(spoken).toContain('Turn right onto Cross Street.')
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })
 
 test('when I pick a slower route on purpose, it drives that route', async ({ app, page }) => {
