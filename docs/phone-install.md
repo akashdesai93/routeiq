@@ -31,14 +31,16 @@ The build runs on GitHub Actions and produces an **unsigned** `.ipa`. It contain
 (the build fails if it finds one).
 
 ```bash
-gh run list --workflow shell-ios.yml --status success --limit 5
+# the newest build: the id of the run that made it, then the download
+gh api "repos/akashdesai93/routeiq/actions/artifacts?name=RouteIQ-unsigned&per_page=1" --jq ".artifacts[0].workflow_run.id"
 gh run download <run-id> -n RouteIQ-unsigned
 ```
 
 That leaves `RouteIQ-unsigned.ipa` in the current folder. Or in the browser: the repository's
-**Actions** tab, workflow **Shell iOS (unsigned ipa)**, the newest green run, **Artifacts** at the
-bottom, `RouteIQ-unsigned` (a `.zip` with the `.ipa` inside). Artifacts are deleted after 30 days;
-any change under `native/shell/` or `src/` builds a new one.
+**Actions** tab, workflow **Gate**, the newest green run that has a **shell-ios** job, **Artifacts**
+at the bottom, `RouteIQ-unsigned` (a `.zip` with the `.ipa` inside). Artifacts are deleted after 30 days;
+any change under `native/shell/` or `src/` builds a new one, and `gh workflow run shell-ios.yml`
+builds one on demand (that run is then under the workflow **Shell iOS (unsigned ipa)**).
 
 ## 2. Install it from Windows with a free Apple ID
 

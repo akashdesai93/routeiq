@@ -12,6 +12,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "oxlint",
+    "size": "node scripts/check-bundle-size.mjs",
     "build:signals": "node scripts/build-signal-tiles.mjs",
     "preview": "vite preview",
     "e2e:build": "node e2e/build.mjs",
