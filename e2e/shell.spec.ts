@@ -1,4 +1,5 @@
 import type { ShellWindow } from './browserStubs.ts'
+import { amberOutside, smallText } from './design.ts'
 import { expect, test } from './harness.ts'
 import { NO_TOKEN_PORT } from './ports.ts'
 import { JAM_ON_A_FROM_SECOND_CHECK } from './world/traffic.ts'
@@ -126,7 +127,12 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
     }
     if (sec === 8) {
       // The drive view says the position is made up, and has a way to the diagnostics without ending the drive.
-      await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
+      const badge = page.getByText('SIMULATED GPS', { exact: true })
+      await expect(badge).toBeVisible()
+      await app.snap('test drive: the SIMULATED GPS badge')
+      // A test-mode label is not news: no amber (amber means a faster route), and driving-size text (#133).
+      expect(await amberOutside(badge, '.live-banner'), 'amber on the SIMULATED GPS badge').toEqual([])
+      expect(await smallText(badge, 14), 'SIMULATED GPS badge text under 14 px').toEqual([])
       await page.getByRole('button', { name: 'More' }).click()
       await page.getByRole('button', { name: 'Drive diagnostics' }).click()
       await expect(page.getByLabel('Diagnostics text')).toHaveValue(/SIMULATED GPS test drive: wrong-turn, 3x speed/)
