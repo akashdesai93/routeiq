@@ -347,7 +347,7 @@ describe('Start drive and the live drive view', () => {
     expect(html).toContain('>End</button>')
     expect(html).not.toContain('data-tile="voice"')
     expect(render(play(started), T0, { initiallyOpen: true })).toContain('data-tile="voice"')
-    expect(html).not.toContain('Keep previous route')
+    expect(html).not.toContain('Keep my route')
     expect(render(play([started[0]!]), T0)).toContain('Finding your position…')
   })
 
@@ -411,19 +411,30 @@ describe('Start drive and the live drive view', () => {
   it('shows a switch with one large way to undo it, and warnings in one line each', () => {
     const switched: LiveState = {
       ...driving,
-      switchBanner: { untilMs: T0 + 30_000, text: 'Switched to a faster route: saves 3 minutes', canKeep: true },
+      switchBanner: {
+        untilMs: T0 + 30_000,
+        text: 'Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles.',
+        canKeep: true,
+        atMs: T0 + 18_000,
+        beforeSec: 1500,
+        afterSec: 1320,
+        turnInM: 1300,
+      },
       wakeLock: 'unavailable',
       pausedNote: { seconds: 42, untilMs: T0 + 30_000 },
     }
     const html = render(switched, T0 + 20_000)
-    expect(html).toContain('<strong>Switched to a faster route: saves 3 minutes</strong>')
-    expect(html).toContain('class="live-button live-keep">Keep previous route</button>')
+    expect(html).toContain('<strong>Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles.</strong>')
+    expect(html).toContain('class="live-button live-keep">Keep my route</button>')
     expect(html).toContain('RouteIQ was paused for 42 s while in the background.')
     expect(html).toContain('Keep the screen on yourself')
     // After leaving the route there is nothing to keep.
-    const replanned = render({ ...switched, switchBanner: { untilMs: T0 + 30_000, text: 'New route from here', canKeep: false } }, T0 + 20_000)
-    expect(replanned).toContain('New route from here')
-    expect(replanned).not.toContain('Keep previous route')
+    const replanned = render(
+      { ...switched, switchBanner: { ...switched.switchBanner!, text: 'New route. 22 minutes to your destination.', canKeep: false, beforeSec: null, turnInM: null } },
+      T0 + 20_000,
+    )
+    expect(replanned).toContain('New route. 22 minutes to your destination.')
+    expect(replanned).not.toContain('Keep my route')
     expect(render(driving, T0, { speechSupported: false })).toContain('This browser cannot speak')
   })
 
@@ -493,8 +504,8 @@ describe('RoutePanel', () => {
   it('lists ETA, distance and difference from typical, and marks the selected route', () => {
     const routes = [route('route-0', 900, 780), route('route-1', 840, null)]
     const html = renderToString(<RoutePanel {...idle} ranked={rankRoutes(routes)} selectedId="route-1" />)
-    expect(html).toContain('15 min')
-    expect(html).toContain('14 min')
+    expect(html).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
+    expect(html).toContain('<span class="route-eta">14<span class="unit"> min</span></span>')
     expect(html).toContain('5.8 mi')
     expect(html).toContain('2 min slower than typical')
     expect(html).toContain('No typical time available')
@@ -585,7 +596,7 @@ describe('RoutePanel', () => {
       <RoutePanel {...idle} signalsStatus="loading" ranked={rankRoutes(routes)} selectedId="route-0" />,
     )
     // Routes are already listed; only the signal line waits.
-    expect(loading).toContain('15 min')
+    expect(loading).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
     expect(loading).toContain('Counting signals…')
     expect(loading).not.toContain('Signals: unknown')
     expect(loading).not.toContain('title=')
@@ -613,7 +624,7 @@ describe('RoutePanel', () => {
         selectedId="route-0"
       />,
     )
-    expect(html).toContain('15 min')
+    expect(html).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
     // A lower bound is labelled as one; a full count is plain; missing data is never shown as zero.
     expect(html).toContain('≥ 9 signals (partial)')
     expect(html).toContain('>12 signals<')

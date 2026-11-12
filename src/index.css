@@ -1,87 +1,131 @@
+/* The approved design (design/README.md, "The merged direction"; #85): black glass, Inter for
+   words, Barlow Condensed for figures, white for the one primary action, amber for news only.
+   The one place the tokens live (.claude/skills/design-tokens): every screen, the drive view
+   (live.css) included, reads them from here. Fonts: fonts.css (bundled). */
 :root {
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  color: #1f2328;
-  background: #ffffff;
+  --bg: #050607;
+  --glass: #0b0d10;
+  --raised: #171a1f;
+  --raised2: #20242b;
+  --hair: #2c3138;
+  --hair2: #59616c;
+  /* The cards' edge over a night map (#145): 3.5:1 on its land, 4.1:1 on --glass. */
+  --hair-night: #6b737e;
+  --fg: #f2f4f6;
+  --dim: #9aa1ab;
+  --amber: #ffb000;
+  --on-amber: #0a0a0a;
+  --old: #646c77;
+  --danger: #ff8a80;
+  --figure: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-.app { display: flex; flex-direction: column; height: 100%; }
-.bar { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid #d0d7de; flex-wrap: wrap; }
+.app { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+/* Safe areas (#85): the page runs edge to edge (viewport-fit=cover in index.html, and the iPhone
+   shell's contentInset "never"), so the app keeps its own content clear of the notch, the home
+   indicator and the rounded corners. The drive view pads its own cards (live.css). */
+.app:not(.live) { padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.app:not(.live) .bar { padding-top: max(10px, env(safe-area-inset-top, 0px)); }
+.bar { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--hair); flex-wrap: wrap; background: var(--glass); }
+.bar > strong { font-family: var(--figure); font-size: 24px; letter-spacing: 0.01em; }
 /* --pin is set inline from PIN_COLOR in src/map/pins.ts, the one source for pin colors. */
 .dot::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: var(--pin); }
-button { font: inherit; font-size: 14px; padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: inherit; cursor: pointer; }
-button:hover { background: #eaeef2; }
+button { font: inherit; font-size: 14px; padding: 4px 10px; border: 1px solid var(--hair); border-radius: 10px; background: var(--raised); color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+a { color: var(--fg); }
+button:hover { background: var(--raised2); }
 .main { flex: 1; display: flex; min-height: 0; }
 .map { flex: 1; min-height: 300px; min-width: 0; }
-.side { width: 340px; border-left: 1px solid #d0d7de; overflow-y: auto; font-size: 14px; }
+.side { width: 380px; background: var(--glass); border-left: 1px solid var(--hair); overflow-y: auto; font-size: 14px; }
 .panel { padding: 12px 16px; }
-.plan { padding: 12px 16px; border-bottom: 1px solid #d0d7de; }
+.plan { padding: 12px 16px; border-bottom: 1px solid var(--hair); }
 .field { position: relative; margin-bottom: 4px; }
 .field label { display: block; margin-bottom: 4px; font-weight: 600; }
 .field-row { display: flex; gap: 6px; }
 /* 16px: iOS Safari zooms the page when a smaller input takes the focus. */
-.plan input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid #8c959f; border-radius: 6px; background: #ffffff; color: inherit; }
-.plan input:focus-visible, .plan button:focus-visible, .plan summary:focus-visible { outline: 2px solid #1f6feb; outline-offset: 1px; }
+.plan input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 8px 12px; border: 1.5px solid var(--hair); border-radius: 14px; background: var(--raised); color: inherit; }
+.plan input::placeholder { color: var(--dim); }
+.plan input:focus-visible, .plan button:focus-visible, .plan summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
 .locate { flex: none; }
-.options { position: absolute; z-index: 5; left: 0; right: 0; margin: 2px 0 0; padding: 0; list-style: none; background: #ffffff; border: 1px solid #8c959f; border-radius: 6px; box-shadow: 0 4px 12px rgba(31, 35, 40, 0.15); max-height: 320px; overflow-y: auto; }
-.option { display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid #eaeef2; cursor: pointer; }
+.options { position: absolute; z-index: 5; left: 0; right: 0; margin: 4px 0 0; padding: 0; list-style: none; background: var(--raised); border: 1px solid var(--hair2); border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); max-height: 320px; overflow-y: auto; }
+.option { display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid var(--raised2); cursor: pointer; }
 .option:last-child { border-bottom: 0; }
-.option:hover, .option.active { background: #ddf4ff; }
+.option:hover, .option.active { background: var(--raised2); }
 .option-name { font-weight: 600; }
-.option-detail { color: #57606a; font-size: 13px; overflow-wrap: anywhere; }
-.field-status { min-height: 4px; margin: 2px 0 6px; color: #57606a; font-size: 13px; }
-.field-status.failed { color: #a40e26; }
+.option-detail { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+.field-status { min-height: 4px; margin: 2px 0 6px; color: var(--dim); font-size: 13px; }
+.field-status.failed { color: var(--danger); }
 .plan-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-.plan button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
-.plan button:disabled { color: #8c959f; cursor: default; }
-.chip { border-radius: 16px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip.unset { border-style: dashed; color: #57606a; }
+.plan button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
+.plan button:disabled { color: var(--hair2); cursor: default; }
+.chip { border-radius: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.unset { border-style: dashed; border-color: var(--hair2); background: transparent; color: var(--dim); }
 .plan-more summary { cursor: pointer; }
 .plan-more h3 { margin: 12px 0 6px; font-size: 14px; }
 .place-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.place-go { width: 100%; text-align: left; background: #ffffff; overflow-wrap: anywhere; }
+.place-go { width: 100%; text-align: left; background: var(--glass); overflow-wrap: anywhere; }
 .saved-row { display: flex; gap: 6px; align-items: center; }
 .saved-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .name-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .panel h2 { margin: 0 0 8px; font-size: 16px; }
 .panel .notice { margin: 0 0 12px; padding: 12px; }
 .panel .notice p { margin: 0 0 8px; }
-.routes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.route { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 10px 12px; text-align: left; background: #ffffff; border-left: 4px solid #8c959f; }
-.route.selected { border-color: #1f6feb; border-left-color: #1f6feb; background: #ddf4ff; }
-.route-name { font-weight: 600; }
-.route-eta { font-weight: 600; text-align: right; }
-.route-distance { grid-column: 1 / -1; }
-.route-signals { grid-column: 1 / -1; }
-.route-delay { grid-column: 1 / -1; color: #57606a; }
-.route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 13px; font-weight: 400; color: #57606a; }
-.route-source { margin-left: 2px; font-size: 12px; font-weight: 400; font-style: italic; color: #57606a; }
-.route-reasons { grid-column: 1 / -1; color: #57606a; font-size: 13px; }
-.hint { color: #57606a; font-size: 13px; }
+.routes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+/* A route card (#85; design merged-2-pick-a-route, merged-signal-states): time leads, large, in
+   the figure face; then the name and badges, distance and lights, and the reasons, dim. The
+   selected card has the white outline. The name is first in the markup (it starts the button's
+   accessible name) and placed beside the time by the grid. */
+.route { width: 100%; display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'eta name' 'eta facts' 'eta note' 'delay delay' 'reasons reasons'; gap: 2px 14px; align-items: center; padding: 12px 16px; border: 2px solid var(--hair); border-radius: 18px; background: var(--glass); text-align: left; contain: layout paint; }
+.route.selected { border-color: var(--fg); background: var(--raised); }
+.route:hover { background: var(--raised); }
+.route-name { grid-area: name; justify-self: end; text-align: right; font-size: 16px; }
+.route-eta { grid-area: eta; font-family: var(--figure); font-size: 56px; font-weight: 600; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.route-eta .unit { color: var(--dim); font-size: 24px; font-weight: 500; }
+.route-facts { grid-area: facts; justify-self: end; display: flex; gap: 12px; color: var(--dim); font-size: 15px; font-variant-numeric: tabular-nums; }
+.route-signal-note { grid-area: note; justify-self: end; text-align: right; color: var(--dim); font-size: 13px; font-weight: 500; }
+.route-delay { grid-area: delay; color: var(--dim); font-size: 13px; font-weight: 500; }
+.route-badge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 10px; background: var(--fg); color: var(--bg); font-size: 13px; }
+.route-source { display: inline-block; margin-left: 6px; padding: 1px 8px; border: 1.5px solid var(--hair2); border-radius: 10px; color: var(--fg); font-size: 13px; }
+.route-reasons { grid-area: reasons; color: var(--dim); font-size: 13px; font-weight: 500; }
+/* "−8 min · −2 lights · −3 mi": what Route 1 gives against Route 2, three cells between hairlines. */
+.route-delta { display: grid; grid-template-columns: repeat(3, 1fr); margin: 12px 0 0; border-top: 1.5px solid var(--hair); border-bottom: 1.5px solid var(--hair); }
+.route-delta-cell { display: flex; align-items: baseline; min-height: 60px; padding: 10px 12px; font-family: var(--figure); font-size: 38px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.route-delta-cell + .route-delta-cell { border-left: 1.5px solid var(--hair); }
+.route-delta-cell .unit { color: var(--dim); font-size: 19px; font-weight: 500; }
+.route-delta-words { align-self: center; color: var(--dim); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.25; white-space: normal; }
+.hint { color: var(--dim); font-size: 13px; }
 .handoff { margin: 4px 0 8px; font-size: 14px; }
-button.link { padding: 0; border: 0; background: none; font-size: inherit; color: #0969da; text-decoration: underline; }
-button.link:hover { background: none; color: #0550ae; }
-.drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid #d0d7de; }
+button.link { padding: 0; border: 0; background: none; font-size: inherit; color: var(--fg); text-decoration: underline; }
+button.link:hover { background: none; color: #ffffff; }
+.drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid var(--hair); }
 .drive h3 { display: inline; margin: 0; font-size: 15px; }
 .drive > details > summary { cursor: pointer; margin-bottom: 8px; }
 .drive-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.drive button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
-.drive button:disabled { color: #8c959f; cursor: default; }
+.drive button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
+.drive button:disabled { color: var(--hair2); cursor: default; }
 .drive-status { margin: 0 0 8px; }
-.whatif { margin: 0 0 8px; padding: 8px; border: 1px dashed #bf8700; border-radius: 6px; background: #fff8c5; }
+.whatif { margin: 0 0 8px; padding: 8px; border: 1px dashed var(--hair2); border-radius: 12px; background: var(--raised); }
 .whatif .drive-row { margin: 6px 0 0; }
 .whatif .hint { margin: 6px 0 0; }
 .setting { display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; margin: 4px 0; font-size: 13px; }
 .setting input { width: 72px; font: inherit; font-size: 13px; padding: 2px 4px; }
 .drive-settings { margin-bottom: 8px; }
 .drive-settings summary { cursor: pointer; }
-.drive-log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; }
-.drive-log li { padding: 4px 8px; border-bottom: 1px solid #eaeef2; }
+.drive-log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 13px; border: 1px solid var(--hair); border-radius: 6px; }
+.drive-log li { padding: 4px 8px; border-bottom: 1px solid var(--raised2); }
 .drive-log li:last-child { border-bottom: 0; }
-.drive-log-time { color: #57606a; font-variant-numeric: tabular-nums; }
-.drive-log-switch { font-weight: 600; background: #dafbe1; }
-.drive-log-note { color: #57606a; }
-.notice { margin: 24px 16px; padding: 16px; border: 1px solid #d4a72c; background: #fff8c5; border-radius: 6px; max-width: 640px; line-height: 1.5; }
+.drive-log-time { color: var(--dim); font-variant-numeric: tabular-nums; }
+.drive-log-switch { font-weight: 600; background: #1d3a26; }
+.drive-log-note { color: var(--dim); }
+.notice { margin: 24px 16px; padding: 16px; border: 1.5px solid var(--hair2); background: var(--raised); border-radius: 16px; max-width: 640px; line-height: 1.5; font-weight: 500; }
 /* Help shown in place of the map takes the map's room, so the side panel stays at the right edge. */
 .main > .notice { flex: 1; align-self: flex-start; max-width: none; }
 /* Phone width: one scrolling column, the trip input above the map and the routes under it.
@@ -90,11 +134,22 @@ button.link:hover { background: none; color: #0550ae; }
   .bar { padding: 6px 16px; }
   .main { flex-direction: column; overflow-x: hidden; overflow-y: auto; }
   .side { display: contents; }
-  .plan { order: 1; flex: none; font-size: 14px; }
-  .map, .main > .notice { order: 2; }
+  /* Phone-first (#85; design merged-1-plan, merged-2-pick-a-route): the map on top, and under it
+     one sheet with the trip and the routes, its rounded top lapping over the map. */
+  .map, .main > .notice { order: 1; }
+  .plan { order: 2; flex: none; position: relative; z-index: 2; margin-top: -24px; padding-top: 22px; border: 0; border-top: 1.5px solid var(--hair); border-radius: 28px 28px 0 0; background: var(--glass); font-size: 15px; }
+  .plan::before { content: ''; position: absolute; top: 9px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: var(--hair2); }
   .main > .notice { flex: none; align-self: auto; }
-  .map { flex: none; height: 46vh; height: 46dvh; min-height: 280px; }
-  .panel { order: 3; flex: none; border-top: 1px solid #d0d7de; font-size: 14px; }
+  .map { flex: none; height: 42vh; height: 42dvh; min-height: 260px; }
+  .panel { order: 3; flex: none; background: var(--glass); font-size: 15px; }
+  /* Clear of the sheet's rounded top, which laps 24px over the map. */
+  .map .mapboxgl-ctrl-bottom-left, .map .mapboxgl-ctrl-bottom-right { bottom: 24px; }
+  .drive-log { max-height: 200px; }
+}
+/* Touch sizes: on a phone-width screen, and on any touch screen however wide (a phone on its
+   side is 844 px wide but still tapped with a finger, #132). The layout above stays width-only,
+   so a landscape phone keeps the side-by-side trip screen. */
+@media (max-width: 700px), (pointer: coarse) {
   /* Everything that is tapped is at least 44px high. */
   button, summary, .plan input, .setting input { min-height: 44px; }
   button { padding: 8px 14px; }
@@ -105,58 +160,65 @@ button.link:hover { background: none; color: #0550ae; }
   /* Height from min-height, not padding round the text: font metrics differ between machines (43 px in CI). */
   .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
-  .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
 }
 /* The attribution is never collapsed (it carries the OpenStreetMap credit), so on a narrow map it is kept clear of the Mapbox logo in the other corner. */
 .map .mapboxgl-ctrl-bottom-right { max-width: calc(100% - 110px); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.start-drive { margin: 0 0 12px; }
-.start-drive-button { width: 100%; min-height: 56px; font-size: 18px; font-weight: 600; background: #1a7f37; border-color: #1a7f37; color: #ffffff; }
-.start-drive-button:hover { background: #116329; }
-.start-drive-button:disabled { background: #f6f8fa; border-color: #d0d7de; color: #8c959f; cursor: default; }
+.start-drive { margin: 12px 0; }
+.start-drive-button { width: 100%; min-height: 60px; border: 0; border-radius: 16px; font-size: 20px; font-weight: 600; background: var(--fg); color: var(--bg); }
+.start-drive-button::after { content: ' →'; }
+.start-drive-button:hover { background: #ffffff; }
+.start-drive-button:disabled { background: var(--raised); color: var(--hair2); cursor: default; }
 .start-drive .hint { margin: 6px 0; }
 .check { display: flex; gap: 8px; align-items: center; min-height: 32px; font-size: 13px; }
-.replay button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
+.replay button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
 /* The live drive has its own sheet: live.css. */
 .side-street-notice:empty { margin: 0; }
 /* The iPhone shell: the "paste your token" screen and the "Change token" button in the bar (ShellRoot.tsx). */
-.token-screen input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; padding: 8px 10px; font: inherit; border: 1px solid #8c959f; border-radius: 6px; }
+.token-screen input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; padding: 8px 12px; font: inherit; font-size: 16px; border: 1.5px solid var(--hair2); border-radius: 12px; background: var(--glass); color: var(--fg); }
 .token-screen p { margin: 8px 0; }
 .token-actions { display: flex; gap: 8px; }
 .shell-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-/* The iPhone shell's test drive (#86): the SIMULATED GPS badge, over the map below the turn card (which fills the width on a phone) for the whole drive. */
-.sim-badge { position: fixed; z-index: 40; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 150px); pointer-events: none; padding: 4px 10px; border: 2px solid #bf8700; border-radius: 6px; background: #fff8c5; color: #4d2d00; font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
-.testdrive button[aria-pressed='true'], .diagnostics-which button[aria-pressed='true'] { background: #ddf4ff; border-color: #1f6feb; }
+/* The iPhone shell's test drive (#86): the SIMULATED GPS badge, over the map below the turn card (which fills the width on a phone) for the whole drive.
+   A test-mode label, not news: a raised pill with words, never amber (#133, design-tokens rule 1). */
+.sim-badge { position: fixed; z-index: 40; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 150px); pointer-events: none; padding: 6px 12px; border: 1.5px solid var(--hair2); border-radius: 999px; background: var(--raised); color: var(--fg); font-weight: 700; font-size: 14px; letter-spacing: 0.04em; }
+.testdrive button[aria-pressed='true'], .diagnostics-which button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
 .testdrive .drive-row { flex-wrap: wrap; }
 .diagnostics-which { display: flex; gap: 8px; flex-wrap: wrap; }
 .diagnostics-which button { min-height: 36px; }
 /* The iPhone shell's "Drive diagnostics" (DriveDiagnosticsPanel.tsx): a sheet over the lower part of the screen. */
-.diagnostics { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: 80%; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #ffffff; border-top: 1px solid #8c959f; box-shadow: 0 -4px 12px rgba(31, 35, 40, 0.15); font-size: 14px; }
+.diagnostics { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: 80%; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--glass); border-top: 1px solid var(--hair2); box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.4); font-size: 14px; }
 .diagnostics-head { display: flex; gap: 8px; align-items: center; }
 .diagnostics-head strong { margin-right: auto; }
 .diagnostics-head button { min-height: 36px; }
-.diagnostics-note { margin: 0; color: #57606a; font-size: 13px; }
-.diagnostics-text { flex: 1; width: 100%; min-height: 200px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; resize: none; white-space: pre; overflow: auto; }
+.diagnostics-note { margin: 0; color: var(--dim); font-size: 13px; }
+.diagnostics-text { flex: 1; width: 100%; min-height: 200px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--hair); border-radius: 10px; padding: 6px 8px; resize: none; white-space: pre; overflow: auto; }
+.route-delta-cell .unit { margin-left: 3px; }
+/* The map's zoom and compass controls on black glass. The attribution keeps the map's own ink. */
+.map .mapboxgl-ctrl-group { background: var(--raised); box-shadow: 0 0 0 1.5px var(--hair); }
+.map .mapboxgl-ctrl-group button + button { border-top-color: var(--hair); }
+.map .mapboxgl-ctrl-group .mapboxgl-ctrl-icon { filter: invert(1); }
+/* The map keeps its own ink: its attribution is dark text on a light ground (as in live.css). */
+.map { color: #1f2328; font-weight: 400; letter-spacing: normal; }
 
 /* The Drives screen (DrivesPanel.tsx): the private drive log, a sheet over the trip screen. */
-.drives { position: fixed; z-index: 40; inset: 0; overflow-y: auto; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); background: #ffffff; font-size: 14px; }
+.drives { position: fixed; z-index: 40; inset: 0; overflow-y: auto; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); background: var(--glass); font-size: 14px; }
 .drives-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .drives-head strong { margin-right: auto; font-size: 18px; }
 .drives h2 { font-size: 16px; margin: 16px 0 6px; }
 .drives h3 { font-size: 15px; margin: 12px 0 4px; }
 .drives p { margin: 2px 0; }
 .drive-list { list-style: none; padding: 0; margin: 8px 0; }
-.drive-item { border-top: 1px solid #d0d7de; padding: 8px 0; }
+.drive-item { border-top: 1px solid var(--hair); padding: 8px 0; }
 .drive-head { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
-.drive-outcome.arrived { color: #1a7f37; }
-.drive-outcome.ended, .drive-outcome.unfinished { color: #9a6700; }
+.drive-outcome.arrived, .drive-outcome.ended, .drive-outcome.unfinished { color: var(--fg); }
 .drives table { border-collapse: collapse; margin: 4px 0; }
 .drives th, .drives td { text-align: left; padding: 2px 10px 2px 0; }
 .corridor-sources { margin: 4px 0; padding-left: 18px; }
-.drives-export textarea { width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; }
+.drives-export textarea { width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--hair); border-radius: 10px; }
 .other-eta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .other-eta input { width: 9em; }
 .other-eta .field-status { flex-basis: 100%; }
 /* "Other app's ETA" before Start drive (#118): a field a thumb can hit, 16 px so iOS does not zoom on focus. */
-.other-eta input { min-height: 44px; padding: 8px 10px; font: inherit; font-size: 16px; border: 1px solid #8c959f; border-radius: 6px; background: #ffffff; color: inherit; }
+.other-eta input { min-height: 44px; padding: 8px 12px; font: inherit; font-size: 16px; border: 1.5px solid var(--hair2); border-radius: 12px; background: var(--raised); color: inherit; }

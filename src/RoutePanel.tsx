@@ -10,11 +10,14 @@ import {
   GOOGLE_MAPS_MAX_WAYPOINTS_MOBILE,
   googleMapsUrl,
   handoffWaypoints,
+  routeDelta,
   signalCountNote,
   wazeUrl,
   type RankedRoute,
   type RouteCandidate,
+  type RouteDelta,
 } from './core/index.ts'
+import { Figure } from './Figure.tsx'
 import type { SignalsStatus } from './useRoutes.ts'
 
 interface RoutePanelProps {
@@ -118,6 +121,35 @@ function HandoffLinks({
 }
 
 /**
+ * The delta row under the route list (#21, #44): what the recommended route
+ * gives against the next one, "−8 min · −2 lights · −3 mi". The words come
+ * from core (routeDelta); lights it cannot compare say so, never 0.
+ */
+function DeltaRow({ delta, against }: { delta: RouteDelta; against: number }) {
+  const cells = [
+    ['time', delta.time],
+    ['lights', delta.lights],
+    ['distance', delta.distance],
+  ] as const
+  return (
+    <div className="route-delta" role="group" aria-label={`Route 1 against Route ${against}`}>
+      {cells.map(([key, cell]) => (
+        <span key={key} className="route-delta-cell" data-delta={key}>
+          {cell === null ? (
+            <span className="route-delta-words">Lights: can't compare</span>
+          ) : (
+            <>
+              {cell.figure}
+              <span className="unit"> {cell.unit}</span>
+            </>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
  * Lists the routes in rank order with each one's facts and the reason for its
  * place. Presentation only: the numbers, the order and the wording of the
  * reasons come from src/core. Highlighting follows the selection, not the rank.
@@ -144,28 +176,10 @@ export function RoutePanel({
 }: RoutePanelProps) {
   const dataMonth = formatDataMonth(signalDataDate)
   const candidates = useMemo(() => ranked.map((r) => r.route), [ranked])
+  const delta = useMemo(() => (ranked.length < 2 ? null : routeDelta(ranked[0]!.route, ranked[1]!.route)), [ranked])
   return (
     <aside className="panel" aria-label="Routes">
       <h2>Routes</h2>
-      {onStartDrive !== undefined && (
-        <div className="start-drive">
-          <button
-            type="button"
-            className="start-drive-button"
-            onClick={onStartDrive}
-            onPointerEnter={onKeepSelection}
-            onFocus={onKeepSelection}
-            disabled={!canStartDrive}
-          >
-            Start drive
-          </button>
-          <p className="hint">
-            Follows your location to the destination, checks for faster routes as you go and switches by itself, out
-            loud. Works while this page stays in front with the screen on. Your location is not stored.
-          </p>
-          {startDriveExtra}
-        </div>
-      )}
       {loading && <p role="status">Finding routes…</p>}
       {error && (
         <div className="notice" role="alert">
@@ -182,6 +196,7 @@ export function RoutePanel({
       <ol className="routes" onPointerEnter={onKeepSelection} onFocus={onKeepSelection}>
         {ranked.map(({ route, rank, reasons }) => {
           const counting = signalsStatus === 'loading' || countingRouteIds?.has(route.id) === true
+          const note = signalCountNote(route.signalCount, route.signalCoverage)
           return (
           <li key={route.id}>
             <button
@@ -190,6 +205,7 @@ export function RoutePanel({
               aria-pressed={route.id === selectedId}
               onClick={() => onSelect(route.id)}
             >
+              {/* Read in this order ("Route 1 Recommended via side streets, 35 min, ..."); laid out with the time leading. */}
               <span className="route-name">
                 {`Route ${rank}`}
                 {rank === 1 && <span className="route-badge"> Recommended</span>}
@@ -200,13 +216,21 @@ export function RoutePanel({
                   </span>
                 )}
               </span>
-              <span className="route-eta">{formatDuration(route.durationSec)}</span>
-              <span className="route-distance">{formatDistance(route.distanceM)}</span>
-              <span className="route-signals" title={counting ? undefined : signalHoverText(route)}>
-                {counting
-                  ? 'Counting signals…'
-                  : formatSignalCount(route.signalCount, route.signalCoverage)}
+              <span className="route-eta">
+                <Figure text={formatDuration(route.durationSec)} unitClass="unit" />
               </span>
+              <span className="route-facts">
+                <span className="route-distance">{formatDistance(route.distanceM)}</span>{' '}
+                <span
+                  className="route-signals"
+                  title={counting ? undefined : signalHoverText(route)}
+                >
+                  {counting
+                    ? 'Counting signals…'
+                    : formatSignalCount(route.signalCount, route.signalCoverage)}
+                </span>
+              </span>
+              {!counting && note !== null && <span className="route-signal-note">{note}</span>}
               <span className="route-delay">{formatDelay(delayVsTypicalSec(route))}</span>
               <span className="route-reasons">{reasons.join(' · ')}</span>
             </button>
@@ -215,6 +239,26 @@ export function RoutePanel({
           )
         })}
       </ol>
+      {delta !== null && <DeltaRow delta={delta} against={2} />}
+      {onStartDrive !== undefined && (
+        <div className="start-drive">
+          <p className="hint start-drive-note">
+            Switches by itself if a faster route holds up, and says so out loud. Works while this page stays in front
+            with the screen on. Your location is not stored.
+          </p>
+          <button
+            type="button"
+            className="start-drive-button"
+            onClick={onStartDrive}
+            onPointerEnter={onKeepSelection}
+            onFocus={onKeepSelection}
+            disabled={!canStartDrive}
+          >
+            Start drive
+          </button>
+          {startDriveExtra}
+        </div>
+      )}
       {children}
       {!loading && !error && ranked.length > 0 && (
         <p className="hint">Times include live traffic. Search for a place or drag a pin to change the trip.</p>

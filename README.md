@@ -353,6 +353,7 @@ src/DrivePanel.tsx The "Simulate drive" controls, the thresholds, the what-if co
 src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
                 typical time, the reason for its place, and a "Recommended" badge on
                 the top route. The highlight follows the selection, not the rank.
+                Under it the delta row (core routeDelta) and Start drive.
 src/config.ts   Reads and checks VITE_MAPBOX_TOKEN.
 src/App.tsx     Page shell; owns origin and destination (search, saved place, location,
                 drag, swap, reset) and restores the last trip. Shows setup
@@ -385,7 +386,7 @@ tests/          Vitest: core helpers, route facts and formatting, signal countin
                 itself, poor fixes, off-route patience, arrival), guidance.test.ts
                 (banner and voice fields, missing ones, what is due and when),
                 live.test.ts (the session: cadence, standing still, off route,
-                switching, "Keep previous route", budget, background, failures),
+                switching, "Keep my route", budget, background, failures),
                 device.test.ts (the wrappers and the voice's queue) and
                 liveReplay.test.ts (whole replayed drives through the runner: a
                 traffic change gives exactly one switch and the spoken lines in order).
@@ -999,7 +1000,7 @@ lead distance, the cooldown, no return. No threshold changed.
   route's own via first (`keep`), since a confirmation needs the same route on
   consecutive checks and the points move with the car. A failed check keeps it, as the
   engine keeps its confirmation; anything else that ends the confirmation, a switch or
-  "Keep previous route" included, drops it. The kept via is dropped too once it is within
+  "Keep my route" included, drops it. The kept via is dropped too once it is within
   the endpoint clearance of the car or the destination, behind the car, or on a road a
   check now offers.
 - **Budget.** Probes share the drive's request budget (`maxRequests`, 60) and never take
@@ -1009,11 +1010,11 @@ lead distance, the cooldown, no return. No threshold changed.
   A search for a new route (off the route) and the first route never probe. Nothing to
   probe (under 3 km left, freeway only, a route not held up) costs nothing. Every request
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
-  check that is cancelled before it answers (End, off the route, "Keep previous route")
+  check that is cancelled before it answers (End, off the route, "Keep my route")
   count too, and 60 and 20 are exact.
 - **Said as such.** A switch onto a probed route says "Switching to a faster route via side
-  streets. Saves 4 minutes. Turn in 1.1 miles." and the banner "Switched to a faster route
-  via side streets: saves 4 minutes"; the simulated drive's log adds "(via side streets)".
+  streets. Saves 4 minutes. Turn in 1.1 miles.", and the banner shows that line word for
+  word; the simulated drive's log adds "(via side streets)".
 - **Diagnostics.** In the iPhone shell's drive diagnostics a probe is logged as
   "request N (probe)" and a path check as "request N (path check)", with a count of each.
   A probe that finds no road (NoSegment) or no route is a normal answer, not a fault.
@@ -1065,9 +1066,37 @@ durations are carried but not used for the choice yet.
 | `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
 | `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
 
+### The plan and route screens (#85)
+
+Every screen is in the approved design (`design/README.md`, "The merged direction"), dark:
+black glass, Inter for words, Barlow Condensed for figures (the two faces the drive view
+bundles; no new fonts), a white button for the one primary action, amber only for news in
+the drive view. On a phone (up to 700 px) the map is on top and the trip and the routes
+sit in one sheet under it, its rounded top lapping over the map; on a wide screen the panel
+stays at the right.
+- **A route card** leads with its time, large; beside it the name with the "Recommended"
+  badge (filled white) and the "via side streets" tag (outlined) for a route a probe found,
+  then the distance and the light count. A count that is not whole says so under it in
+  words ("Signal data for part of this route is missing, so this is a lower bound."; "Signal
+  data for this route could not be loaded."), and is never shown as 0.
+- **The delta row**, under the list: what Route 1 gives against Route 2, "−8 min · −2 lights ·
+  −3 mi" (`routeDelta` in `src/core/rank.ts`). Minutes and miles are rounded (miles to a
+  tenth under 10). Lights are compared only when both counts are full; otherwise the cell
+  reads "Lights: can't compare".
+- **Start drive** is the white button under it, with "Switches by itself if a faster route
+  holds up".
+- **The iPhone shell**: the token screen and the top bar's "Change token" and "Drive
+  diagnostics" are unchanged in place, in the same dark theme.
+- **Safe areas.** The page asks to run edge to edge (`viewport-fit=cover`) and pads itself
+  with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
+  sits below the notch and the content clear of the home indicator and the rounded corners.
+  The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
+  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
+  gaps apply; the shell's layout is the same as before this change.
+
 ## Live drive
 
-"Start drive" at the top of the route list is the one tap. After it nothing needs
+"Start drive" under the route list is the one tap. After it nothing needs
 touching: RouteIQ asks for the location permission, starts on the route you picked,
 follows the car, checks Mapbox for faster routes,
 changes route by itself and announces it, speaks the turn prompts, and at the
@@ -1187,9 +1216,43 @@ the phone's safe areas, and the one animation is off under `prefers-reduced-moti
 On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
 the sheet stack in a column on the left and the map fills the right, so the car stays in
 view; the sheet scrolls in its column with More and End pinned at its foot (#131).
-After a switch a banner stays for 8 seconds with one large button, "Keep previous
-route". Doing nothing accepts the switch. Pressing it goes back to the route just left
-and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
+**The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
+the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
+casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and
+the turn card's and the sheet's edge a lighter `--hair-night` so they don't melt into the
+streets. A change of appearance takes effect the next time the map starts, never with a
+style reload under a drive. While following the car, the base map's points of interest,
+transit and traffic layers are off (traffic's orange sits next to amber); they come back on
+the trip screen. Same Mapbox style service as before, with the same token: no new network
+call.
+**The switch moment** (#84; design #22, #43, #44) has three stages in the sheet, each a
+banner over the time line. Amber appears only here, and only for news.
+- **Pending**: the engine is confirming a faster route (`confirming`, or held by its
+  cooldown). An amber outline with a hollow ring: "Checking a faster route", and under it
+  "Would save 8 min · 2 fewer lights". The lights are compared only when both counts are
+  full; otherwise "lights: can't compare", never a number. Nothing has changed yet and
+  nothing is said. "Keep my route" is offered already.
+- **Confirmed**: the switch is made. Filled amber, and the words are the spoken line,
+  word for word ("Switching to a faster route. Saves 8 minutes. Turn in 0.8 miles.").
+  The time line shows the old travel time and arrival, small, dim and struck through,
+  beside the new ones, the new time on amber ("43 → 35 min", "Arrive 10:24 → 10:16").
+  They are the figures of the moment of the switch and do not tick; the old time is the
+  new one plus the saving the engine measured, so the two differ by what was said (each
+  rounded to the minute). The turn card holds the distance the line named ("0.8 mi") for
+  as long as the banner shows, then counts down again, but only when its next turn is the
+  turn-off itself: a maneuver within `heldTurnMatchM` (50 m) of the turn-off's place and no
+  more than that beyond the distance said. A turn both routes share before the turn-off, or
+  one that comes back past the turn-off later (a loop), keeps its own distance. The banner stays for
+  `switchBannerSec` (8 s); doing nothing accepts the switch.
+- **Kept**: "Keep my route" (at either stage) leaves the driver on, or puts them back on,
+  the route they were on, and tells the engine not to offer the other route again for
+  `noReturnSec` (10 minutes). A calm outline, not amber, for `switchBannerSec`:
+  "Staying on your route." (the spoken line, as in the design, #43) and "Won't offer that route again for
+  10 min." Once that time is up, a route that is still faster comes back as an ordinary
+  pending offer titled "Still faster. Checking again." if it turns off within
+  `heldTurnMatchM` (50 m) of where a route the driver turned down did; any other route is
+  "Checking a faster route".
+- After leaving the route there is nothing to keep: the "New route" banner has no button.
 
 **Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):
 

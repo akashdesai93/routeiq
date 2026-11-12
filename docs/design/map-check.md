@@ -88,8 +88,11 @@ GPS fix: they are set when the map loads, and when the appearance changes.
 
 ## What comes next
 
-- #145 for items 1 to 5 (web map; the native app takes the same table), with an e2e scenario that
-  checks the style request asks for the night preset when the page is dark, and that the
-  route paint follows it. The busy map makes that check possible offline.
+- #145 for items 1 to 4, done on the web map (`src/map/mapTheme.ts`, the table the native app
+  takes too): the style follows the phone's appearance as the map starts (`streets-v12` by day,
+  `navigation-night-v1` by night), the route paint follows the style, POI, transit and traffic
+  layers are off while driving, and the cards get the `--hair-night` edge at night.
+  `e2e/nightmap.spec.ts` checks it over the busy map, offline, by its pixels. Item 5 (the amber
+  branch's black casing by day) waits for the amber branch itself, which the map does not draw yet.
 - Re-photograph after #135 and #144 land (`npm run design:shots -- -g "busy map"`), and
   once on the phone with the real token for item 6.
