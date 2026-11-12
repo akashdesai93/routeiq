@@ -7,6 +7,10 @@ export const DRIVE_ROUTE_SOURCE = 'drive-route'
 export const DRIVE_SOURCE = 'drive'
 /** The line layer of the route being driven; the part behind the car is trimmed off. */
 export const DRIVE_ROUTE_LAYER = 'drive-route'
+/** Its white casing, drawn under it from the same source and trimmed with it. */
+export const DRIVE_ROUTE_CASE_LAYER = 'drive-route-case'
+/** Every layer of the route line: each gets the same trim. */
+export const DRIVE_ROUTE_LAYERS = [DRIVE_ROUTE_CASE_LAYER, DRIVE_ROUTE_LAYER] as const
 
 /** The few calls of a Mapbox map the drive layers make (a mapboxgl.Map has them). */
 export interface DriveMap {
@@ -40,7 +44,7 @@ export function driveLayers(map: DriveMap): { update(drive: DriveOverlay | null)
       const nextTrim = drive === null ? 0 : progress(drive.alongM)
       if (nextTrim !== trim) {
         trim = nextTrim
-        map.setPaintProperty(DRIVE_ROUTE_LAYER, 'line-trim-offset', [0, trim])
+        for (const layer of DRIVE_ROUTE_LAYERS) map.setPaintProperty(layer, 'line-trim-offset', [0, trim])
       }
       const points = driveMarkerFeatures(drive)
       const nextMarkers = JSON.stringify(points)

@@ -59,7 +59,17 @@ export function alongRouteM(line: readonly LngLat[]): number[] {
   return along
 }
 
-const M_PER_DEGREE = (EARTH_RADIUS_M * Math.PI) / 180
+/** Meters in one degree of latitude (and of longitude at the equator). */
+export const M_PER_DEGREE = (EARTH_RADIUS_M * Math.PI) / 180
+
+/**
+ * Degrees of longitude that span as much ground as `latDegrees` of latitude,
+ * at latitude `lat`. A degree of longitude shrinks toward the poles; the floor
+ * near them keeps the answer finite.
+ */
+export function lngDegreesFor(latDegrees: number, lat: number): number {
+  return latDegrees / Math.max(0.01, Math.cos((Math.min(89.9, Math.abs(lat)) * Math.PI) / 180))
+}
 
 /** A point on a flat local plane, in meters east (x) and north (y) of the plane's origin. */
 export type XY = readonly [x: number, y: number]
@@ -89,6 +99,29 @@ export function pointToSegment(p: XY, a: XY, b: XY): { distanceM: number; t: num
       ? 0
       : Math.min(1, Math.max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / lengthSq))
   return { distanceM: Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy)), t }
+}
+
+/** True when P lies within `toleranceM` of some segment of the line (flat plane). A line of fewer than two points is near nothing. */
+export function nearLine(p: XY, line: readonly XY[], toleranceM: number): boolean {
+  for (let i = 1; i < line.length; i++) {
+    if (pointToSegment(p, line[i - 1]!, line[i]!).distanceM <= toleranceM) return true
+  }
+  return false
+}
+
+/**
+ * Meters along `line` (as alongRouteM counts them) of the line's point closest
+ * to `p`. The first of equally close points wins. 0 for a line of fewer than two points.
+ */
+export function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
+  const project = localProjector(p)
+  const along = alongRouteM(line)
+  let best = { distanceM: Infinity, atM: 0 }
+  for (let i = 1; i < line.length; i++) {
+    const hit = pointToSegment([0, 0], project(line[i - 1]!), project(line[i]!))
+    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, atM: along[i - 1]! + hit.t * (along[i]! - along[i - 1]!) }
+  }
+  return best.atM
 }
 
 /** True when every point lies inside the box (edges included). */

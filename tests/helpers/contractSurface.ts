@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join } from 'node:path/posix'
 
 // The contract surface (PLAN step 10, #7): the type declarations the Swift port and the
 // iPhone shell depend on, read straight from the source, each with every type it refers to,

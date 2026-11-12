@@ -32,6 +32,12 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     private var onceRequested = false
     private var heartbeat: Timer?
 
+    // The "Test drive": a made-up car in place of the GPS (RouteIQSimulation).
+    // While it is set, positions from the GPS are discarded.
+    private var simulation: RouteIQSimulation?
+    private var simulationTimer: Timer?
+    private var simulationLastStep: Date?
+
     // Speech: the line being spoken, and who to tell when it ends.
     private var currentUtterance: AVSpeechUtterance?
     private var currentDone: ((Bool) -> Void)?
@@ -74,6 +80,8 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     }
 
     func stopLocation() {
+        // Ending a drive always ends a test drive too, whatever the web app did or did not call.
+        stopSimulatedRoute()
         if let pending = pendingStart {
             pendingStart = nil
             pending("unavailable")
@@ -140,6 +148,54 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         }
         RunLoop.main.add(timer, forMode: .common)
         heartbeat = timer
+    }
+
+    // MARK: - Test drive (simulated positions)
+
+    /// From now on `onFix` gets made-up positions, about one a second, along
+    /// `points`; the first one at once. Positions from the GPS are discarded
+    /// until `stopSimulatedRoute` or `stopLocation`. The GPS itself is not
+    /// touched: with the location stream on, it is what keeps the app (and
+    /// this timer) running while the phone is locked, exactly as on a real
+    /// drive. Calling this again replaces the route. False when no point is
+    /// usable; a simulation that was running then carries on.
+    func startSimulatedRoute(points: [(lng: Double, lat: Double)], speedMps: Double, steps: [RouteIQSimulation.Step]) -> Bool {
+        guard let next = RouteIQSimulation(points: points, speedMps: speedMps, steps: steps) else { return false }
+        let wasRunning = simulation != nil && simulationTimer != nil
+        simulation = next
+        // A route that replaces another carries on in the same rhythm: the
+        // next tick of the timer moves the car along the new one.
+        if wasRunning { return true }
+        simulationLastStep = nil
+        simulationTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            self?.stepSimulation()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        simulationTimer = timer
+        // The first position at once, like a phone that already knows where it is.
+        stepSimulation()
+        return true
+    }
+
+    func stopSimulatedRoute() {
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+        simulation = nil
+        simulationLastStep = nil
+    }
+
+    var isSimulating: Bool { simulation != nil }
+
+    /// Moves the made-up car on by the time since the last step and reports where it is.
+    private func stepSimulation() {
+        guard var current = simulation else { return }
+        let now = Date()
+        let elapsed = simulationLastStep.map { now.timeIntervalSince($0) } ?? 0
+        simulationLastStep = now
+        let fix = current.advance(bySec: elapsed, timestampMs: now.timeIntervalSince1970 * 1000)
+        simulation = current
+        onFix?(fix)
     }
 
     // MARK: - One position ("Use my location")
@@ -221,7 +277,9 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         }
         // Core Location may first hand over a fix it kept from earlier. The
         // web app stamps fixes on arrival, so an old one must not look new.
-        if updating && location.timestamp.timeIntervalSinceNow > -Self.maxFixAgeSec {
+        // During a test drive the GPS's position is discarded here: the
+        // stream is only on to keep the app running.
+        if updating && simulation == nil && location.timestamp.timeIntervalSinceNow > -Self.maxFixAgeSec {
             onFix?(fix)
         }
     }
@@ -232,7 +290,8 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         if !pendingOnce.isEmpty && (!updating || denied) {
             answerOnce(fix: nil, error: kind)
         }
-        if updating {
+        // Indoors, on a test drive, "no position right now" is expected and not the drive's problem.
+        if updating && (simulation == nil || denied) {
             onLocationError?(kind)
         }
     }

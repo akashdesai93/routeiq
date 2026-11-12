@@ -25,6 +25,9 @@
 //
 // How long each stretch takes is set by a Traffic function, so a scenario can
 // script "a jam on A from the third request on" without touching the geometry.
+// A Closure, likewise, closes stretches of road from some request on: a route
+// whose way ahead passes a closed stretch is not offered, and a request through
+// via points on it is answered NoRoute, as Mapbox answers when no road goes that way.
 // Every answer carries Mapbox's per-segment annotations (congestion and
 // duration, one entry per segment of the line), the congestion read off how much
 // slower the segment is than its usual pace (see congestionOf).
@@ -43,6 +46,12 @@ export interface FramePoint {
 
 /** Seconds per meter on a stretch of `route` around `at`, for the `n`th Directions request of the test (1 is the first). */
 export type Traffic = (route: RouteName, at: FramePoint, n: number) => number
+
+/** True when the road at `at` is closed for the `n`th Directions request of the test. */
+export type Closure = (at: FramePoint, n: number) => boolean
+
+/** Nothing is ever closed. */
+export const NO_CLOSURES: Closure = () => false
 
 // A is the fastest by about a minute in free flow, more than the 30 s within which
 // the signal count breaks ties, so the recommended route is always A.
@@ -190,13 +199,14 @@ export class World {
   }
 
   /** The routes on offer from `from`, as Mapbox Directions JSON, fastest first. */
-  directions(from: LngLat, traffic: Traffic, n: number): DirectionsJson {
+  directions(from: LngLat, traffic: Traffic, n: number, closed: Closure = NO_CLOSURES): DirectionsJson {
     const offered: { road: Road; body: RouteJson }[] = []
     for (const road of this.roads) {
       if (!OFFERED.includes(road.name as RoadName)) continue
       const p = project(this.frame, road.corners, from)
       if (p.offM > ON_ROAD_M) continue
       const rest = restOf(road, p)
+      if (this.isClosed(rest, closed, n)) continue
       offered.push({ road: rest, body: this.routeJson(rest, traffic, n) })
     }
     if (offered.length === 0) {
@@ -237,7 +247,8 @@ export class World {
     n: number,
     /** The via's `radiuses` entry, when the request sent one: no road this close is NoSegment, as at Mapbox. */
     radiusM: number = VIA_SNAP_M,
-  ): { answer: DirectionsJson | NoSegmentJson; road: RouteName | null; durationSec: number | null } {
+    closed: Closure = NO_CLOSURES,
+  ): { answer: DirectionsJson | NoSegmentJson | NoRouteJson; road: RouteName | null; durationSec: number | null } {
     let best: { road: Road; offM: number } | null = null
     for (const road of this.roads) {
       if (road.name === 'S' && !this.sideStreet) continue
@@ -251,6 +262,7 @@ export class World {
     const rest = restOf(best.road, onRoad)
     const road: Road =
       onRoad.offM <= ON_ROAD_M ? rest : { name: rest.name, corners: [from, ...rest.corners], legNames: ['Cross Street', ...rest.legNames] }
+    if (this.isClosed(road, closed, n)) return { answer: NO_ROUTE, road: null, durationSec: null }
     const body = this.routeJson(road, traffic, n)
     return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: road.name, durationSec: body.duration }
   }
@@ -261,18 +273,39 @@ export class World {
    * the drive places where it leaves the routes Mapbox offered. One route
    * along the road that passes within ON_ROAD_M of every via (S only in a
    * world made with `sideStreet`), from the point on it nearest `from`. Null
-   * when no one road passes them all. Leaves lastOffered alone: the car
-   * drives on what it was driving.
+   * when no one road passes them all. NoRoute (road null) when that road is
+   * closed on the way. Leaves lastOffered alone: the car drives on what it was
+   * driving.
    */
-  pathThrough(from: LngLat, vias: readonly LngLat[], traffic: Traffic, n: number): { answer: DirectionsJson; road: RouteName; durationSec: number } | null {
+  pathThrough(
+    from: LngLat,
+    vias: readonly LngLat[],
+    traffic: Traffic,
+    n: number,
+    closed: Closure = NO_CLOSURES,
+  ): { answer: DirectionsJson | NoRouteJson; road: RouteName | null; durationSec: number | null } | null {
     for (const road of this.roads) {
       if (road.name === 'S' && !this.sideStreet) continue
       if (!vias.every((via) => project(this.frame, road.corners, via).offM <= ON_ROAD_M)) continue
       const rest = restOf(road, project(this.frame, road.corners, from))
+      if (this.isClosed(rest, closed, n)) return { answer: NO_ROUTE, road: null, durationSec: null }
       const body = this.routeJson(rest, traffic, n)
       return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: road.name, durationSec: body.duration }
     }
     return null
+  }
+
+  /** True when some stretch of `road` (from its first corner to its last) is closed for request `n`. */
+  private isClosed(road: Road, closed: Closure, n: number): boolean {
+    if (closed === NO_CLOSURES) return false
+    for (let i = 0; i < road.corners.length - 1; i++) {
+      const piece = densify(this.frame, road.corners[i]!, road.corners[i + 1]!)
+      for (let k = 1; k < piece.length; k++) {
+        const mid = this.frame.toFrame([(piece[k - 1]![0] + piece[k]![0]) / 2, (piece[k - 1]![1] + piece[k]![1]) / 2])
+        if (closed(mid, n)) return true
+      }
+    }
+    return false
   }
 
   private road(name: RoadName): Road {
@@ -506,6 +539,14 @@ export interface DirectionsJson {
   waypoints: never[]
   routes: RouteJson[]
 }
+/** Mapbox's answer (HTTP 200) when no road goes from the start through the points to the end. */
+export interface NoRouteJson {
+  code: 'NoRoute'
+  message: string
+  routes: never[]
+}
+const NO_ROUTE: NoRouteJson = { code: 'NoRoute', message: 'No route found', routes: [] }
+
 /** Mapbox's answer (HTTP 200) when a coordinate is too far from any road. */
 export interface NoSegmentJson {
   code: 'NoSegment'

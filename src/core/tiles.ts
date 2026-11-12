@@ -1,4 +1,4 @@
-import { isValidLngLat } from './geo.ts'
+import { isValidLngLat, lngDegreesFor, M_PER_DEGREE } from './geo.ts'
 import type { BBox, LngLat } from './types.ts'
 
 /**
@@ -60,8 +60,6 @@ export function tileBounds(tileId: string): BBox | null {
   return [x / TILES_PER_DEGREE, y / TILES_PER_DEGREE, (x + 1) / TILES_PER_DEGREE, (y + 1) / TILES_PER_DEGREE]
 }
 
-const M_PER_DEGREE = (6_371_008.8 * Math.PI) / 180
-
 /** A route segment is walked in pieces no longer than this, so a long one cannot step over a tile. */
 const PIECE_DEG = TILE_SIZE_DEG / 2
 
@@ -86,9 +84,7 @@ export function tilesForRoute(geometry: readonly LngLat[], marginM = 0): string[
   const addBox = (lngA: number, latA: number, lngB: number, latB: number) => {
     const south = Math.min(latA, latB) - padLat
     const north = Math.max(latA, latB) + padLat
-    // A degree of longitude shrinks toward the poles; the floor keeps the padding finite there.
-    const widest = Math.max(Math.abs(south), Math.abs(north))
-    const padLng = padLat / Math.max(0.01, Math.cos((Math.min(89.9, widest) * Math.PI) / 180))
+    const padLng = lngDegreesFor(padLat, Math.max(Math.abs(south), Math.abs(north)))
     const x0 = tenthsBelow(Math.min(lngA, lngB) - padLng)
     const x1 = tenthsBelow(Math.max(lngA, lngB) + padLng)
     const y0 = tenthsBelow(south)

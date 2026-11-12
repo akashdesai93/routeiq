@@ -26,8 +26,13 @@ and a concrete failure scenario:
 7. **Privacy:** no position is stored or logged, and no new network destination or payload
    is added without a README Privacy note. Tokens never appear in code or logs.
 8. **Docs:** a changed default or behaviour is reflected in the README tables and in PLAN.md.
-9. **Tests:** new logic has tests that would fail without it. Edge cases such as empty
-   routes, a single route, failed polls and a tiny remaining trip are covered where relevant.
+9. **Tests prove behaviour** (CLAUDE.md, "Tests must prove behaviour"). For each new or
+   changed test, revert or break the logic it covers and confirm it fails; report which
+   mutations you tried. Flag as blocking: tests that assert wiring or mock calls and not
+   outcomes; assertions that were loosened, tolerances that were widened, or retries and
+   `skip`/`only`/`todo` that were added to get green; snapshots with no behavioural
+   meaning; and edge cases left uncovered where relevant (empty routes, a single route,
+   failed polls, a tiny remaining trip).
 
 Finish with a verdict: OK to commit, or the blocking findings in order of severity.
 Don't edit files.

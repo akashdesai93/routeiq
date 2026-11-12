@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { alongRouteM, lineFrom, type LngLat } from '../src/core/index.ts'
-import { DRIVE_ROUTE_LAYER, DRIVE_ROUTE_SOURCE, DRIVE_SOURCE, driveLayers, type DriveMap } from '../src/map/driveLayers.ts'
+import { DRIVE_ROUTE_CASE_LAYER, DRIVE_ROUTE_LAYER, DRIVE_ROUTE_SOURCE, DRIVE_SOURCE, driveLayers, type DriveMap } from '../src/map/driveLayers.ts'
 import type { DriveOverlay } from '../src/map/driveFeatures.ts'
 
 // #94: the live drive handed the map the whole rest of the route on every fix (about 66 kB of
@@ -10,7 +10,9 @@ import type { DriveOverlay } from '../src/map/driveFeatures.ts'
 /** A recorder in place of the Mapbox map: what each source was set to, and each trim. */
 function recorder() {
   const sets: Record<string, { calls: number; bytes: number }> = {}
+  // The trims of the ink line; the casing's are kept apart and must be the same, one for one.
   const trims: [number, number][] = []
+  const caseTrims: [number, number][] = []
   const map: DriveMap = {
     getSource: (id) => ({
       setData: (data) => {
@@ -20,11 +22,13 @@ function recorder() {
       },
     }),
     setPaintProperty: (layer, name, value) => {
-      expect([layer, name]).toEqual([DRIVE_ROUTE_LAYER, 'line-trim-offset'])
-      trims.push(value)
+      expect(name).toBe('line-trim-offset')
+      if (layer === DRIVE_ROUTE_LAYER) trims.push(value)
+      else if (layer === DRIVE_ROUTE_CASE_LAYER) caseTrims.push(value)
+      else throw new Error(`unexpected layer ${layer}`)
     },
   }
-  return { map, sets, trims }
+  return { map, sets, trims, caseTrims }
 }
 
 /** A 60 km road south from Uptown Charlotte, 3000 vertices, gently winding (a long trip, as in docs/performance.md). */
@@ -53,7 +57,7 @@ describe('drive layers on the map (#94)', () => {
     })
 
   it('sets the route line only when the route changes, and the car on each fix in under 1 kB', () => {
-    const { map, sets, trims } = recorder()
+    const { map, sets, trims, caseTrims } = recorder()
     const layers = driveLayers(map)
     const fixes = minute()
     for (const drive of fixes) layers.update(drive)
@@ -70,6 +74,8 @@ describe('drive layers on the map (#94)', () => {
       expect(end).toBeLessThan(0.1)
     }
     expect(trims[29]![1]).toBeGreaterThan(trims[0]![1])
+    // The white casing under the line is cut at the same place, or it would show behind the car.
+    expect(caseTrims).toEqual(trims)
 
     // Before #94 each fix handed over the rest of the route: about 3000 points, 60-odd kB.
     const before = JSON.stringify(lineFrom(route, fixes[0]!.alongM)).length
@@ -77,7 +83,7 @@ describe('drive layers on the map (#94)', () => {
   })
 
   it('hands over nothing when nothing moved, and clears the map when the drive ends', () => {
-    const { map, sets, trims } = recorder()
+    const { map, sets, trims, caseTrims } = recorder()
     const layers = driveLayers(map)
     const drive: DriveOverlay = { car: route[100]!, route, alongM: alongRouteM(route)[100]!, turn: null }
     layers.update(null)
@@ -93,6 +99,7 @@ describe('drive layers on the map (#94)', () => {
     expect(sets[DRIVE_ROUTE_SOURCE]?.calls).toBe(2)
     expect(sets[DRIVE_SOURCE]?.calls).toBe(2)
     expect(trims.at(-1)).toEqual([0, 0])
+    expect(caseTrims).toEqual(trims)
   })
 
   it('a position with no route yet: only the car, whatever empty line comes with it', () => {

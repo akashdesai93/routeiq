@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, installShellStubs, type E2EWindow } from './browserStubs.ts'
-import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
+import { along, alongOf, FREE_FLOW, NO_CLOSURES, sideStep, World, type Closure, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
 
 export { expect }
 
@@ -43,6 +43,8 @@ const fixture = (name: string) => readFileSync(`tests/fixtures/${name}`, 'utf8')
 export interface Outside {
   /** Traffic on the made-up road network. Default: free flow. */
   traffic?: Traffic
+  /** Stretches of road closed, from some request on. Default: none. */
+  closed?: Closure
   /** The road network has Parallel Street (S), a side street Mapbox never offers among its three. Default: no. */
   sideStreet?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
@@ -75,6 +77,8 @@ export interface DriveOptions {
   hideAtSec?: number
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
+  /** Looks at the screen mid-drive: each runs once, at its simulated second, with the drive standing still. */
+  lookAtSec?: readonly { atSec: number; look: () => Promise<void> }[]
 }
 
 export interface DriveLog {
@@ -94,7 +98,7 @@ export class App {
   directionsRequests = 0
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
-  /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on. */
+  /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on ('NoRoute': closed that way). */
   readonly pathChecks: { n: number; road: string | null; vias: number }[] = []
   /**
    * Side-street probes (one via point with a `radiuses` entry), in order: the road each one came
@@ -218,7 +222,7 @@ export class App {
         const probes = this.probes
           .filter((p) => p.forRequest === n)
           .map((p) => (p.road === null ? 'NoSegment' : `${names[p.road] ?? p.road} ${minutes(p.durationSec ?? 0)}`))
-        return `request ${String(n).padStart(2)}: ${offered}${probes.length > 0 ? `\n   probes: ${probes.join(', ')}` : ''}`
+        return `request ${String(n).padStart(2)}: ${offered || 'NoRoute'}${probes.length > 0 ? `\n   probes: ${probes.join(', ')}` : ''}`
       })
       .join('\n')
     await this.info.attach('route answers', { body: text, contentType: 'text/plain' })
@@ -232,7 +236,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, lookAtSec = [] } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
     await page.getByRole('button', { name: 'Start drive' }).click()
@@ -287,6 +291,8 @@ export class App {
       if (state.status !== '' && state.status !== log.statusLines.at(-1)?.text) log.statusLines.push({ atSec: sec, text: state.status })
       if (state.banner !== '' && state.banner !== lastBanner) {
         log.banners.push({ atSec: sec, text: state.banner })
+        // The banner made the sheet taller and the map shorter: one frame for the map to draw at its new size.
+        await page.clock.runFor(20)
         await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
         // The driver follows the app onto the route it switched to: a side street a probe
         // found during the drive, or else the fastest of what Mapbox offered.
@@ -303,6 +309,7 @@ export class App {
       }
       lastBanner = state.banner
       if (snapAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) await this.snap(`driving, minute ${Math.floor(sec / 60)}`)
+      for (const { atSec, look } of lookAtSec) if (atSec >= sec && atSec < sec + STEP_SEC) await look()
       log.seconds = sec + STEP_SEC
       if (state.arrived) {
         log.arrived = true
@@ -338,7 +345,7 @@ export class App {
     const url = new URL(request.url())
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue()
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
-    const { mapboxStatus, traffic = FREE_FLOW, overpass, sideStreet = false } = this.outside
+    const { mapboxStatus, traffic = FREE_FLOW, closed = NO_CLOSURES, overpass, sideStreet = false } = this.outside
 
     if (url.hostname === 'api.mapbox.com') {
       if (mapboxStatus !== undefined) return route.fulfill({ status: mapboxStatus, json: { message: 'Not Authorized - Invalid Token' } })
@@ -364,7 +371,7 @@ export class App {
         if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && Number.isFinite(viaRadius)) {
           // Through the via, answered with the traffic of the request it belongs to (the plan,
           // or the drive's check it follows). As Mapbox reads the radius: no road that close is NoSegment.
-          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, viaRadius)
+          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, viaRadius, closed)
           const index =
             this.probes.push({
               forRequest: this.directionsRequests,
@@ -384,17 +391,20 @@ export class App {
         }
         // The drive's own check of the route being driven: through vias, with the car's heading.
         if (points.length > 2) {
-          const path = world.pathThrough(from, points.slice(1, -1), traffic, this.directionsRequests + 1)
+          const path = world.pathThrough(from, points.slice(1, -1), traffic, this.directionsRequests + 1, closed)
           if (path !== null) {
             this.directionsRequests++
-            this.pathChecks.push({ n: this.directionsRequests, road: path.road, vias: points.length - 2 })
-            this.answers.push({ n: this.directionsRequests, routes: [{ name: path.road, durationSec: path.durationSec }] })
+            this.pathChecks.push({ n: this.directionsRequests, road: path.road ?? 'NoRoute', vias: points.length - 2 })
+            this.answers.push({
+              n: this.directionsRequests,
+              routes: path.road === null ? [] : [{ name: path.road, durationSec: path.durationSec ?? 0 }],
+            })
             return route.fulfill({ json: path.answer })
           }
           this.pathChecks.push({ n: this.directionsRequests + 1, road: null, vias: points.length - 2 })
         }
         this.directionsRequests++
-        const json = world.directions(from, traffic, this.directionsRequests)
+        const json = world.directions(from, traffic, this.directionsRequests, closed)
         this.answers.push({ n: this.directionsRequests, routes: world.lastOffered.map((r) => ({ name: r.name, durationSec: r.durationSec })) })
         return route.fulfill({ json })
       }

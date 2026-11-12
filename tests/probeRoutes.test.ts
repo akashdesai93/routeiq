@@ -411,6 +411,30 @@ describe('comparing long routes (#93)', () => {
     expect(meter.segmentChecks + meter.gridEntries).toBeLessThanOrEqual(30 * 5000)
   })
 
+  it('once the grid has taken over, a point just past the tolerance is still off the line', () => {
+    // The grid only picks which segments to measure; it must give the same answer as measuring
+    // every segment, right at the tolerance, or a route 1 m off another is taken for it.
+    const shuffled = [...lineA]
+    const pick = rng(13)
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(pick() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!]
+    }
+    const nearest = (p: XY) => Math.min(...lineA.slice(1).map((b, i) => pointToSegment(p, lineA[i]!, b).distanceM))
+    const answers = [-0.5, 0.5, 1, 2, 4].flatMap((overM) =>
+      [500, 1500, 2500, 3500, 4500].map((i) => {
+        const [x, y] = lineA[i]!
+        const p: XY = [x, y + SAME_ROUTE_TOLERANCE_M + overM]
+        const expected = nearest(p) <= SAME_ROUTE_TOLERANCE_M
+        // The shuffled line first, so that the walk has missed often enough for the grid to answer p.
+        expect(everyPointNear([...shuffled, p], lineA, SAME_ROUTE_TOLERANCE_M), `${overM} m over at ${i}`).toBe(expected)
+        return expected
+      }),
+    )
+    expect(answers).toContain(true)
+    expect(answers).toContain(false)
+  })
+
   it('counting changes nothing: the same answer with or without a meter', () => {
     expect(mergeProbeRoutes(known, [...backOnKnown, sideStreet]).map((r) => r.id)).toEqual(['a', 'b', 'c', 'probe-s'])
   })

@@ -1,4 +1,4 @@
-import { alongRouteM, distanceM, isValidLngLat, localProjector, pointAtDistance, pointToSegment, type MatchMeter } from './geo.ts'
+import { alongRouteM, distanceM, isValidLngLat, localProjector, nearestAlongM, pointAtDistance, pointToSegment, type MatchMeter } from './geo.ts'
 import { findCurrentRoute, type RerouteDecision, type RerouteOptions } from './reroute.ts'
 import { everyPointNear, SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
 import type { CongestionLevel, DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
@@ -574,18 +574,6 @@ export interface CheckProbeInput {
   readonly rerouteOptions?: Partial<RerouteOptions>
   /** For minDelaySec; left out, the defaults. */
   readonly budget?: Partial<DriveProbeBudget>
-}
-
-/** Where along a line the point nearest `p` is, in meters from the line's start. */
-function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
-  const project = localProjector(p)
-  const along = alongRouteM(line)
-  let best = { distanceM: Infinity, atM: 0 }
-  for (let i = 1; i < line.length; i++) {
-    const hit = pointToSegment([0, 0], project(line[i - 1]!), project(line[i]!))
-    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, atM: along[i - 1]! + hit.t * (along[i]! - along[i - 1]!) }
-  }
-  return best.atM
 }
 
 /**

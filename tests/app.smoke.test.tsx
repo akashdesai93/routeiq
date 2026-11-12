@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -310,7 +311,7 @@ describe('Start drive and the live drive view', () => {
     { type: 'fix', nowMs: T0, fix: fixAt(0) },
   ]
   const driving = play([...started, { type: 'routes', nowMs: T0 + 1000, requestId: 1, routes: [route] }])
-  const render = (state: LiveState, nowMs: number, extra: { replaying?: boolean; speechSupported?: boolean } = {}) =>
+  const render = (state: LiveState, nowMs: number, extra: { replaying?: boolean; speechSupported?: boolean; initiallyOpen?: boolean; extra?: ReactNode } = {}) =>
     renderToString(
       <LiveDriveView
         state={state}
@@ -339,28 +340,72 @@ describe('Start drive and the live drive view', () => {
     expect(app).not.toContain('class="app live"')
   })
 
-  it('before the first route it says what it is waiting for, with Mute and End already there', () => {
+  it('before the first route it says what it is waiting for, with More and End already there and Mute behind More', () => {
     const html = render(play(started), T0)
     expect(html).toContain('Finding a route…')
-    expect(html).toContain('>Mute</button>')
+    expect(html).toContain('aria-expanded="false">More</button>')
     expect(html).toContain('>End</button>')
+    expect(html).not.toContain('aria-label="Mute"')
+    expect(render(play(started), T0, { initiallyOpen: true })).toContain('aria-label="Mute"')
     expect(html).not.toContain('Keep previous route')
     expect(render(play([started[0]!]), T0)).toContain('Finding your position…')
   })
 
-  it('driving: the next turn with its arrow, distance and road, the arrival time, and a quiet status line', () => {
+  it('driving: the next turn with its arrow, distance and road, and one line with the time left and the arrival time', () => {
     const html = render(driving, T0 + 13_000)
     expect(html).toContain('data-arrow="right"')
-    expect(html).toContain('<span class="live-turn-distance">2.7 mi</span>')
+    // The distance is the hero: the digits, then the unit set small.
+    expect(html).toContain('<span class="live-turn-distance">2.7<span class="live-unit"> mi</span></span>')
     expect(html).toContain('Turn right: </span>Wilkinson Boulevard')
     expect(html).toContain('US 74 West')
-    // Arrival time, minutes left, distance left.
-    expect(html).toMatch(/<p class="live-eta"><strong>\d{1,2}:\d{2}[^<]*<\/strong><span>1[45] min<\/span><span>\d\.\d mi<\/span><\/p>/)
+    // One line: minutes left, then the arrival time.
+    expect(html).toMatch(
+      /<p class="live-eta"><strong class="live-eta-left">1[45]<span class="live-unit"> min<\/span><\/strong><span class="live-eta-arrive"><span class="live-eta-label">Arrive <\/span><span class="live-eta-clock">\d{1,2}:\d{2}[^<]*<\/span><\/span><\/p>/,
+    )
+    // Everything else is behind More.
+    expect(html).not.toContain('Lights on route')
+    expect(html).not.toContain('requests')
+    expect(html).not.toContain('aria-label="Mute"')
+  })
+
+  it('behind More: lights, distance left, the automatic switch, the voice and the quiet status line', () => {
+    const open = { initiallyOpen: true }
+    const html = render(driving, T0 + 13_000, open)
+    expect(html).toContain('aria-expanded="true">Less</button>')
+    expect(html).toMatch(/Distance<\/span><span class="live-tile-word">\d\.\d<span class="live-unit"> mi<\/span>/)
+    expect(html).toContain('Auto-switch</span><span class="live-tile-word">On</span>')
     expect(html).toContain('Watching for a faster route. · checked 12 s ago · 1 of 60 requests')
-    expect(html).toContain('aria-pressed="false">Mute</button>')
+    expect(html).toContain('aria-pressed="false" aria-label="Mute"')
+    expect(html).toContain('Voice</span><span class="live-tile-word">On</span>')
     expect(html).not.toContain('GPS replay')
-    expect(render(driving, T0 + 13_000, { replaying: true })).toContain('GPS replay (simulated position)')
-    expect(render({ ...driving, muted: true }, T0 + 13_000)).toContain('aria-pressed="true">Unmute</button>')
+    expect(render(driving, T0 + 13_000, { ...open, replaying: true })).toContain('GPS replay (simulated position)')
+    const muted = render({ ...driving, muted: true }, T0 + 13_000, open)
+    expect(muted).toContain('aria-pressed="true" aria-label="Unmute"')
+    expect(muted).toContain('Voice</span><span class="live-tile-word">Off</span>')
+    expect(render(driving, T0 + 13_000, { ...open, extra: <button type="button">Drive diagnostics</button> })).toContain('>Drive diagnostics</button>')
+  })
+
+  it('the lights tile is a number only for a full count: a lower bound or Unknown otherwise, never 0 when unsure', () => {
+    const lights = (signalCount: number | null, signalCoverage: RouteCandidate['signalCoverage']) => {
+      const html = render({ ...driving, route: { ...route, signalCount, signalCoverage } }, T0 + 13_000, { initiallyOpen: true })
+      return /Lights on route<\/span><span class="live-tile-word">(.*?)<\/span><\/div>/.exec(html)?.[1]
+    }
+    expect(lights(21, 'full')).toBe('21')
+    expect(lights(0, 'full')).toBe('0')
+    expect(lights(9, 'partial')).toBe('≥ 9<span class="live-tile-hint"> data missing</span>')
+    expect(lights(0, 'partial')).toBe('Unknown')
+    expect(lights(null, 'none')).toBe('Unknown')
+    expect(lights(4, 'none')).toBe('Unknown')
+  })
+
+  it('with no turn listed it still leads with a distance: straight on for what is left', () => {
+    const html = render({ ...driving, route: { ...route, guidance: [] } }, T0 + 13_000)
+    expect(html).toContain('data-arrow="straight"')
+    expect(html).toMatch(/<span class="live-turn-distance">\d\.\d<span class="live-unit"> mi<\/span><\/span>/)
+    expect(html).toContain('<span class="live-turn-road live-turn-plain">Continue straight</span>')
+    // The road carries straight on under a known name.
+    const onward = { ...route, guidance: [{ ...route.guidance![1]!, type: 'continue', modifier: 'straight' }] }
+    expect(render({ ...driving, route: onward }, T0 + 13_000)).toContain('<span class="live-turn-road live-turn-plain">Continue on Wilkinson Boulevard</span>')
   })
 
   it('shows a switch with one large way to undo it, and warnings in one line each', () => {

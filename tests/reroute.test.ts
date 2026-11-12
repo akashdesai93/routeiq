@@ -86,6 +86,7 @@ describe('reroute thresholds', () => {
       minLeadTimeSec: 20,
       freewayLeadDistanceM: 1200,
       routeLostPolls: 3,
+      routeLostWindowSec: 900,
       offRouteM: 50,
       sameRouteToleranceM: 10,
       matchToleranceM: 20,
@@ -93,6 +94,7 @@ describe('reroute thresholds', () => {
       matchMaxGapM: 400,
       matchMaxDivergenceM: 50,
       matchIgnoreStartM: 150,
+      matchStartSearchM: 200,
       baselineViaSpacingM: 3000,
       baselineMaxViaPoints: 6,
       returnOverlapFraction: 0.5,
@@ -174,6 +176,52 @@ describe('findCurrentRoute: which fresh candidate is the rest of the current rou
     // Nor is a route that stops short of the destination.
     expect(findCurrentRoute(driven, 3000, [{ ...fresh, geometry: fresh.geometry.slice(0, -4) }])).toBeNull()
     expect(findCurrentRoute(driven, 3000, [])).toBeNull()
+  })
+})
+
+describe('findCurrentRoute at a route that crosses itself (#74)', () => {
+  // East along y = 0, under a bridge at (3000, 0), round a loop (3150, 0) > (3150, -150) >
+  // (3000, -150), then north over the bridge along x = 3000. The car is 3000 m along, at the
+  // crossing; the fresh route is the true rest of the route.
+  const toCandidate = (id: string, geometry: LngLat[]): RouteCandidate => ({
+    ...candidate('A', at(0, 0), 600)!,
+    id,
+    geometry,
+    distanceM: alongRouteM(geometry).at(-1)!,
+    maneuvers: [],
+  })
+  const loop = [at(3150, 0), at(3150, -150), at(3000, -150), at(3000, 0), at(3000, 6000)]
+  const driven = toCandidate('driven', [at(0, 0), at(3000, 0), ...loop])
+  const rest = (start: LngLat) => toCandidate('rest', [start, ...loop])
+
+  it('matches when the fresh start is nearer the later pass than the one being driven', () => {
+    // 0.8 m beside the line and 0.3 m before the crossing, as Mapbox can snap a start.
+    expect(findCurrentRoute(driven, 3000, [rest(at(2999.7, 0.8))])).not.toBeNull()
+    // Control: 5 m before the crossing it always matched.
+    expect(findCurrentRoute(driven, 2995, [rest(at(2995, 0.8))])).not.toBeNull()
+  })
+
+  it('looks for the start on the first matchStartSearchM of the path, then on the whole of it', () => {
+    // Only the first stretch is looked at while the start is on it: the later pass, 650 m on, is not.
+    expect(findCurrentRoute(driven, 3000, [rest(at(2999.7, 0.8))], { matchStartSearchM: 649 })).not.toBeNull()
+    // A window that reaches the later pass lets it win again: the window must be shorter than the loop.
+    expect(findCurrentRoute(driven, 3000, [rest(at(2999.7, 0.8))], { matchStartSearchM: 700 })).toBeNull()
+    // A fresh route fetched from further on than the position says (a stale position, 300 m
+    // behind, so beyond the window) is still found on the whole path.
+    const straight = candidate('A', at(0, 0), 2000)!
+    expect(findCurrentRoute(straight, 2700, [candidate('A', at(3000, 0), 1700)!])).not.toBeNull()
+  })
+
+  it('a poll at the crossing keeps the current route and its count', () => {
+    const decision = decideReroute(INITIAL_REROUTE_STATE, {
+      nowSec: 0,
+      route: driven,
+      positionAlongM: 3000,
+      speedMps: 15,
+      candidates: [rest(at(2999.7, 0.8))],
+    })
+    expect(decision.code).not.toBe('route-unconfirmed')
+    expect(decision.current).not.toBeNull()
   })
 })
 
@@ -705,8 +753,39 @@ describe('scripted drives', () => {
     expect(found.switches).toEqual([])
   })
 
+  it('"no route" answers older than routeLostWindowSec no longer count toward leaving the route (#68)', () => {
+    // One "no route" answer at the start, then a quarter of an hour of "another road" answers
+    // (no evidence either way), then two more "no route" answers. The first is 17 minutes old
+    // by then: three in all, but only two recent ones, so no switch until a third recent one.
+    const noRouteAt = (poll: number) => poll === 0 || poll >= 16
+    const script = {
+      polls: 19,
+      speedMps: 1,
+      eta: fixed({ A: 2000, B: 1900 }),
+      tamper: (candidates: RouteCandidate[]) => candidates.filter((c) => nameOf(c) !== 'A'),
+      baseline: (candidates: readonly RouteCandidate[], { poll }: PollContext) =>
+        noRouteAt(poll) ? [] : candidates.filter((c) => nameOf(c) === 'B'),
+    }
+    const log = drive(script)
+    const counts = log.polls.map((p) => p.decision.nextState.lostPolls)
+    expect(counts.slice(0, 2)).toEqual([1, 1])
+    // 900 s after the first answer it still counts; at 960 s it has dropped out.
+    expect(counts[15]).toBe(1)
+    // The third recent answer switches (and a switch starts the count over).
+    expect(counts.slice(16)).toEqual([1, 2, 0])
+    expect(log.codes[18]).toBe('route-lost')
+    expect(log.switches).toEqual([{ nowSec: 18 * 60, from: 'A', to: 'B' }])
+    expect(log.polls[17]!.decision.reason).toBe('Staying: the road ahead could not be routed, check 2 of 3')
+    // Without the window (as before #68) the stale answer counted and the switch came a poll sooner.
+    const unbounded = drive({ ...script, options: { routeLostWindowSec: 1e9 } })
+    expect(unbounded.switches).toEqual([{ nowSec: 17 * 60, from: 'A', to: 'B' }])
+    // The window only ever takes answers away: three recent ones in a row still switch at once.
+    const recent = drive({ ...script, baseline: () => [] })
+    expect(recent.switches).toEqual([{ nowSec: 2 * 60, from: 'A', to: 'B' }])
+  })
+
   it('a poll that could not ask for the current path neither adds to the count nor clears it', () => {
-    const state: RerouteState = { ...INITIAL_REROUTE_STATE, lostPolls: 2 }
+    const state: RerouteState = { ...INITIAL_REROUTE_STATE, lostPolls: 2, lostAtSec: [0, 0] }
     const notAsked = pollOnA({ xM: 1000, etas: { B: 1500 }, state })
     expect(notAsked).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
     expect(notAsked.nextState.lostPolls).toBe(2)
