@@ -19,6 +19,12 @@ gh api -X PATCH  $R/issues/comments/ID -F body=@decision.md      # edit a commen
 
 Write bodies to a scratch file first (rtk can drop text piped on stdin).
 
+**`main` is protected** (`docs/branch-protection.md`). The orchestrator no longer pushes
+docs or skill commits to `main`: every change of its own, however small, goes on a
+`claude/orch-<slug>` branch in a worktree, through a PR, merged with
+`gh pr merge N --squash --auto` once the single required check `required` is green. Batch
+small doc and skill edits into one PR per tick rather than one PR per line.
+
 ## 1. Survey
 
 - **Local sessions:** `mcp__fleet__roster`. Use `mcp__fleet__brief` on a RouteIQ session
@@ -39,7 +45,8 @@ Write bodies to a scratch file first (rtk can drop text piped on stdin).
   (`gh pr list --state open --json number,headRefName,author,updatedAt`). A cloud session
   with no #17 comment and no PR push for over 2 hours counts as stalled: say so in the report.
 - Read the comments on #17 since your last iteration.
-- **Main health:** `gh run list --branch main --limit 3 --json conclusion,status,name,headSha`.
+- **Main health:** `gh run list --branch main --limit 5 --json conclusion,status,name,headSha`
+  (Gate, CodeQL and Pages run on main after each merge).
   If the newest completed run of any workflow on main failed, don't merge this tick: send
   the owner a PushNotification and file a p1 issue for it (unless one is already open).
   This is the same check `/pr-watch` runs after a merge.
@@ -123,8 +130,9 @@ Run from the main checkout (`C:\Users\akash\dev\routeiq`):
      too, but only once its PR is merged or closed, or it has no PR and no unpushed commits.
    Remove it with `git worktree remove <wt>` (no `--force`). Never touch a dirty worktree;
    list it in the report instead if it's older than a day.
-3. Delete a remote `claude/*` branch when its PR merged more than a day ago and no open PR
-   uses it: `git push origin --delete <branch>`.
+3. GitHub deletes a PR's head branch when it merges. Delete a leftover remote `claude/*`
+   branch (its PR was closed unmerged, or merged before that setting) when that was more
+   than a day ago and no open PR uses it: `git push origin --delete <branch>`.
 4. Windows sometimes reports "Permission denied" on `node_modules`. Retry once; if it fails
    again, log the path in `events.json` and move on. Don't escalate to `rm -rf`.
 

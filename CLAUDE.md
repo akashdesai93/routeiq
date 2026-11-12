@@ -21,6 +21,7 @@ npm.cmd run lint               # oxlint (no new errors; existing react(refs) war
 npx.cmd vitest run             # all tests, offline, ~5 s
 npx.cmd vitest run tests/reroute.test.ts   # one file
 npm.cmd run build              # typecheck + vite build
+npm.cmd run size               # bundle-size budget (after a build; scripts/bundle-budget.json)
 npm.cmd run dev                # http://localhost:5173 (strictPort, localhost only)
 npm.cmd run e2e                # end-to-end scenarios, offline, ~1 min (own ports per checkout)
 npx.cmd playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm.cmd run e2e:build)
@@ -108,8 +109,8 @@ GitHub issues on `akashdesai93/routeiq` are the task list. The labels are `ready
 `in-progress`, `blocked`, `needs-human`, `triage`, `review`, `p1`–`p3` and `area:*`.
 `/loop /work-loop` runs autonomously. Each iteration syncs the board, claims the top
 `ready` issue, builds it in its own worktree on `claude/issue-N-*`, verifies it and opens
-a PR. When nothing is ready, it files new `triage` issues instead. Loops never push to
-`main` and never merge their own PRs: the orchestrator reviews and merges (`/pr-watch`). Rules: `.claude/skills/work-loop/SKILL.md`.
+a PR. When nothing is ready, it files new `triage` issues instead. Nobody pushes to
+`main` (it is protected) and loops never merge their own PRs: the orchestrator reviews and merges (`/pr-watch`). Rules: `.claude/skills/work-loop/SKILL.md`.
 
 ## Coordination (several sessions at once)
 
@@ -126,9 +127,18 @@ a PR. When nothing is ready, it files new `triage` issues instead. Loops never p
 - **Before editing:** run `mcp__fleet__roster` (the fleet mod) or `ListAgents` to see who
   else is in the repo, and `mcp__fleet__brief <id>` to read their context. Work in your
   own worktree. Never edit another session's uncommitted files.
+- **`main` is protected: everything goes through a PR.** Nobody pushes to `main`, the
+  owner's token and the orchestrator included, and that covers docs and skill edits too.
+  A PR merges only when the single required check, **`required`**, is green. It is the last
+  job of `.github/workflows/gate.yml`, which runs on every PR: the web checks (typecheck,
+  lint, tests, build, bundle-size budget) and the e2e scenarios always, the Swift tests and
+  the macOS builds when their paths change. The branch must also be up to date with `main`
+  (`gh pr update-branch N`), and review threads must be resolved. Details and the exact
+  settings: `docs/branch-protection.md`.
 - **Ship work through PRs**, one issue per PR, with `Closes #N` and how it was verified.
-  The orchestrator reviews the PR with an independent agent, checks CI, and squash-merges.
-  After a merge, rebase onto or restart from `origin/main`.
+  The orchestrator reviews the PR with an independent agent, then squash-merges it with
+  `gh pr merge N --squash --auto`, which merges once `required` is green. GitHub deletes the
+  head branch on merge. After a merge, restart from `origin/main`.
 - **Questions for the owner** go on the issue with the `needs-human` label (remove `ready`)
   and in your status post, as one comment that starts `Decision needed:` with the question,
   a recommendation and the options. The orchestrator collects them for the owner.
@@ -160,7 +170,7 @@ the owner: `docs/cloud-sessions.md`.
   gh api $R/actions/runs --jq '.workflow_runs[:5][] | [.name,.head_branch,.conclusion] | @tsv'
   ```
 - **Same rules otherwise:** your own branch `claude/...` from `origin/main`, one issue per PR
-  with `Closes #N` and how it was verified, never push to `main`, never merge. Use the
+  with `Closes #N` and how it was verified, never push to `main` (protected), never merge. Use the
   Linux commands above. Never paste or ask for the real Mapbox token; tests and the e2e
   build use a dummy `pk.test` token.
 - The proxy pushes branches but refuses branch deletions and tags. The native session runs
