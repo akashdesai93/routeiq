@@ -840,7 +840,8 @@ public enum Reroute {
     }
 
     static func isEndpointManeuver(_ m: Maneuver) -> Bool {
-        m.kind.hasPrefix("depart") || m.kind.hasPrefix("arrive")
+        // JavaScript startsWith: by UTF-16 code units, not canonical equivalence.
+        m.kind.utf16.starts(with: "depart".utf16) || m.kind.utf16.starts(with: "arrive".utf16)
     }
 
     /// The candidate's first maneuver that the current route does not also make.
@@ -849,7 +850,7 @@ public enum Reroute {
         for m in candidate.maneuvers {
             if isEndpointManeuver(m) || !m.atDistanceM.isFinite || !Geo.isValidLngLat(m.location) { continue }
             let at = plane.project(m.location)
-            if !shared.contains(where: { $0.kind == m.kind && apart($0.at, at) <= plane.toleranceM }) { return m }
+            if !shared.contains(where: { JS.Key($0.kind) == JS.Key(m.kind) && apart($0.at, at) <= plane.toleranceM }) { return m }
         }
         return nil
     }

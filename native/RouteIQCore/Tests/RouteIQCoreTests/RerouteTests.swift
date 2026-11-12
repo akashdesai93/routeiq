@@ -713,7 +713,8 @@ final class RerouteTests: XCTestCase {
             polls: 6,
             eta: RerouteFx.fixed([.B: 1900, .C: 1950]),
             baseline: { _, context in
-                DriveWorld.candidate(.A, context.position, context.poll >= 3 ? 2300 : 2000).map { [$0] } ?? []
+                // A missing candidate would read as "no route that way": fail loudly instead, as the TS `!` does.
+                [DriveWorld.candidate(.A, context.position, context.poll >= 3 ? 2300 : 2000)!]
             }
         ))
         XCTAssertEqual(log.codes, ["saving-too-small", "saving-too-small", "saving-too-small", "confirming", "faster-route", "current-best"])
@@ -1574,7 +1575,8 @@ final class RerouteLeadFromTheCarTests: XCTestCase {
         let late = try decide(375)
         XCTAssertEqual(late.code, .tooLate)
         XCTAssertEqual(try XCTUnwrap(late.considered).turnInM, 325, accuracy: 0.5)
-        XCTAssertTrue(late.reason.hasSuffix(", too late to take safely") && late.reason.contains("turns off in "), late.reason)
+        // The TS regex /turns off in .+, too late to take safely$/.
+        XCTAssertNotNil(late.reason.range(of: "turns off in .+, too late to take safely$", options: .regularExpression), late.reason)
     }
 
     // it('what is said counts from the car too, and a value that is not a distance is 0')
