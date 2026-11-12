@@ -1,30 +1,31 @@
 name: CI
 
+# The web checks: typecheck, lint, unit tests, the production build and its size budget.
+# Called by gate.yml on every pull request and every push to main (it has no triggers of
+# its own, so each change runs once); it can also be started by hand.
+#
+# The unit tests include the counted-work guards: how many route requests a drive may
+# make (tests/drive.test.ts, "request budget"), that a signal tile is asked for at most
+# once, and the reroute and matching rules. They run as part of `npm test`.
+
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "native/**"
-  pull_request:
-    paths-ignore:
-      - "native/**"
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   check:
-    name: typecheck, lint, test
+    name: typecheck, lint, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -33,3 +34,27 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+
+      # A made-up token, as in the e2e builds: nothing here talks to Mapbox.
+      - name: Build
+        env:
+          VITE_MAPBOX_TOKEN: pk.test
+        run: npm run build
+
+      - name: Bundle size budget (scripts/bundle-budget.json)
+        run: npm run size
+
+      # Known vulnerabilities in what ships (no dev dependencies), in the three projects.
+      # It warns and never fails the job: a new advisory must not block unrelated work.
+      - name: npm audit (warns, does not block)
+        run: |
+          for dir in . native/shell design; do
+            echo "::group::npm audit in $dir"
+            if (cd "$dir" && npm audit --omit=dev --audit-level=high); then
+              echo "- \`$dir\`: no high or critical advisory" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning title=npm audit::High or critical advisory (or the audit could not run) in $dir. See the 'npm audit' step."
+              echo "- \`$dir\`: **high or critical advisory, or the audit failed** (see the npm audit step)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done

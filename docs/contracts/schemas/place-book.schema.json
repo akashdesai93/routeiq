@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "routeiq/place-book.schema.json",
+  "title": "Stored place book",
+  "description": "The value under the localStorage key routeiq.places.v1 (src/storage/placeBook.ts): PlaceBook (src/core/places.ts) plus its version. Kept on the device only. An origin that came from the device's position is never stored (lastTrip.origin is null then).",
+  "type": "object",
+  "required": ["version", "home", "work", "custom", "recents", "lastTrip"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "home": { "oneOf": [{ "$ref": "#/$defs/savedPlace" }, { "type": "null" }] },
+    "work": { "oneOf": [{ "$ref": "#/$defs/savedPlace" }, { "type": "null" }] },
+    "custom": { "description": "In the order they were added.", "type": "array", "items": { "$ref": "#/$defs/savedPlace" } },
+    "recents": { "description": "Newest first.", "type": "array", "items": { "$ref": "#/$defs/place" } },
+    "lastTrip": { "oneOf": [{ "$ref": "#/$defs/storedTrip" }, { "type": "null" }] }
+  },
+  "$defs": {
+    "lngLat": {
+      "title": "LngLat",
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": -180, "maximum": 180 },
+        { "type": "number", "minimum": -90, "maximum": 90 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "place": {
+      "title": "Place",
+      "type": "object",
+      "required": ["id", "label", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "position": { "$ref": "#/$defs/lngLat" }
+      }
+    },
+    "savedPlace": {
+      "title": "SavedPlace",
+      "type": "object",
+      "required": ["id", "name", "label", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "label": { "type": "string" },
+        "position": { "$ref": "#/$defs/lngLat" }
+      }
+    },
+    "storedTrip": {
+      "title": "StoredTrip",
+      "type": "object",
+      "required": ["origin", "destination"],
+      "additionalProperties": false,
+      "properties": {
+        "origin": { "oneOf": [{ "$ref": "#/$defs/place" }, { "type": "null" }] },
+        "destination": { "$ref": "#/$defs/place" }
+      }
+    }
+  }
+}
