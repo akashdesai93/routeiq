@@ -50,7 +50,8 @@ export interface RerouteOptions {
   /**
    * ...and those answers count only while they are this recent, in seconds: a
    * "no route" answer from longer ago than this is about a road the driver
-   * may long since have passed, and is dropped from the count (#68).
+   * may long since have passed, and is dropped from the count (#68). 0 counts
+   * only answers from the same second: no closure switch, which is the safe side.
    */
   readonly routeLostWindowSec: number
   /** The driver is off the current route when the fresh routes start farther than this from its line, in meters. */
@@ -98,7 +99,7 @@ export interface RerouteOptions {
   /**
    * Where the fresh route starts is looked for on the first this many meters
    * of the current path (which begins `offRouteM` behind the driver), and on
-   * the rest of it only when nothing there is within `offRouteM`. A route that
+   * the rest of it only when nothing there is within `matchToleranceM`. A route that
    * crosses itself (a cloverleaf) passes the driver's spot again later, and
    * the nearest point of the whole path can be that later pass (#74). It must
    * be shorter than the shortest loop back to the same spot.
@@ -584,7 +585,7 @@ function stretchesApart(
 /** The thresholds of compareRest: the match* part of RerouteOptions. */
 type MatchOptions = Pick<
   RerouteOptions,
-  'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchMaxDivergenceM' | 'matchIgnoreStartM' | 'matchStartSearchM' | 'offRouteM'
+  'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchMaxDivergenceM' | 'matchIgnoreStartM' | 'matchStartSearchM'
 >
 
 /** How a fresh route compares with the rest of a path. */
@@ -614,7 +615,7 @@ function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions,
   // whole path is searched only when it is not, so that a later pass of the same spot
   // (a cloverleaf) is never taken for where the driver is.
   const near = nearestOnLine(start, path, meter, options.matchStartSearchM)
-  const at = near.distanceM <= options.offRouteM ? near : nearestOnLine(start, path, meter)
+  const at = near.distanceM <= options.matchToleranceM ? near : nearestOnLine(start, path, meter)
   const rest = fromNearest(path, at)
   // A fresh route that starts behind the path (fetched a moment before the position was
   // taken: see RerouteObservation.positionAlongM) is compared from where it reaches the
@@ -1188,7 +1189,7 @@ export function decideReroute(
     // nothing about the road between them, #41): no evidence either way, and the count is
     // kept. Only a poll that finds the current route again starts it over.
     // Answers from longer ago than the window are about a road that may be well behind (#68).
-    const recent = base.lostAtSec.filter((atSec) => nowSec - atSec <= opts.routeLostWindowSec)
+    const recent = (base.lostAtSec ?? []).filter((atSec) => nowSec - atSec <= opts.routeLostWindowSec)
     const lostAtSec = baseline !== null && baseline.length === 0 ? [...recent, nowSec] : recent
     const lostPolls = lostAtSec.length
     const lost: RerouteState = { ...noWinner, lostPolls, lostAtSec }

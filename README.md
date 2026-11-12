@@ -777,11 +777,11 @@ the drive changes to East Loop with "The road ahead on your route looks closed."
 
 **Routes that cross themselves (#74).** Where the fresh route starts is looked for on the
 first 200 m of the path ahead (`matchStartSearchM`, from 50 m behind the car), and on the
-rest only when nothing there is within 50 m. It used to be the nearest point of the whole
+rest only when nothing there is within 20 m (`matchToleranceM`). It used to be the nearest point of the whole
 path: under a cloverleaf bridge the later pass over it can be a meter nearer the snapped
 start than the road being driven, the comparison then started after the loop, the
 lengths differed by more than 400 m, and the current route went "unconfirmed" (a spent
-check, and a lost confirmation). 200 m is shorter than any loop back to the same spot.
+check, and a lost confirmation). 200 m is shorter than a cloverleaf loop; a loop back to the same spot within 150 m of the car would still be in the window.
 The tracker had the same flaw on a drive's first fix only (later fixes already take the
 pass that fits the progress so far): of passes about as near (15 m), it now takes the
 first in driving order.
