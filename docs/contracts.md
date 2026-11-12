@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 1** (Nov 12, 2026, `main` at 08526ec, side-street probes in the drive included). The Swift port does not match it yet;
+**Current version: 2** (Nov 12, 2026: version 1 plus the reroute changes of #74 and #68). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -107,12 +107,16 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 1 | by definition |
+| Web app (`src/`) | 2 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 1 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80) |
+| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`, unchanged since 1) | the plugin interface was added with the shell (#78, #80) |
 
 ## Changes
 
 - **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
   `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
   `probe-unconfirmed`).
+- **2** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.
