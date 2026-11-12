@@ -382,6 +382,9 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.spoken(), [])
         XCTAssertEqual(s.state.lastDecision?.action, .stay)
         XCTAssertEqual(s.state.lastDecision?.code, .reroute(.routeUnconfirmed))
+        // Routes came back, but not the side street's own time: the saving is unknown, never guessed (#175).
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         XCTAssertEqual(s.state.engine.lostPolls, 0)
         XCTAssertFalse(s.view().offRoute)
     }
@@ -771,6 +774,9 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.engine, engine)
         XCTAssertEqual(s.state.lastDecision?.code, .reroute(.pollFailed))
         XCTAssertEqual(s.state.lastDecision?.reason, "Staying: could not check for faster routes (Could not reach Mapbox.)")
+        // No answer: no route count and no saving (#175).
+        XCTAssertNil(s.state.lastDecision?.routes)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         // The last good check is still the last one answered.
         XCTAssertEqual(s.state.lastCheckedAtMs, before.lastCheckedAtMs)
         XCTAssertEqual(s.state.candidates, before.candidates)
@@ -780,6 +786,15 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.engine.failedPolls, 3)
         XCTAssertEqual(s.requests().map(\.atSec), [0, 60, 120, 180])
         XCTAssertEqual(s.spoken(), [])
+    }
+
+    // it('a check where the route driven is the fastest says so with a known saving of 0, for the diagnostics (#175)')
+    func testChecksThatChangeNothing_currentBestHasAKnownSavingOfZero() throws {
+        let s = driving()
+        cruise(s, 130) { xM in routesAt(xM, [.A: 1300, .B: 1420]) }
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.currentBest))
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertEqual(s.state.lastDecision?.savingSec, 0)
     }
 
     // it('staying is never spoken')
@@ -792,6 +807,8 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertEqual(s.spoken(), [])
         XCTAssertEqual(s.view().statusLine, "Staying: faster route saves only 40 seconds")
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertEqual(s.state.lastDecision?.savingSec, 40)
     }
 
     // MARK: - describe('the route being driven is not among the fresh routes')
@@ -925,6 +942,8 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertEqual(s.state.declinedSwitches, 1)
         XCTAssertEqual(s.state.lastDecision?.code, .keptPrevious)
+        XCTAssertNil(s.state.lastDecision?.routes)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         // As if the switch had not been made: no cooldown, but B is declined for noReturnSec (600 s).
         XCTAssertNil(s.state.engine.lastSwitchAtSec)
         XCTAssertEqual(s.state.engine.declined.count, 1)
