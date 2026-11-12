@@ -58,6 +58,27 @@ test('a route outside NC/SC shows a partial light count, never 0, and still rank
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
 
+  test('picking a route where light data is missing: a lower bound that says so, and the delta row never compares lights', async ({ app, page }) => {
+    await app.open({ storage: georgiaTrip(app) })
+    await app.routesReady()
+    const cards = page.locator('ol.routes > li')
+    await expect(cards).toHaveCount(3)
+    // Each card: a lower bound or "unknown", and under it in words what is missing. Never 0.
+    for (const card of await cards.all()) {
+      const count = (await card.locator('.route-signals').textContent())!
+      expect(count).toMatch(/^(≥ [1-9]\d* signals? \(partial\)|Signals: unknown)$/)
+      await expect(card.locator('.route-signal-note')).toHaveText(
+        count.startsWith('≥') ? 'Signal data for part of this route is missing, so this is a lower bound.' : 'Signal data for this route could not be loaded.',
+      )
+    }
+    // Minutes and miles are compared; lights are not, and the row says so instead of a number.
+    const delta = page.getByRole('group', { name: 'Route 1 against Route 2' })
+    await expect(delta.locator('[data-delta="lights"]')).toHaveText("Lights: can't compare")
+    await expect(delta.locator('[data-delta="time"]')).toHaveText(/^(\u2212\d+|0) min$/)
+    await delta.scrollIntoViewIfNeeded()
+    await app.snap('partial and unknown light counts on the route cards, and the delta row')
+  })
+
   test('driving where light data is missing, More shows a lower bound that says so, never 0', async ({ app, page }) => {
     await app.open({ fakeClock: true, storage: georgiaTrip(app) })
     await app.routesReady()

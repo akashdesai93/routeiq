@@ -25,6 +25,8 @@ names. Use the token, never the raw value, and never invent a near-copy.
 | `--amber` | `#ffb000` | **news only**: a pending or confirmed switch | 10.6:1 |
 | `--on-amber` | `#0a0a0a` | text on an amber fill | 11:1 |
 | `--old` | `#646c77` | the route being left, struck-through old figures | |
+| `--raised2` | `#20242b` | a raised control under the pointer, a selected route card | |
+| `--danger` | `#ff8a80` | a failed field or a refused token, always with words | |
 
 Daylight (`design/src/merged/merged.css`, the light block) flips to black on white with a
 pale map. There, amber is only ever a **fill under black text** (amber on white is 1.8:1),
@@ -63,7 +65,7 @@ The once-a-second tick must not move layout: fixed-height boxes, `contain: layou
 3. **Colour is never the only signal**: words, a tick, a hatch or a shape say it too.
 4. **Check contrast** for any new pair: `node scripts/design/contrast.mjs <fg> <bg>`
    (AA: 4.5:1 text, 3:1 large text and UI).
-5. Tokens live once (today: the `.app.live` block at the top of `src/live.css`). Add a token there and to the
+5. Tokens live once (on `:root` at the top of `src/index.css`, since #85; every screen reads them). Add a token there and to the
    table above in the same PR; don't redefine a value locally.
 6. The e2e design guards (`e2e/design.spec.ts`: axe, touch targets, text sizes,
    overflow) must stay green; a token change that breaks one is a regression.
