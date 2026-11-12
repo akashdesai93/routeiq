@@ -419,6 +419,13 @@ export function LiveDriveView({
           arrive={known ? clockTime(view.arrivalAtMs!) : null}
           fallback={destinationLabel}
         />
+        {/* With More closed the engine's latest word is still there to be read out, just not drawn.
+            Without the "checked N s ago" part, so a clock tick changes nothing here. */}
+        {!open && (
+          <p className="live-status visually-hidden" role="status">
+            {view.statusLine}
+          </p>
+        )}
         {open && (
           <MoreSheet
             lights={lights.word}
