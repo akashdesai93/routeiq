@@ -103,3 +103,52 @@ npm.cmd run ios:generate        # the Xcode project into ios/
 ```
 
 Compiling needs the cloud build.
+
+## Simulator drive in CI (screenshots and video)
+
+`.github/workflows/sim-drive.yml` runs this app in the iOS Simulator on a GitHub macOS runner,
+drives it along the made-up road network of the e2e scenarios (`e2e/world/roads.ts`) with a
+wrong turn, and uploads the evidence as the artifact **`sim-drive`**.
+
+- **When it runs:** on every pull request that touches `native/shell/**`, `src/device/native/**`
+  or the workflow itself. Once it is on `main` it can also be started by hand (Actions >
+  "Simulator drive" > Run workflow) with three inputs: `gps` (`start`: `simctl location start`
+  moves the simulator itself; `set`: the driver sets a position each second), `map` (`off` by
+  default, see below) and `device` (empty: a plain iPhone on the newest runtime).
+- **No secret.** Route requests are answered by a stub server on the runner (`sim/stub.mjs`).
+  The optional `MAPBOX_PUBLIC_TOKEN_SIM` secret only changes the map (and only with `map: on`).
+- **What the artifact holds:** numbered screenshots (`01-plan.png` ... `09-after-end.png`),
+  `video.mp4` of the whole run, `summary.md` (the checks, a table of what each screenshot's
+  screen said, the spoken lines and the route requests), `diagnostics.txt` (the app's own Drive
+  diagnostics text), `spoken.txt`, `directions.json`, `reports.jsonl` (what the page script
+  reported once a second), `result.json`, `app-log.txt` (the app's simulator log) and
+  `xcodebuild-sim.log`. The job summary on the run page shows `summary.md`.
+- **The checks** (the job fails when one does not hold): more than 40 GPS fixes and at least one
+  answered route request in the app's Drive diagnostics; the app says "You are off the route"
+  and then "New route…", with a route request from off every road. The lock test (Simulator
+  menu Device > Lock) is best effort and never fails the run.
+- **The map is off by default.** Mapbox GL in the simulator on a runner without a GPU kills the
+  web view's content process; the page then reloads and the drive is lost. With `map: off` the
+  page script makes WebGL unavailable, the app shows "The map could not start" and the drive
+  works without a map. `map: on` is there to try again on another runner or Xcode.
+- **Nothing of this reaches the phone build.** The page script (`sim/page.js`, bundled into
+  `www/routeiq-sim.js`) and the plain-http exception (`NSAllowsLocalNetworking`) are added by
+  `node sim/prepare.mjs www` and `node sim/prepare.mjs plist`, which only this workflow runs.
+  `build-web.mjs` and `shell-ios.yml` fail if either is found in the phone app.
+- **Not covered:** the Swift `RouteIQHttp` path to Mapbox (the page script answers route
+  requests through Capacitor's native HTTP to the stub instead), real Mapbox tiles, and the
+  phone's own GPS and background behaviour (`docs/phone-install.md`, and the plugged-in drive in
+  `docs/phone-sim-location.md` cover those).
+
+Run it locally on a Mac with a booted simulator:
+
+```bash
+npm ci && npm run build && node sim/prepare.mjs www
+npm run ios:generate && node sim/prepare.mjs plist
+xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator \
+  -derivedDataPath build/sim-derived CODE_SIGNING_ALLOWED=NO build
+xcrun simctl install booted build/sim-derived/Build/Products/Debug-iphonesimulator/App.app
+node sim/drive.mjs --udid <udid> --out build/sim-drive
+```
+
+Never run `prepare.mjs` before a build you put on a phone.

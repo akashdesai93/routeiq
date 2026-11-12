@@ -49,3 +49,6 @@ design/reference/mapbox-screenshots-internal-not-for-publishing/
 
 # Phone lab reports (scripts/phone/lab): screenshots of the phone and logs, never published
 phone-lab/
+
+# Design screenshots (npm run design:shots)
+design-shots/

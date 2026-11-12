@@ -13,4 +13,4 @@
  * shapes are covered: a default value or a rule changing is covered by the
  * unit tests that pin it (the spec for the port), not by this number.
  */
-export const CORE_CONTRACT_VERSION = 3
+export const CORE_CONTRACT_VERSION = 4
