@@ -568,6 +568,21 @@ describe('withSignalCounts', () => {
     expect(together.routes.map((r) => r.signalCount)).toEqual([2, 3, 2, 2])
   })
 
+  it('works out the tiles of a route again for another reach', () => {
+    // The middle of a tile: with the default reach it needs that tile only; with a 6 km
+    // tolerance it needs its neighbours too, also when the same line was asked before.
+    const middle: LngLat[] = [
+      [-80.855, 35.255],
+      [-80.845, 35.255],
+    ]
+    const near = signalTilesForRoute(middle)
+    const wide = signalTilesForRoute(middle, { toleranceM: 6000 })
+    expect(near).toEqual(['-809_352'])
+    expect(wide).toEqual(signalTilesForRoute([...middle], { toleranceM: 6000 }))
+    expect(wide.length).toBeGreaterThan(near.length)
+    expect(signalTilesForRoute(middle)).toEqual(near)
+  })
+
   it('hands every caller its own list of tiles', () => {
     const tiles = signalTilesForRoute(NORTH_1KM)
     tiles.push('-999_999')

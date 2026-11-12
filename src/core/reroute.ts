@@ -699,6 +699,20 @@ interface Plane {
  * changed in place (as trackedRoute assumes too), and a WeakMap lets go of them with the
  * routes. Not used while a MatchMeter counts the work, so the counts stay what they were.
  */
+/**
+ * Every threshold a match depends on, so that each is part of the key. A Record over
+ * MatchOptions: a new match* option that is left out here does not compile.
+ */
+const MATCH_OPTION_FIELDS: Record<keyof MatchOptions, true> = {
+  matchToleranceM: true,
+  matchMinOverlap: true,
+  matchMaxGapM: true,
+  matchMaxDivergenceM: true,
+  matchIgnoreStartM: true,
+  matchStartSearchM: true,
+}
+const MATCH_OPTION_KEYS = Object.keys(MATCH_OPTION_FIELDS) as (keyof MatchOptions)[]
+
 const restMatches = new WeakMap<readonly LngLat[], WeakMap<readonly LngLat[], Map<string, number | null>>>()
 
 /**
@@ -750,15 +764,7 @@ function aheadMatcher(
     return compareRest(ahead, p.xy, options, meter, p.s)
   }
   if (meter !== undefined) return { line, project, ahead, match: compute, compare }
-  const key = [
-    fromM,
-    options.matchToleranceM,
-    options.matchMinOverlap,
-    options.matchMaxGapM,
-    options.matchMaxDivergenceM,
-    options.matchIgnoreStartM,
-    options.matchStartSearchM,
-  ].join('|')
+  const key = [fromM, ...MATCH_OPTION_KEYS.map((k) => options[k])].join('|')
   let byFresh = restMatches.get(geometry)
   if (byFresh === undefined) restMatches.set(geometry, (byFresh = new WeakMap()))
   const known = byFresh
