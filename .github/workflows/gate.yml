@@ -18,7 +18,7 @@ name: Gate
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, claude/issue-140-proof-before]
 
 permissions:
   contents: read
@@ -56,7 +56,6 @@ jobs:
               - 'public/seed/osm-signals/**'
               - 'tests/fixtures/**'
               - '.github/workflows/native-core.yml'
-              - '.github/workflows/gate.yml'
             native-app:
               - 'native/RouteIQ/**'
               - 'native/scripts/**'
@@ -64,7 +63,6 @@ jobs:
               - 'native/RouteIQCore/Package.swift'
               - 'native/RouteIQCore/Sources/**'
               - '.github/workflows/native-app.yml'
-              - '.github/workflows/gate.yml'
             shell-ios:
               - 'native/shell/**'
               - 'src/**'
@@ -75,7 +73,6 @@ jobs:
               - 'vite.config.ts'
               - 'tsconfig*.json'
               - '.github/workflows/shell-ios.yml'
-              - '.github/workflows/gate.yml'
 
   web:
     uses: ./.github/workflows/ci.yml
