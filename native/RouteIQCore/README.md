@@ -31,12 +31,14 @@ same JSON fixtures straight from `tests/fixtures`.
 
 The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/contract.ts`, and
 [docs/contracts.md](../../docs/contracts.md)). `Contract.coreContractVersion` is the version this
-port was brought up to: **3**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
+port was brought up to: **4**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
 and fails when the web app's version moves on, so a bump is never missed here. Version 2 differed
 from version 1 only in the iPhone shell's plugin, which this package does not contain; version 3
-adds the reroute changes of #74 and #68 (`matchStartSearchM`, `routeLostWindowSec`, `lostAtSec`).
+adds the reroute changes of #74 and #68 (`matchStartSearchM`, `routeLostWindowSec`, `lostAtSec`); version 4
+changed only live-drive shapes (`LiveOptions.requestTimeoutSec`, `LiveState.pickedAtMs`, the Start
+event's `routeFetchedAtMs`), and the live drive is not ported yet.
 
-What of version 3 is ported (#33, in stages):
+What of version 4 is ported (#33, in stages):
 - **Routes:** `RouteCandidate` with `guidance`, `source`, `via` and `segmentTraffic`;
   `GuidanceStep`, `GuidanceAnnouncement`, `SegmentTraffic`, `CongestionLevel`, `RouteSource`.
 - **Signal tiles and bundle:** `SignalBundle` (RouteIQKit). OpenStreetMap only: the City of

@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import plist from 'plist';
+import { build, parse } from 'plist';
 import { checkInfoPlist, patchInfoPlist } from '../scripts/info-plist.mjs';
 import { findTokens, injectBridge, usesRootPaths } from '../scripts/web-checks.mjs';
 
-const TEMPLATE = plist.build({
+const TEMPLATE = build({
   CFBundleDisplayName: 'RouteIQ',
   UILaunchStoryboardName: 'LaunchScreen',
 });
 
 test('patch adds both background modes and both location usage strings', () => {
-  const info = plist.parse(patchInfoPlist(TEMPLATE));
+  const info = parse(patchInfoPlist(TEMPLATE));
   assert.deepEqual(info.UIBackgroundModes, ['location', 'audio']);
   assert.ok(info.NSLocationWhenInUseUsageDescription.length > 20);
   assert.ok(info.NSLocationAlwaysAndWhenInUseUsageDescription.length > 20);
@@ -19,11 +19,11 @@ test('patch adds both background modes and both location usage strings', () => {
 });
 
 test('patch is idempotent and keeps modes that were already there', () => {
-  const withMode = plist.build({ UIBackgroundModes: ['fetch', 'audio'] });
+  const withMode = build({ UIBackgroundModes: ['fetch', 'audio'] });
   const once = patchInfoPlist(withMode);
   const twice = patchInfoPlist(once);
   assert.equal(once, twice);
-  assert.deepEqual(plist.parse(twice).UIBackgroundModes, ['fetch', 'audio', 'location']);
+  assert.deepEqual(parse(twice).UIBackgroundModes, ['fetch', 'audio', 'location']);
 });
 
 test('check rejects an unpatched plist and accepts a patched one', () => {
