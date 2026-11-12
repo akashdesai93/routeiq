@@ -80,7 +80,8 @@ faster, it never switches", "a wrong turn: it says I am off the route, finds a n
 gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
 and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix",
 "when a side street saves time, it is offered and wins", "when a jam builds during the
-drive, a side street found mid-drive takes me round it".
+drive, a side street found mid-drive takes me round it", "after a drive, it shows how long
+it really took against what it predicted".
 
 ```powershell
 npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
@@ -236,6 +237,10 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 removing, telling two places apart, the caps, and reading a stored
                 book back without trusting it. search.ts says when typed text is
                 worth a request and how requests are grouped into billing sessions.
+                driveLog.ts is the private drive log (#107): the recorder fed the live
+                drive's state (a record begins when the drive sets off, is written at a
+                switch and at the end), the coarse corridor key, the stored shape read
+                back without trusting it, the per-corridor summaries and the CSV export.
                 tracking.ts turns raw position fixes into a place on the route, with
                 an off-route verdict that takes patience. guidance.ts picks the turn
                 to show and the announcement that is due. speechQueue.ts is what is
@@ -298,6 +303,7 @@ src/storage/    kv.ts: the tiny key-value store the signal data on the device go
                 or memory without it; a full or blocked store reports the failed write.
                 placeBook.ts: loads, saves and clears the place book under one
                 versioned key (`routeiq.places.v1`); corrupt data is removed.
+                driveLog.ts: the same for the private drive log (`routeiq.drives.v1`).
 src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch)
                 and wires up the sources the app uses, the bundled tiles ahead of the
                 device cache and the network. askOnce wraps them for a drive that
@@ -1268,6 +1274,58 @@ positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audi
 CarPlay or Bluetooth, and battery use have not been tried. The checklist for the first
 real-phone test is [docs/phone-testing.md](docs/phone-testing.md).
 
+## Drive log (private)
+
+RouteIQ's edge over the big navigation apps is the owner's own repeated drives, so each
+live drive is kept in a **private drive log** on the device (#107): what RouteIQ predicted
+at the start against what the drive really took. Rules: `src/core/driveLog.ts`; storage:
+`src/storage/driveLog.ts`; screen: `src/DrivesPanel.tsx`.
+
+- **What a drive records:** when it began (the moment it set off on its first route) and
+  ended; a coarse **corridor key** for its two ends (below); the first route's source
+  (`provider` for Mapbox, `probe` for a side street; not its id, which is a hash of the
+  exact geometry and could confirm a guessed route); the
+  first route's traffic-aware time then (the prediction), its length and its lights
+  (unknown stays unknown, a partial count is a lower bound); the actual time; each switch
+  with the saving the engine claimed and whether it was kept or turned down with "Keep
+  previous route"; how often it said "off the route"; the route requests used; and the
+  other app's ETA if one was noted.
+- **Saving actually made**, for the last kept switch of a drive: the time the route left was predicted to
+  take from there (the new route's time plus the claimed saving) minus the time the rest
+  of the drive really took. It is measured against a prediction, not against the road not
+  taken, and is unknown for an earlier switch (its window would take in the gains of the
+  later ones), a closure, a new route after leaving the route, and a drive that did not
+  arrive.
+- **Another app's ETA.** Under Start drive, "Other app's ETA (minutes)" takes what Google
+  Maps or Waze showed for the same trip at departure ("19", "19 min" or "1:05"), for a
+  side-by-side test. Optional; it is read when the drive sets off and kept with it only.
+- **When it writes:** when a switch is made or turned down (so a drive the app does not
+  see the end of is still kept, as "not finished") and when the drive arrives or End is
+  tapped. Nothing is written or computed on the 1-second tick. A development replay and the
+  iPhone app's test drive (simulated GPS) are not logged.
+- **Drives screen:** the Drives button on the plan screen. Newest drive first (predicted,
+  took, the difference, the other app's ETA, switches), then a summary per corridor
+  (Corridor A, B, ... by first drive): the median error overall, by hour of the start and
+  by route source ("Mapbox routes: under-estimated by 2 min"). Only arrived drives are
+  compared; a drive ended early or not finished is listed and counted, not compared.
+- **Export:** the log as CSV (one row per drive, start time in UTC, hour in local time),
+  through the share sheet (in the iPhone app, the app's own; in a browser, where it offers
+  one), or Copy. **Clear drive log** asks once,
+  then removes it from the device.
+- **Not yet:** the correction factor per corridor and route source used when ranking is a
+  later step (#115), behind a setting. It will never loosen the reroute thresholds.
+
+| Setting (`DEFAULT_DRIVE_LOG_OPTIONS`) | Value | Meaning |
+| --- | --- | --- |
+| `corridorGridDeg` | 0.01° | each end is rounded to this grid (about 1.1 km) before the corridor key is made |
+| `maxDrives` | 500 | drives kept; the oldest go first |
+| `maxOtherAppMin` | 600 | the largest other-app ETA accepted, in minutes |
+
+The stored shape is versioned: localStorage key `routeiq.drives.v1`, value
+`{ "version": 1, "drives": [...] }` (`DriveLog` in the core contract, docs/contracts.md). A
+value of another version, or text that is not one, is discarded; a damaged record is
+dropped by itself, and only known fields are read back.
+
 ## Pinned versions (checked Nov 11, 2026)
 
 | Package | Version | Note |
@@ -1351,6 +1409,20 @@ with the centre of the map rounded to four decimals (to put nearby results first
 random session token that groups the requests for billing and says nothing about you.
 Picking a suggestion sends that suggestion's id. Nothing typed is logged or stored by
 RouteIQ; a destination picked from search is kept in the recent list (below).
+
+**The drive log** (Drives screen) lives only on the device, in localStorage under
+`routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
+holds times, durations, distances, light counts, switch savings, request counts and, for
+each drive, the route's source (Mapbox or side street, never the route itself or its
+id) and a corridor key: the drive's first position and its destination, each rounded
+to about a kilometre and hashed together, so a record holds no coordinate, address or
+place name. The rounding is what protects you; the hash only makes the key short. Someone
+holding the log and guessing a pair of 1 km squares could confirm the guess, so the log
+says roughly which areas you drive between and when, and is treated as private. It is
+never sent anywhere: the only way out is Export, which hands the CSV to the share sheet or
+the clipboard for you to send yourself. "Clear drive log" removes all of it, as does
+clearing the site's (or the app's) data. The other app's ETA you type is kept with its
+drive only.
 
 **Saved places, recent destinations and the last trip** live only in this browser's
 localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They
