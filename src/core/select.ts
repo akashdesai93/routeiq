@@ -14,6 +14,7 @@ export const SAME_ROUTE_TOLERANCE_M = 10
  * The grid reaches a meter past the tolerance, so that a segment exactly at the
  * tolerance is never missed by rounding at a cell edge. It only decides which
  * segments are measured; the answer is the same distance test as before.
+ * It must stay above 0.
  */
 const GRID_MARGIN_M = 1
 /** Segments looked at ahead of the last hit (and one behind) before looking further. */

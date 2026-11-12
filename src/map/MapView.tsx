@@ -213,7 +213,8 @@ export function MapView({
         type: 'line',
         source: DRIVE_ROUTE_SOURCE,
         filter: ['==', ['get', 'kind'], 'route'],
-        layout,
+        // Flat ends: the trimmed-off start is then gone whole (no round cap left behind), and the cut is under the car.
+        layout: { 'line-join': 'round', 'line-cap': 'butt' },
         paint: { 'line-color': '#1a7f37', 'line-width': 4, 'line-trim-offset': [0, 0] },
       })
       map.addLayer({

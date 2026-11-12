@@ -616,4 +616,14 @@ describe('drive features', () => {
     expect([...shares].sort((a, b) => a - b)).toEqual(shares)
     expect(routeProgress([car])(10)).toBe(0)
   })
+
+  it('measures the share on the Mercator plane, as Mapbox does, not in meters', () => {
+    // Due south along one meridian, two legs of 0.1 degree: the same meters each, but the
+    // northern leg is longer on the Mercator plane, so the vertex between them is past half.
+    const meridian: LngLat[] = [[-80.85, 35.2], [-80.85, 35.1], [-80.85, 35.0]]
+    const y = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))
+    const share = routeProgress(meridian)(distanceM(meridian[0]!, meridian[1]!))
+    expect(share).toBeCloseTo((y(35.2) - y(35.1)) / (y(35.2) - y(35.0)), 9)
+    expect(share).toBeGreaterThan(0.5002)
+  })
 })
