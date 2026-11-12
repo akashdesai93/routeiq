@@ -201,7 +201,8 @@ jobs:
   # would skip this one, and GitHub counts a skipped required check as passed.
   # On a pull request it also holds the PR gates (scripts/orch/gates.mjs, docs/orchestrator.md):
   # `do-not-merge` / `needs-human`, `needs-phone` (or PHONE CHECK NEEDED in the body) without
-  # `phone-verified`, and "up to date by area". It reads them live, so gates.yml can re-run just
+  # `phone-verified`, "up to date by area", and the bundle growth limit and ceiling file without
+  # `size-ok` (#170). It reads them live, so gates.yml can re-run just
   # this job when a label, the body or main changes.
   required:
     name: required
@@ -252,11 +253,13 @@ jobs:
           sparse-checkout: scripts/orch
           sparse-checkout-cone-mode: true
 
-      - name: PR gates (hold labels, phone, up to date by area)
+      - name: PR gates (hold labels, phone, up to date by area, bundle growth)
         if: always() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           # The merge commit this run tested; its first parent is the main it saw.
           TESTED: ${{ github.sha }}
-        run: node scripts/orch/gates.mjs --pr "$PR" --tested "$TESTED"
+          # What the PR adds to the bundle (ci.yml, #170); empty when it was not measured.
+          SIZE_GROWTH: ${{ needs.web.outputs.size-growth }}
+        run: node scripts/orch/gates.mjs --pr "$PR" --tested "$TESTED" --size-growth "$SIZE_GROWTH"

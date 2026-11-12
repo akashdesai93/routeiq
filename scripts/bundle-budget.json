@@ -1,19 +1,16 @@
 {
-  "note": "Bundle-size budget for scripts/check-bundle-size.mjs, in bytes (minified, not compressed). Each budget is the measured size + 10 %. Update with `npm run build && npm run size -- --update` and say why in the pull request.",
-  "appJs": {
-    "measured": 416046,
-    "budget": 457651
+  "note": "Bundle size (#170), in bytes, minified, not compressed (scripts/check-bundle-size.mjs). ceiling: the owner's number, never changed by a feature PR. growthPerPr: the most a PR may add to each without the size-ok label. alertAt: the fleet board flags main above this share of the ceiling.",
+  "ceiling": {
+    "appJs": 480000,
+    "css": 85000,
+    "entryJs": 452123,
+    "entryCss": 25822
   },
-  "css": {
-    "measured": 72105,
-    "budget": 79316
+  "growthPerPr": {
+    "appJs": 4000,
+    "css": 2000,
+    "entryJs": 4000,
+    "entryCss": 2000
   },
-  "entryJs": {
-    "measured": 411020,
-    "budget": 452123
-  },
-  "entryCss": {
-    "measured": 23474,
-    "budget": 25822
-  }
+  "alertAt": 0.9
 }
