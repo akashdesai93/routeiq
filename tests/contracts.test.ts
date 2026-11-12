@@ -137,6 +137,15 @@ describe('core contracts (PLAN step 10, #7)', () => {
       expect(validate(def('httpGetRequest'), { id: 'get-1', url: 'https://api.mapbox.com/directions/v5/x', timeoutMs: 20_000 })).toEqual([])
       expect(validate(def('httpGetRequest'), { id: 'get-1', url: 'https://example.com/', timeoutMs: 20_000 })).not.toEqual([])
       expect(validate(def('httpGetErrorCode'), 'timeout')).toEqual([])
+      // The test drive (#86): a made-up fix says so, and the route it drives is points, a speed and a script.
+      expect(validate(def('fix'), { lng: -80.8431, lat: 35.2271, accuracy: 5, speed: 15, timestamp: 1_794_345_699_000, simulated: true })).toEqual([])
+      expect(validate(def('fix'), { lng: -80.8431, lat: 35.2271, simulated: 'yes' })).not.toEqual([])
+      const route = { points: [[-80.8431, 35.2271], [-80.8431, 35.2181]], speedMps: 15, script: [{ atM: 870, speedMps: 5 }, { atM: 900, stopSec: 3 }] }
+      expect(validate(def('simulatedRouteRequest'), route)).toEqual([])
+      expect(validate(def('simulatedRouteRequest'), { ...route, points: [] })).not.toEqual([])
+      expect(validate(def('simulatedRouteRequest'), { ...route, script: [{ speedMps: 5 }] })).not.toEqual([])
+      expect(validate(def('shareRequest'), { text: 'RouteIQ drive diagnostics' })).toEqual([])
+      expect(validate(def('shareRequest'), {})).not.toEqual([])
     })
 
     it('each schema names the same fields as the TypeScript type it stands for', () => {
@@ -150,6 +159,7 @@ describe('core contracts (PLAN step 10, #7)', () => {
         ['place-book.schema.json', 'storedTrip', 'StoredTrip'],
         ['native-bridge.schema.json', 'fix', 'NativeFix'],
         ['native-bridge.schema.json', 'locationError', 'NativeLocationError'],
+        ['native-bridge.schema.json', 'simulatedStep', 'NativeSimulatedStep'],
       ]
       for (const [file, def, type] of pairs) {
         const s = schema(file)

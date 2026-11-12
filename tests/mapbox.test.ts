@@ -562,8 +562,10 @@ describe('fetchDirections', () => {
 
   it('explains 429 as rate limiting', async () => {
     const limited = failureOf(await fetchDirections({ ...where, ...fakeFetch(429, { message: 'Too Many Requests' }) }))
-    expect(limited.kind).toBe('rate-limit')
-    expect(limited.message).toContain('429')
+    expect(limited).toMatchObject({
+      kind: 'rate-limit',
+      message: 'Mapbox is rate limiting route requests (429). Wait a minute, then try again.',
+    })
   })
 
   it('keeps Mapbox’s explanation for a 422 and is generic for a 500', async () => {
@@ -583,7 +585,7 @@ describe('fetchDirections', () => {
   it('reports a network failure without leaking the request', async () => {
     const fetchImpl = (() => Promise.reject(new TypeError(`Failed to fetch ${TOKEN}`))) as typeof fetch
     const result = failureOf(await fetchDirections({ ...where, fetchImpl }))
-    expect(result.kind).toBe('network')
+    expect(result).toMatchObject({ kind: 'network', message: 'Could not reach Mapbox. Check your internet connection and try again.' })
     expect(result.message).not.toContain(TOKEN)
   })
 
@@ -595,7 +597,7 @@ describe('fetchDirections', () => {
       })) as typeof fetch
     const pending = fetchDirections({ ...where, signal: controller.signal, fetchImpl })
     controller.abort()
-    expect(failureOf(await pending).kind).toBe('aborted')
+    expect(failureOf(await pending)).toMatchObject({ kind: 'aborted', message: 'Route request cancelled.' })
 
     // Aborted while the response was already on its way: still not a result to show.
     const late = fetchDirections({ ...where, signal: controller.signal, ...fakeFetch(200, OK) })

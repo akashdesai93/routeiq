@@ -77,6 +77,8 @@ export interface DriveOptions {
   hideAtSec?: number
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
+  /** Looks at the screen mid-drive: each runs once, at its simulated second, with the drive standing still. */
+  lookAtSec?: readonly { atSec: number; look: () => Promise<void> }[]
 }
 
 export interface DriveLog {
@@ -234,7 +236,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, lookAtSec = [] } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
     await page.getByRole('button', { name: 'Start drive' }).click()
@@ -289,6 +291,8 @@ export class App {
       if (state.status !== '' && state.status !== log.statusLines.at(-1)?.text) log.statusLines.push({ atSec: sec, text: state.status })
       if (state.banner !== '' && state.banner !== lastBanner) {
         log.banners.push({ atSec: sec, text: state.banner })
+        // The banner made the sheet taller and the map shorter: one frame for the map to draw at its new size.
+        await page.clock.runFor(20)
         await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
         // The driver follows the app onto the route it switched to: a side street a probe
         // found during the drive, or else the fastest of what Mapbox offered.
@@ -305,6 +309,7 @@ export class App {
       }
       lastBanner = state.banner
       if (snapAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) await this.snap(`driving, minute ${Math.floor(sec / 60)}`)
+      for (const { atSec, look } of lookAtSec) if (atSec >= sec && atSec < sec + STEP_SEC) await look()
       log.seconds = sec + STEP_SEC
       if (state.arrived) {
         log.arrived = true

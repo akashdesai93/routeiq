@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import * as mapboxgl from 'mapbox-gl/esm'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import {
@@ -54,8 +54,11 @@ function pinLabel(role: PinRole, place: Place): string {
  * simulated or live drive, when there is one, following the car when told to) and
  * reports drags and clicks upward; it decides nothing. Following Mapbox's
  * React guide, the map is created once in an effect and removed on unmount.
+ *
+ * Memoised: during a live drive the app renders once a second for the clock, and the
+ * map takes no part in that unless something it draws has changed.
  */
-export function MapView({
+export const MapView = memo(function MapView({
   token,
   pins,
   routes,
@@ -206,13 +209,22 @@ export function MapView({
       // The simulated drive, above everything else: the route being driven, the
       // turn-off of a switch (hollow while the switch is still waiting), and the car.
       map.addSource(DRIVE_SOURCE, { type: 'geojson', data: driveFeatures(null) })
+      // Ink on a white casing, as the approved design draws the route on a light map.
+      map.addLayer({
+        id: 'drive-route-case',
+        type: 'line',
+        source: DRIVE_SOURCE,
+        filter: ['==', ['get', 'kind'], 'route'],
+        layout,
+        paint: { 'line-color': '#ffffff', 'line-width': 10 },
+      })
       map.addLayer({
         id: 'drive-route',
         type: 'line',
         source: DRIVE_SOURCE,
         filter: ['==', ['get', 'kind'], 'route'],
         layout,
-        paint: { 'line-color': '#1a7f37', 'line-width': 4 },
+        paint: { 'line-color': '#0a0c0f', 'line-width': 6 },
       })
       map.addLayer({
         id: 'drive-turn',
@@ -221,8 +233,8 @@ export function MapView({
         filter: ['==', ['get', 'kind'], 'turn'],
         paint: {
           'circle-radius': 8,
-          'circle-color': ['case', ['get', 'pending'], '#ffffff', '#bf8700'],
-          'circle-stroke-color': '#bf8700',
+          'circle-color': ['case', ['get', 'pending'], '#ffffff', '#ffb000'],
+          'circle-stroke-color': ['case', ['get', 'pending'], '#ffb000', '#0a0c0f'],
           'circle-stroke-width': 3,
         },
       })
@@ -232,10 +244,10 @@ export function MapView({
         source: DRIVE_SOURCE,
         filter: ['==', ['get', 'kind'], 'car'],
         paint: {
-          'circle-radius': 7,
-          'circle-color': '#1f2328',
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 3,
+          'circle-radius': 9,
+          'circle-color': '#ffffff',
+          'circle-stroke-color': '#0a0c0f',
+          'circle-stroke-width': 4,
         },
       })
       setReadyMap(map)
@@ -348,4 +360,4 @@ export function MapView({
       <div ref={containerRef} className="map" data-testid="map" hidden={error !== null} />
     </>
   )
-}
+})
