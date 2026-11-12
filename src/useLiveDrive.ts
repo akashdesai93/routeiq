@@ -19,6 +19,7 @@ import { fetchFreshRoutes } from './drive/freshRoutes.ts'
 import { createReplaySource, type ReplayMultiplier, type ReplayPlan } from './drive/replay.ts'
 import { MIN_REQUEST_GAP_MS, type DriveSettings } from './drive/simulation.ts'
 import { createLiveRunner, type LiveRunner } from './live/runner.ts'
+import type { DriveObserver } from './useDriveLog.ts'
 
 /** The development replay: a made-up driver in place of the device's GPS (see drive/replay.ts). */
 export interface ReplayConfig {
@@ -43,6 +44,8 @@ export interface LiveDriveConfig {
   readonly onWhatIfSpent: () => void
   /** Null: the device's GPS. */
   readonly replay: ReplayConfig | null
+  /** Told about each drive on the device's own position (not a development replay): the private drive log. */
+  readonly observer?: DriveObserver
 }
 
 export interface LiveDrive {
@@ -89,7 +92,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   const [nowMs, setNowMs] = useState(0)
   const [replaying, setReplaying] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(true)
-  const runnerRef = useRef<{ runner: LiveRunner; now: () => number } | null>(null)
+  const runnerRef = useRef<{ runner: LiveRunner; now: () => number; observer: DriveObserver | undefined } | null>(null)
   const speakerRef = useRef<Speaker | null>(null)
   const latest = useRef(config)
   const whatIfInPlay = useRef(false)
@@ -120,6 +123,9 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const now = replaySource === null ? Date.now : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
+    // A development replay is not a real drive: it is not logged.
+    const observer = replaySource === null ? latest.current.observer : undefined
+    observer?.start()
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
@@ -143,8 +149,10 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           latest.current.onWhatIfSpent()
         }
         seenSwitches = next.switches.length
+        const at = now()
+        observer?.change(next, at)
         setState(next)
-        setNowMs(now())
+        setNowMs(at)
       },
       routes: async (query) => {
         const { token, whatIfDelaySec, rerouteOptions } = latest.current
@@ -175,14 +183,16 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },
     })
-    runnerRef.current = { runner, now }
+    runnerRef.current = { runner, now, observer }
     setReplaying(replaySource !== null)
     setSpeechSupported(speaker.supported)
     runner.start(destination, route)
   }, [optionsOf])
 
   const end = useCallback(() => {
-    runnerRef.current?.runner.dispose()
+    const current = runnerRef.current
+    current?.observer?.end(current.runner.state(), current.now())
+    current?.runner.dispose()
     runnerRef.current = null
     setState(LIVE_IDLE)
   }, [])

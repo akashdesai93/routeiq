@@ -276,6 +276,23 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       OSM) with live speeds from a traffic feed. That means a server, so it needs a cost
       and privacy decision first.
 
+12. **Done: private drive log** (#107, `src/core/driveLog.ts`). Each live drive is kept
+    on the device with the time predicted when it set off against the time it really
+    took, under a coarse corridor key (both ends rounded to about 1 km and hashed: no
+    coordinates, addresses or place names), with its switches (claimed and realised
+    saving, kept or turned down), off-route events, requests, lights, and an optional
+    ETA typed from another app at departure. Written at switches and at the end only.
+    The Drives screen (from the plan screen) lists the drives and a per-corridor
+    summary (median error by start hour and by route source); Export as CSV through
+    the share sheet or Copy; Clear asks once. Versioned shape `routeiq.drives.v1`,
+    contract version 2. Tests: `tests/driveLog.test.ts`; e2e: "after a drive, it shows
+    how long it really took against what it predicted" (`e2e/drivelog.spec.ts`).
+    Open for later: the ranking correction factor per corridor and route source,
+    behind a setting (never loosening the reroute thresholds), #115;
+    editing the other app's ETA after the drive; naming corridors; a drive the app is
+    closed during without a switch is not kept (nothing is written before the first
+    switch or the end).
+
 ## Native iPhone + CarPlay (later)
 
 - Swift app on Mapbox Navigation SDK for iOS v3 (current 3.34.2: Swift 5.9+,

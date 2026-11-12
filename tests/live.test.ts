@@ -299,7 +299,9 @@ describe('the route picked on the plan screen (#66)', () => {
     expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
     cruiseOnB(s, 250, (xM) => ({ routes: offered(xM, 950), baseline: own(xM) }))
     expect(s.state.switches).toHaveLength(1)
-    expect(s.state.switches[0]).toMatchObject({ code: 'faster-route' })
+    // The switch keeps the saving it claimed, for the drive log (#107): 5 minutes, less the drive since.
+    expect(s.state.switches[0]).toMatchObject({ code: 'faster-route', savingSec: expect.any(Number) })
+    expect(s.state.switches[0]!.savingSec).toBeGreaterThan(120)
     expect(nameOf(s.state.route!)).toBe('A')
   })
 })
@@ -716,7 +718,7 @@ describe('off the route', () => {
     s.setTime(72)
     const applied = s.answer([fromHere(1050, 120)])
     expect(s.state.route!.id).toBe('replanned')
-    expect(s.state.switches.at(-1)).toMatchObject({ code: 'off-route' })
+    expect(s.state.switches.at(-1)).toMatchObject({ code: 'off-route', savingSec: null })
     expect(applied.map((e) => e.type)).toEqual(['follow-route', 'speak'])
     expect(s.spoken().at(-1)).toBe('New route. 18 minutes to your destination.')
     // There is no previous route to keep after leaving it.
