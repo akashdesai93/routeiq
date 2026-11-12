@@ -619,3 +619,30 @@ test('after it stops asking, a jam that gets worse makes it try the side streets
   expect(driveProbes.filter((p) => p.forRequest >= CHANGE_AT).length).toBeGreaterThanOrEqual(1)
   expect(log.banners).toEqual([])
 })
+
+test('on a 40-minute drive that is slow from the start, the side streets are tried early and the checks still last to the end', async ({ app }) => {
+  // Every road 2.2 times its usual pace, the plan included: the trip reads about 43 minutes,
+  // held up from the start, with the usual budget of 60 requests. Keeping back one request per
+  // minute left (plus 3) leaves room for a probe at once; keeping back 1.5 per minute did not
+  // (a rush-hour desk drive on #186 sent 1 probe in 40 minutes).
+  app.outside.sideStreet = true
+  app.outside.traffic = everyRoadSlow(2.2, 1)
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const before = app.directionsRequests
+  const probesBefore = app.probes.length
+
+  // The car keeps the pace the travel time says (about 10 m/s), so the time left falls a minute a minute.
+  const log = await app.drive({ road: 'A', speedMps: 10, maxSec: 3200, snapAtSec: [120] })
+  await app.snap('arrived: probed early, checked to the end')
+
+  expect(log.arrived).toBe(true)
+  const checks = app.answers.filter((a) => a.n > before && !app.pathChecks.some((c) => c.n === a.n)).map((a) => a.n)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  // A probe on one of the first three checks.
+  expect(driveProbes.some((p) => checks.slice(0, 3).includes(p.forRequest))).toBe(true)
+  // And the budget lasted: never used up, all 60 or fewer.
+  expect(log.statusLines.filter((l) => l.text.startsWith('Request budget used up'))).toEqual([])
+  expect(app.directionsRequests - before + driveProbes.length).toBeLessThanOrEqual(60)
+  expect(log.banners).toEqual([])
+})

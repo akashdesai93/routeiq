@@ -73,12 +73,13 @@ describe('simulated clock', () => {
     expect(simulatedTimeLeftSec(30_000, 3_000, 0)).toBeNull()
     expect(simulatedTimeLeftSec(NaN, 3_000, 10)).toBeNull()
     const settings = { pollIntervalSec: 60, maxRequests: 60 }
-    // 48 minutes left: 72 kept back, more than the whole budget, so no probe.
-    expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 9.375 })).toBe(0)
-    // At the planned speed (20 m/s: 22.5 minutes, 34 kept back) there is room.
+    // At 7.5 m/s, 60 minutes left: 60 + 3 kept back, more than the whole budget, so no probe.
+    expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 7.5 })).toBe(0)
+    // At 20 m/s (22.5 minutes: 23 + 3 = 26 kept back) there is room.
     expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(1)
-    // 34 kept back: the 26th request has 60 - 26 - 1 - 34 = -1, none.
-    expect(simulatedProbeAllowance({ requestsUsed: 26, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(0)
+    // 26 kept back: the 32nd request has 60 - 32 - 1 - 26 = 1 left; the 33rd none.
+    expect(simulatedProbeAllowance({ requestsUsed: 32, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(1)
+    expect(simulatedProbeAllowance({ requestsUsed: 33, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(0)
     expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 0 })).toBe(0)
   })
 

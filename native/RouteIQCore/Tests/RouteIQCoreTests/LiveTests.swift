@@ -1455,7 +1455,7 @@ final class LiveTests: XCTestCase {
         // 4 requests: the first route, then checks. The 2nd request may probe (room for it and a path check);
         // the 3rd may not (the 4th is the path check's); the 4th has no room for either.
         // (Nothing kept back for the checks until the arrival here: the next test is about that.)
-        let s = driving(LiveOptions(maxRequests: 4, probes: DriveProbeBudget(arrivalReserve: 0)))
+        let s = driving(LiveOptions(maxRequests: 4, probes: DriveProbeBudget(arrivalReserve: 0, reserveMargin: 0)))
         cruise(s, 60)
         cruise(s, 120)
         cruise(s, 180)
@@ -1468,7 +1468,7 @@ final class LiveTests: XCTestCase {
     // it('probes never take the requests the plain checks until the arrival need (#183)')
     func testSideStreetProbes_probesNeverTakeTheRequestsThePlainChecksUntilTheArrivalNeed() throws {
         let first = candidate(.A, at(0, 0), 1300)!
-        let reserve = (1300 * ((first.distanceM - 900) / first.distanceM) * 1.5 / 60).rounded(.up)
+        let reserve = (1300 * ((first.distanceM - 900) / first.distanceM) / 60).rounded(.up) + 3
         XCTAssertGreaterThan(reserve, 20)
         let tight = driving(LiveOptions(maxRequests: 3 + reserve), first)
         cruise(tight, 60)
@@ -1477,8 +1477,8 @@ final class LiveTests: XCTestCase {
         cruise(room, 60)
         XCTAssertEqual(room.requests().map(\.effect.probes.allowed), [0, 1])
         // A slower answer (more time left) keeps more back: the check after it may not probe.
-        cruise(room, 120) { xM in routesAt(xM, [.A: 1700]) }
-        cruise(room, 180) { xM in routesAt(xM, [.A: 1700]) }
+        cruise(room, 120) { xM in routesAt(xM, [.A: 1900]) }
+        cruise(room, 180) { xM in routesAt(xM, [.A: 1900]) }
         XCTAssertEqual(room.requests().map(\.effect.probes.allowed).last, 0)
         XCTAssertEqual(room.requests().count, 4)
         // The time left is what the view shows too.

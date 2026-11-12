@@ -124,8 +124,10 @@ public struct DriveProbeBudget: Hashable, Sendable {
     /// Before a probe, one request per poll interval until the expected arrival, times this
     /// factor, is kept back for the plain checks, so the drive never goes blind (#183).
     public var arrivalReserve: Double
+    /// Requests kept back on top of the plain checks: for the odd plain check that needs its path check.
+    public var reserveMargin: Double
 
-    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8, losingChecks: Double = 3, rearmSlowdownChange: Double = 0.1, arrivalReserve: Double = 1.5) {
+    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8, losingChecks: Double = 3, rearmSlowdownChange: Double = 0.1, arrivalReserve: Double = 1, reserveMargin: Double = 3) {
         self.requestsPerCheck = requestsPerCheck
         self.requestsPerDrive = requestsPerDrive
         self.minDelaySec = minDelaySec
@@ -133,6 +135,7 @@ public struct DriveProbeBudget: Hashable, Sendable {
         self.losingChecks = losingChecks
         self.rearmSlowdownChange = rearmSlowdownChange
         self.arrivalReserve = arrivalReserve
+        self.reserveMargin = reserveMargin
     }
 
     public static let `default` = DriveProbeBudget()
@@ -148,7 +151,8 @@ public struct DriveProbeBudget: Hashable, Sendable {
             timeoutSec: n(timeoutSec, d.timeoutSec),
             losingChecks: n(losingChecks, d.losingChecks),
             rearmSlowdownChange: n(rearmSlowdownChange, d.rearmSlowdownChange),
-            arrivalReserve: n(arrivalReserve, d.arrivalReserve)
+            arrivalReserve: n(arrivalReserve, d.arrivalReserve),
+            reserveMargin: n(reserveMargin, d.reserveMargin)
         )
     }
 }
@@ -501,8 +505,8 @@ public enum Probe {
     /// time left is not known: an unknown reserve is never zero (#183).
     public static func plainCheckReserve(remainingSec: Double?, pollIntervalSec: Double, budget: DriveProbeBudget = .default) -> Double? {
         guard let remainingSec, remainingSec.isFinite, pollIntervalSec.isFinite, pollIntervalSec > 0 else { return nil }
-        let factor = budget.resolved().arrivalReserve
-        return (JS.max(0, remainingSec) * factor / pollIntervalSec).rounded(.up)
+        let b = budget.resolved()
+        return (JS.max(0, remainingSec) * b.arrivalReserve / pollIntervalSec).rounded(.up) + b.reserveMargin.rounded(.up)
     }
 
     /// How many probe requests the check being sent may make. `requestsUsed`

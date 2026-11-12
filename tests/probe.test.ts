@@ -398,7 +398,7 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
   const route = world('A', 1700)
 
   it('has one documented budget', () => {
-    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, losingChecks: 3, rearmSlowdownChange: 0.1, arrivalReserve: 1.5 })
+    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, losingChecks: 3, rearmSlowdownChange: 0.1, arrivalReserve: 1, reserveMargin: 3 })
   })
 
   describe('checkProbeAllowance: probes share the drive request budget', () => {
@@ -429,11 +429,12 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
     })
 
     it('keeps back what the plain checks until the arrival need, so the drive never goes blind (#183)', () => {
-      // 30 minutes left, a check a minute: 30 checks, times 1.5 = 45 requests kept back.
-      expect(plainCheckReserve(1800, 60)).toBe(45)
-      expect(plainCheckReserve(1801, 60)).toBe(46)
-      expect(plainCheckReserve(0, 60)).toBe(0)
-      expect(plainCheckReserve(1800, 60, { arrivalReserve: 1 })).toBe(30)
+      // 42 minutes left, a check a minute: 42 checks, plus 3 for the odd path check = 45 kept back.
+      expect(plainCheckReserve(2520, 60)).toBe(45)
+      expect(plainCheckReserve(2521, 60)).toBe(46)
+      expect(plainCheckReserve(0, 60)).toBe(3)
+      expect(plainCheckReserve(1800, 60, { arrivalReserve: 1.5 })).toBe(48)
+      expect(plainCheckReserve(1800, 60, { reserveMargin: 0 })).toBe(30)
       // Not known: no reserve can be worked out, and an unknown one is never zero.
       expect(plainCheckReserve(null, 60)).toBeNull()
       expect(plainCheckReserve(NaN, 60)).toBeNull()
