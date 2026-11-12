@@ -47,6 +47,9 @@ design/node_modules/
 design/shots/
 design/reference/mapbox-screenshots-internal-not-for-publishing/
 
+# Phone lab reports (scripts/phone/lab): screenshots of the phone and logs, never published
+phone-lab/
+
 # CI e2e shards' blob reports (merged into e2e-report/ by e2e/merge.config.ts)
 blob-report/
 
