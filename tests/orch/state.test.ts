@@ -138,9 +138,15 @@ describe('heartbeat', () => {
 
 describe('PRs', () => {
   it('needs the phone by label or by the words in the body, until phone-verified', () => {
-    const s = derive(board([], { pulls: [pr(1, { labels: ['needs-phone'] }), pr(2, { body: 'Ready. PHONE CHECK NEEDED: lock and unlock.' }), pr(3, { labels: ['needs-phone', 'phone-verified'] }), pr(4)] }))
+    const s = derive(board([], { pulls: [pr(1, { labels: ['needs-phone'] }), pr(2, { body: 'Ready.\n\nPHONE CHECK NEEDED: lock and unlock.' }), pr(3, { labels: ['needs-phone', 'phone-verified'] }), pr(4)] }))
     expect(s.phoneQueue.map((q: Json) => q.pr)).toEqual([1, 2])
-    expect(s.phoneQueue[1].steps).toEqual(['Ready. PHONE CHECK NEEDED: lock and unlock.'])
+    expect(s.phoneQueue[1].steps).toEqual(['PHONE CHECK NEEDED: lock and unlock.'])
+  })
+
+  it('does not take a PR that only quotes the marker for one that asks for the phone (#159, #167)', () => {
+    const quoted = ["#158's own description said **\"PHONE CHECK NEEDED before merge\"**: at night...", '| phone | `needs-phone`, or `PHONE CHECK NEEDED` in the body |']
+    const s = derive(board([], { pulls: quoted.map((body, i) => pr(i + 1, { body })).concat([pr(9, { body: 'x\n\nPHONE CHECK NEEDED before merge\n1. lock' })]) }))
+    expect(s.phoneQueue.map((q: Json) => q.pr)).toEqual([9])
   })
 
   it('reads the phone check steps from their section', () => {
