@@ -42,6 +42,14 @@ export interface StopOptions {
   readonly lightBehindM: number
   /** At most this many stops are listed per drive. The totals count every stop. */
   readonly maxStopsKept: number
+  /**
+   * The street/freeway split is left out when more than this share of the
+   * measured time could not be put on either (off the route, no fix on a line):
+   * it would understate both parts.
+   */
+  readonly maxUnplacedShare: number
+  /** Meters driven before a stop are stored rounded to this many meters: enough for "3.6 mi in", not a place. */
+  readonly drivenRoundM: number
 }
 
 export const DEFAULT_STOP_OPTIONS: StopOptions = {
@@ -50,6 +58,8 @@ export const DEFAULT_STOP_OPTIONS: StopOptions = {
   lightAheadM: 80,
   lightBehindM: 25,
   maxStopsKept: 100,
+  maxUnplacedShare: 0.1,
+  drivenRoundM: 100,
 }
 
 /**
@@ -144,6 +154,8 @@ export interface StopMeter {
   readonly partSec: { readonly surface: number; readonly freeway: number; readonly unknown: number }
   /** True while every route of the drive said what kind of road it is on. */
   readonly classKnown: boolean
+  /** True once the car has moved on this drive: a drive started while parked does not log the wait before it sets off. */
+  readonly moved: boolean
   /** The first route's predicted time per part. Null when not known. */
   readonly predicted: { readonly surface: number; readonly freeway: number } | null
   /** When the drive began (the drive's clock): stops are timed from it. */
@@ -162,6 +174,8 @@ function resolve(options: Partial<StopOptions>): StopOptions {
     lightAheadM: pick('lightAheadM'),
     lightBehindM: pick('lightBehindM'),
     maxStopsKept: Math.floor(pick('maxStopsKept')),
+    maxUnplacedShare: pick('maxUnplacedShare'),
+    drivenRoundM: Math.max(1, pick('drivenRoundM')),
   }
 }
 
@@ -223,6 +237,7 @@ export function startStopMeter(route: RouteCandidate, startedAtMs: number): Stop
     unknownStops: 0,
     partSec: { surface: 0, freeway: 0, unknown: 0 },
     classKnown: true,
+    moved: false,
     predicted: predictedParts(route),
     startedAtMs,
   }
@@ -247,7 +262,7 @@ function close(meter: StopMeter, nowMs: number, alongM: number | null, lightsOf:
   const stop: LoggedStop = {
     atSec: tenth(Math.max(0, (open.sinceMs - meter.startedAtMs) / 1000)),
     durationSec,
-    drivenM: open.drivenM === null ? null : Math.round(open.drivenM),
+    drivenM: open.drivenM === null ? null : Math.round(open.drivenM / opts.drivenRoundM) * opts.drivenRoundM,
     place,
     road: open.road,
   }
@@ -310,7 +325,8 @@ export function meterFix(meter: StopMeter, state: LiveState, nowMs: number, ligh
 
   const crawl = options.crawlSpeedMps ?? DEFAULT_STOP_OPTIONS.crawlSpeedMps
   const still = speed < (Number.isFinite(crawl) && crawl >= 0 ? crawl : DEFAULT_STOP_OPTIONS.crawlSpeedMps)
-  if (still && m.open === null) {
+  if (!still && !m.moved) return { ...m, moved: true }
+  if (still && m.open === null && m.moved) {
     const drivenM = onLine ? baseM + Math.max(0, alongM - startAlongM) : null
     return { ...m, open: { sinceMs: nowMs, drivenM, road: part } }
   }
@@ -319,27 +335,32 @@ export function meterFix(meter: StopMeter, state: LiveState, nowMs: number, ligh
 }
 
 /**
- * The drive's stops as of `nowMs`, for its record. `final`: the drive is over
- * (arrived or ended), so a stop still under way is closed then; while the
- * drive goes on it is left out. `switched`: a switch was kept, so the first
- * route's prediction no longer speaks for the road driven.
+ * The drive's stops as of `nowMs`, for its record. `final`: 'arrived' closes
+ * a stop still under way (waiting at the last light before the destination);
+ * 'ended' drops it (End tapped while parked is not a wait), and so does a
+ * write mid-drive (it comes in the final write). `switched`: a switch was
+ * kept, so the first route's prediction no longer speaks for the road driven.
  */
 export function driveStops(
   meter: StopMeter,
   state: LiveState,
   nowMs: number,
   lightsOf: LightsOf,
-  final: boolean,
+  final: 'arrived' | 'ended' | null,
   switched: boolean,
   options: Partial<StopOptions> = {},
 ): DriveStops {
+  const opts = resolve(options)
   let m = meter
-  if (final && m.open !== null) {
-    const tracking = state.tracking
-    const alongM = tracking !== null && tracking.offFixes === 0 ? tracking.alongRouteM : null
-    m = close(m, nowMs, alongM, lightsOf, resolve(options))
+  if (final === 'arrived' && m.open !== null) {
+    // Where the car last stood, on the route whose lights are asked for; otherwise unknown.
+    const alongM = state.route === m.route && m.lastOnLine ? m.lastAlongM : null
+    m = close(m, nowMs, alongM, lightsOf, opts)
   }
   const predicted = switched ? null : m.predicted
+  const placed = m.partSec.surface + m.partSec.freeway
+  const total = placed + m.partSec.unknown
+  const splitKnown = m.classKnown && m.route !== null && (total === 0 || m.partSec.unknown / total <= opts.maxUnplacedShare)
   return {
     list: m.list,
     count: m.count,
@@ -348,13 +369,34 @@ export function driveStops(
     lightSec: tenth(m.lightSec),
     unknownStops: m.unknownStops,
     parts:
-      m.classKnown && m.route !== null
+      splitKnown
         ? {
             surface: { predictedSec: predicted === null ? null : tenth(predicted.surface), actualSec: tenth(m.partSec.surface) },
             freeway: { predictedSec: predicted === null ? null : tenth(predicted.freeway), actualSec: tenth(m.partSec.freeway) },
           }
         : null,
   }
+}
+
+/** Time moving: the drive's time less the time stopped. */
+export function movingSec(actualSec: number, stops: DriveStops): number {
+  return Math.max(0, actualSec - stops.stoppedSec)
+}
+
+/**
+ * The waits at lights as far as they are known. Null when none is known to be
+ * at a light and some stops' places are unknown: unknown, never "none".
+ * `partial`: some stops' places are unknown, so the figures are lower bounds.
+ */
+export function lightTotals(stops: DriveStops): { readonly stops: number; readonly sec: number; readonly partial: boolean } | null {
+  if (stops.lightStops === 0 && stops.unknownStops > 0) return null
+  return { stops: stops.lightStops, sec: stops.lightSec, partial: stops.unknownStops > 0 }
+}
+
+/** True when the drive has freeway to speak of: driven, or predicted. */
+export function hasFreeway(stops: DriveStops): boolean {
+  const f = stops.parts?.freeway
+  return f !== undefined && (f.actualSec > 0 || (f.predictedSec ?? 0) > 0)
 }
 
 /** The stops at lights, longest first: the worst `n`. */

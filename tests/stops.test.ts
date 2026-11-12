@@ -4,6 +4,8 @@ import {
   driveLogCsv,
   driveStops,
   formatWait,
+  lightTotals,
+  movingSec,
   EMPTY_DRIVE_LOG,
   LIVE_IDLE,
   meterFix,
@@ -87,11 +89,11 @@ function wait(meter: StopMeter, r: RouteCandidate, fromSec: number, toSec: numbe
 }
 
 const final = (m: StopMeter, r: RouteCandidate, sec: number, alongM: number, lightsOf: LightsOf = NONE, switched = false) =>
-  driveStops(m, at(r, sec, alongM, 20), T0 + sec * 1000, lightsOf, true, switched)
+  driveStops(m, at(r, sec, alongM, 20), T0 + sec * 1000, lightsOf, 'arrived', switched)
 
 describe('stops', () => {
   it('the defaults', () => {
-    expect(DEFAULT_STOP_OPTIONS).toEqual({ crawlSpeedMps: 1.5, minStopSec: 5, lightAheadM: 80, lightBehindM: 25, maxStopsKept: 100 })
+    expect(DEFAULT_STOP_OPTIONS).toEqual({ crawlSpeedMps: 1.5, minStopSec: 5, lightAheadM: 80, lightBehindM: 25, maxStopsKept: 100, maxUnplacedShare: 0.1, drivenRoundM: 100 })
   })
 
   it('a wait at a light is kept with its length, its place and the meters driven before it, and the totals add up', () => {
@@ -207,15 +209,55 @@ describe('stops', () => {
     expect(asked).toBe(1)
   })
 
-  it('a stop still under way is closed when the drive ends, and left out of a record written mid-drive', () => {
+  it('a stop under way is closed on arrival, dropped when End is tapped (parked), and left out of a write mid-drive', () => {
     const r = route('r1')
     let m = cruise(startStopMeter(r, T0), r, 0, 10, 0)
     m = wait(m, r, 11, 30, 200)
     const state = at(r, 30, 200, 0)
-    expect(driveStops(m, state, T0 + 30_000, NONE, false, false).count).toBe(0)
-    expect(driveStops(m, state, T0 + 30_000, NONE, true, false).list).toEqual([
-      { atSec: 11, durationSec: 19, drivenM: 200, place: 'unknown', road: 'surface' },
+    expect(driveStops(m, state, T0 + 30_000, NONE, null, false).count).toBe(0)
+    expect(driveStops(m, state, T0 + 30_000, NONE, 'ended', false).count).toBe(0)
+    expect(driveStops(m, state, T0 + 30_000, lights([210]), 'arrived', false).list).toEqual([
+      { atSec: 11, durationSec: 19, drivenM: 200, place: 'light', road: 'surface' },
     ])
+    // Arrived on a route the car has had no fix on yet: its lights are not asked for that stop.
+    const other = route('r2', { geometry: [[0.001, 0], END] })
+    expect(driveStops(m, { ...state, route: other }, T0 + 30_000, lights([210]), 'arrived', false).list[0]!.place).toBe('unknown')
+  })
+
+  it('a drive started while parked does not log the wait before the car sets off', () => {
+    const r = route('r1')
+    let m = wait(startStopMeter(r, T0), r, 0, 60, 0)
+    m = cruise(m, r, 61, 80, 0)
+    m = wait(m, r, 81, 90, 400)
+    m = cruise(m, r, 91, 95, 400)
+    expect(final(m, r, 95, 500).list.map((s) => s.atSec)).toEqual([81])
+  })
+
+  it('meters driven are stored to the nearest drivenRoundM, not to the meter', () => {
+    const r = route('r1')
+    let m = cruise(startStopMeter(r, T0), r, 0, 10, 0)
+    m = wait(m, r, 11, 20, 1249)
+    m = cruise(m, r, 21, 22, 1249)
+    expect(final(m, r, 22, 1300).list[0]!.drivenM).toBe(1200)
+  })
+
+  it('the street/freeway split is left out when more than maxUnplacedShare of the time was off the route', () => {
+    const r = route('r1')
+    const run = (offSec: number) => {
+      let m = cruise(startStopMeter(r, T0), r, 0, 100, 0)
+      for (let s = 101; s <= 100 + offSec; s++) m = meterFix(m, at(r, s, 2000, 20, { offFixes: 3 }), T0 + s * 1000, NONE)
+      return final(m, r, 100 + offSec, 2000).parts
+    }
+    expect(run(10)).not.toBeNull()
+    expect(run(13)).toBeNull()
+  })
+
+  it('waits at lights as far as known: unknown when none is known and some places are unknown, a lower bound when some are', () => {
+    const base = { list: [], count: 3, stoppedSec: 90, lightSec: 0, lightStops: 0, unknownStops: 0, parts: null }
+    expect(lightTotals({ ...base, unknownStops: 3 })).toBeNull()
+    expect(lightTotals({ ...base, lightStops: 1, lightSec: 40, unknownStops: 2 })).toEqual({ stops: 1, sec: 40, partial: true })
+    expect(lightTotals({ ...base })).toEqual({ stops: 0, sec: 0, partial: false })
+    expect(movingSec(600, base)).toBe(510)
   })
 
   it('lists at most maxStopsKept stops, and the totals still count every one', () => {
@@ -334,6 +376,35 @@ describe('stops in the drive log', () => {
     const damaged = JSON.parse(text) as { drives: { stops: { list: unknown[] } }[] }
     damaged.drives[0]!.stops.list[0] = { atSec: 26, durationSec: -1, drivenM: 500, place: 'light', road: 'surface' }
     expect(parseDriveLog(damaged)!.drives).toHaveLength(0)
+  })
+
+  it('the CSV never writes an unknown light wait as 0: blank when unknown, ≥ when partly known', () => {
+    const { written } = drive()
+    const s = written!.stops!
+    const csv = driveLogCsv(
+      [
+        { ...written!, id: 'd1', startedAtMs: T0 + 1, stops: { ...s, lightStops: 0, lightSec: 0, unknownStops: 1 } },
+        { ...written!, id: 'd2', startedAtMs: T0 + 2, stops: { ...s, unknownStops: 1 } },
+      ].reduce((l, d) => recordDrive(l, d), EMPTY_DRIVE_LOG),
+    ).split('\n')
+    expect(csv[1]!.endsWith(',0.7,,')).toBe(true)
+    expect(csv[2]!.endsWith(',0.7,≥1,≥0.7')).toBe(true)
+  })
+
+  it('a record written at a switch carries the stops so far', () => {
+    let rec: DriveRecorder = RECORDER_IDLE
+    const feed = (state: LiveState, sec: number) => {
+      const step = observeDrive(rec, state, T0 + sec * 1000, context, {}, lights([520]))
+      rec = step.recorder
+      return step.write
+    }
+    for (let s = 0; s <= 25; s++) feed(at(r, s, s * 20, 20), s)
+    for (let s = 26; s <= 65; s++) feed(at(r, s, 500, 0), s)
+    for (let s = 66; s <= 70; s++) feed(at(r, s, 500 + (s - 66) * 20, 20), s)
+    const b = route('r2')
+    const written = feed({ ...at(b, 71, 0, 20), switches: [{ atMs: T0 + 71_000, code: 'faster-route', reason: 'Switching', savingSec: 150 }] }, 71)
+    expect(written!.outcome).toBe('unfinished')
+    expect(written!.stops).toMatchObject({ count: 1, stoppedSec: 40, lightStops: 1 })
   })
 
   it('the CSV has the time stopped, the stops at lights and the time at lights; blank when not measured', () => {

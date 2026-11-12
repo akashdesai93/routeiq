@@ -270,7 +270,10 @@ export {
 export {
   DEFAULT_STOP_OPTIONS,
   driveStops,
+  hasFreeway,
+  lightTotals,
   meterFix,
+  movingSec,
   predictedParts,
   startStopMeter,
   stopPlace,

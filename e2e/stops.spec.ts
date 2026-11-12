@@ -87,3 +87,29 @@ test('after a drive, the Drives screen shows where I sat at lights, and the wait
   await page.getByRole('button', { name: 'Export' }).click()
   await expect(page.getByLabel('Drive log as CSV')).toHaveValue(/,stopped_min,light_stops,light_wait_min\n.*,1\.3,1,1\.0$/)
 })
+
+test('where light data is missing, a wait is never shown as "not at a light"', async ({ app, page }) => {
+  const { storage, firstLightM } = tripWithLights(app)
+  // Overpass is busy for the western part of the trip: the light data is partial.
+  const answer = app.outside.overpass!
+  app.outside.overpass = (query) => {
+    const box = /\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)/.exec(query)
+    return box !== null && Number(box[2]) < -84.3 ? { status: 504 } : answer(query)
+  }
+  await app.open({ fakeClock: true, storage })
+  await app.routesReady()
+  await expect(page.locator('ol.routes > li').first().locator('.route-signals')).toHaveText(/^≥ \d+ signals? \(partial\)$/)
+
+  // 30 s held up mid-block, then End.
+  await app.drive({ speedMps: standing([{ atM: firstLightM / 2, forSec: 30 }]), maxSec: 160 })
+  await page.getByRole('button', { name: 'End' }).click()
+
+  await page.getByRole('button', { name: /^Drives/ }).click()
+  const stops = page.getByRole('list', { name: 'Past drives' }).getByRole('listitem').first().getByLabel('Stops')
+  await expect(stops).toContainText('Stopped 30 s (1 stop)')
+  await expect(stops).toContainText('At lights: unknown · 1 stop where lights are unknown')
+  await expect(stops).not.toContainText('At lights: none')
+  await app.snap('the Drives screen: a wait where the light data is partial')
+  await page.getByRole('button', { name: 'Export' }).click()
+  await expect(page.getByLabel('Drive log as CSV')).toHaveValue(/,0\.5,,$/)
+})

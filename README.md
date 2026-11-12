@@ -1477,11 +1477,15 @@ at the start against what the drive really took. Rules: `src/core/driveLog.ts`; 
   drive, its length (to a tenth of a second), the meters driven before it, its place and the
   road (street, freeway, or unknown): no position, no light id. The totals (time stopped,
   stops and time at lights) count every stop, so the listed stops add up to them; at most
-  `maxStopsKept` are listed. The meter also adds up the time on **streets** and on
+  `maxStopsKept` are listed. Where no stop is known to be at a light and some places are
+  unknown, the time at lights shows as **unknown** (blank in the CSV); with some unknown, as
+  a lower bound ("≥"). Meters driven are kept to the nearest `drivenRoundM`. The wait
+  before the car first sets off is not a stop, and neither is a stop still under way when
+  End is tapped (parked); on arrival one is closed and kept. The meter also adds up the time on **streets** and on
   **freeway** (the route's limited-access spans, `RouteCandidate.limitedAccessSpansM`) and,
   for a drive that kept no switch, sets it against the first route's prediction per part
-  (from Mapbox's per-segment times). Unknown road class on any route of the drive leaves the
-  split out. Cost per fix: a few comparisons and additions, no search, no write; the light
+  (from Mapbox's per-segment times). Unknown road class on any route of the drive, or more
+  than `maxUnplacedShare` of the time off the route, leaves the split out. Cost per fix: a few comparisons and additions, no search, no write; the light
   lookup runs once per stop. A drive recorded before this has no stops (shown as nothing,
   not as zero). Stops are measured only, not used for ranking or switching (step 3 of #196
   waits for the owner's decision).
@@ -1514,6 +1518,8 @@ at the start against what the drive really took. Rules: `src/core/driveLog.ts`; 
 | `lightAheadM` | 80 m | a light up to this far ahead of where the car last stood makes it a wait at a light (a queue several cars long) |
 | `lightBehindM` | 25 m | ...or up to this far behind (the light's point inside the junction, the car crept past it) |
 | `maxStopsKept` | 100 | stops listed per drive; the totals count all |
+| `maxUnplacedShare` | 0.1 | more than this share of the drive's time on no known road part (off the route): no street/freeway split |
+| `drivenRoundM` | 100 m | meters driven before a stop are stored to this |
 
 The stored shape is versioned: localStorage key `routeiq.drives.v1`, value
 `{ "version": 1, "drives": [...] }` (`DriveLog` in the core contract, docs/contracts.md). A
@@ -1627,7 +1633,7 @@ RouteIQ; a destination picked from search is kept in the recent list (below).
 **The drive log** (Drives screen) lives only on the device, in localStorage under
 `routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
 holds times, durations, distances, light counts, switch savings, request counts, stops
-(seconds into the drive, length, meters driven before them, at a light or not; never a
+(seconds into the drive, length, meters driven before them to 100 m, at a light or not; never a
 position or which light) and, for each drive, the route's source (Mapbox or side street, never the route itself or its
 id) and a corridor key: the drive's first position and its destination, each rounded
 to about a kilometre and hashed together, so a record holds no coordinate, address or

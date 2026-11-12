@@ -9,6 +9,9 @@ import {
   otherAppErrorSec,
   predictionErrorSec,
   summarizeDriveLog,
+  hasFreeway,
+  lightTotals,
+  movingSec,
   worstLights,
   type CorridorSummary,
   type DriveLog,
@@ -57,28 +60,35 @@ function partLine(name: string, part: PartTime): string {
 function StopsBlock({ stops, actualSec }: { stops: DriveStops; actualSec: number }) {
   const worst = worstLights(stops)
   const parts = stops.parts
+  const lights = lightTotals(stops)
+  const at = lights?.partial === true ? '≥ ' : ''
   return (
     <div className="drive-stops" aria-label="Stops">
       <p>
-        Moving {formatWait(Math.max(0, actualSec - stops.stoppedSec))} · Stopped {formatWait(stops.stoppedSec)}
+        Moving {formatWait(movingSec(actualSec, stops))} · Stopped {formatWait(stops.stoppedSec)}
         {stops.count > 0 ? ` (${plural(stops.count, 'stop', 'stops')})` : ' (no stops)'}
       </p>
       {stops.count > 0 && (
         <p>
-          At lights: {stops.lightStops === 0 ? 'none' : `${formatWait(stops.lightSec)} at ${plural(stops.lightStops, 'light', 'lights')}`}
+          At lights:{' '}
+          {lights === null
+            ? 'unknown'
+            : lights.stops === 0
+              ? 'none'
+              : `${at}${formatWait(lights.sec)} at ${at}${plural(lights.stops, 'light', 'lights')}`}
           {stops.unknownStops > 0 && ` · ${plural(stops.unknownStops, 'stop', 'stops')} where lights are unknown`}
         </p>
       )}
       {worst.length > 0 && (
         <p>
           Worst {worst.length === 1 ? 'light' : 'lights'}:{' '}
-          {worst.map((s) => `${formatWait(s.durationSec)}, ${s.drivenM === null ? `${minutes(s.atSec)}` : formatDistance(s.drivenM)} in`).join(" · ")}
+          {worst.map((s) => `${formatWait(s.durationSec)}, ${s.drivenM === null ? `${minutes(s.atSec)}` : formatDistance(s.drivenM)} in`).join(' · ')}
         </p>
       )}
       {parts !== null && (
         <p className="hint">
           {partLine('Streets', parts.surface)}
-          {(parts.freeway.actualSec > 0 || (parts.freeway.predictedSec ?? 0) > 0) && ` · ${partLine('Freeway', parts.freeway)}`}
+          {hasFreeway(stops) && ` · ${partLine('Freeway', parts.freeway)}`}
         </p>
       )}
     </div>

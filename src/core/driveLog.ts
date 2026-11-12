@@ -1,7 +1,7 @@
 import { geometryHash } from './hash.ts'
 import type { LiveState, LiveSwitch } from './live.ts'
 import type { RerouteCode } from './reroute.ts'
-import { driveStops, meterFix, startStopMeter, type DriveStops, type LightsOf, type LoggedStop, type StopMeter } from './stops.ts'
+import { driveStops, lightTotals, meterFix, startStopMeter, type DriveStops, type LightsOf, type LoggedStop, type StopMeter } from './stops.ts'
 import type { LngLat, RouteSource, SignalCoverage } from './types.ts'
 
 /**
@@ -245,7 +245,7 @@ function realise(draft: DriveRecord, endMs: number): readonly LoggedSwitch[] {
 }
 
 /** The record's stops from the meter. `final`: the drive is over, so a stop under way is closed. */
-function withStops(draft: DriveRecord, meter: StopMeter | null, state: LiveState, nowMs: number, lightsOf: LightsOf, final: boolean): DriveRecord {
+function withStops(draft: DriveRecord, meter: StopMeter | null, state: LiveState, nowMs: number, lightsOf: LightsOf, final: 'arrived' | 'ended' | null): DriveRecord {
   if (meter === null) return draft
   const switched = draft.switches.some((s) => s.accepted)
   return { ...draft, stops: driveStops(meter, state, nowMs, lightsOf, final, switched) }
@@ -267,7 +267,7 @@ function finish(
     requests: state.requestsUsed,
     outcome,
   }
-  return withStops(done, meter, state, nowMs, lightsOf, true)
+  return withStops(done, meter, state, nowMs, lightsOf, outcome)
 }
 
 /**
@@ -349,7 +349,7 @@ export function observeDrive(
     draft = { ...draft, switches: [...draft.switches, ...added] }
     write = true
   }
-  if (write) draft = withStops({ ...draft, actualSec: elapsedSec(draft, nowMs), requests: state.requestsUsed }, meter, state, nowMs, lightsOf, false)
+  if (write) draft = withStops({ ...draft, actualSec: elapsedSec(draft, nowMs), requests: state.requestsUsed }, meter, state, nowMs, lightsOf, null)
   return {
     recorder: { draft, done: false, seen: { switches: state.switches, declined: state.declinedSwitches, offRoute: state.offRouteNotified }, meter },
     write: write ? draft : null,
@@ -582,6 +582,14 @@ export function errorWords(errorSec: number): string {
 
 const csvMin = (sec: number | null) => (sec === null ? '' : (sec / 60).toFixed(1))
 
+/** light_stops and light_wait_min: blank when unknown, "≥" when some stops' places are unknown. */
+function lightColumns(d: DriveRecord): [string, string] {
+  const lights = d.stops === null ? null : lightTotals(d.stops)
+  if (lights === null) return ['', '']
+  const at = lights.partial ? '≥' : ''
+  return [`${at}${lights.stops}`, `${at}${csvMin(lights.sec)}`]
+}
+
 export const DRIVE_LOG_CSV_HEADER =
   'started,corridor,hour,outcome,route_source,predicted_min,actual_min,error_min,other_app_min,other_app_error_min,distance_km,lights,switches_kept,switches_declined,claimed_saving_min,realised_saving_min,off_route,requests,stopped_min,light_stops,light_wait_min'
 
@@ -589,7 +597,9 @@ export const DRIVE_LOG_CSV_HEADER =
  * The log as CSV, oldest first, for the share sheet or the clipboard. The
  * start time is UTC (ISO 8601) and the hour is the device's local hour.
  * Corridors are their letters; lights are blank when unknown and "≥N" when partial.
- * The stop columns are blank for a drive recorded before stops were measured.
+ * The stop columns are blank for a drive recorded before stops were measured; the
+ * light columns are blank when no stop is known to be at a light and some places are
+ * unknown, and "≥N" when some are unknown.
  */
 export function driveLogCsv(log: DriveLog): string {
   const labels = corridorLabels(log)
@@ -618,8 +628,7 @@ export function driveLogCsv(log: DriveLog): string {
       String(d.offRouteEvents),
       String(d.requests),
       csvMin(d.stops?.stoppedSec ?? null),
-      d.stops === null ? '' : String(d.stops.lightStops),
-      csvMin(d.stops?.lightSec ?? null),
+      ...lightColumns(d),
     ].join(',')
   })
   return [DRIVE_LOG_CSV_HEADER, ...rows].join('\n')
