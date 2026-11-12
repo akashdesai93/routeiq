@@ -201,9 +201,10 @@ ends too (the previous tick is still running).
 Cloud sessions go through a GitHub proxy that has no GraphQL, and they cannot see the PC. When
 a session needs one of these, it says so in `asks:` and moves on; it does not wait.
 
-- GraphQL-only GitHub actions: mark a draft ready, resolve a review thread, enable auto-merge,
-  pin an issue. (A cloud session may try the GitHub MCP tools first; if they fail, ask.) Never
-  open drafts: use `do-not-merge`.
+- GraphQL-only GitHub actions through `gh`: resolve a review thread, enable auto-merge, pin an
+  issue. The GitHub MCP tools reach some of them from the cloud: `mcp__github__update_pull_request`
+  with `draft: false` marked #162 ready (tried 2026-11-12). Try the MCP tool first; if it fails,
+  ask. Still prefer `do-not-merge` to drafts: the gate enforces the label, and REST can remove it.
 - Create, edit or delete routines; message a session.
 - Anything on the phone or the PC.
 - Repo settings, branch protection, secrets.
@@ -236,4 +237,5 @@ The lab is the only role that touches the phone. Details and the preflight are i
   three decisions had been asked in status comments.
 - Labels drift (a closed issue still `in-progress`, an issue with both `p2` and `p3`):
   `state.mjs` lists these under `label_drift`.
-- No drafts in the cloud: nobody there can mark one ready.
+- `do-not-merge` instead of drafts: #143 sat as a draft because `gh` could not mark it ready
+  (the MCP tool can, but the label is what the gate checks).

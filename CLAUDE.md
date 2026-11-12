@@ -187,8 +187,8 @@ whole picture from GitHub alone.
   `gh api -X PUT repos/akashdesai93/routeiq/pulls/N/update-branch`). Review threads must be
   resolved. Details and the exact settings: `docs/branch-protection.md`.
 - **Ship work through PRs**, one issue per PR, with `Closes #N` and how it was verified.
-  Open them ready for review, never as drafts (nobody in the cloud can mark a draft ready);
-  use `do-not-merge` while unfinished. A PR whose change must be seen on the real iPhone gets
+  Open them ready for review, not as drafts; use `do-not-merge` while unfinished (the gate
+  enforces it, and REST can remove it from the cloud). A PR whose change must be seen on the real iPhone gets
   `needs-phone`. The reviewer role reviews the PR independently, posts `verdict: approve
   <sha7>`, and squash-merges it with an explicit message once `required` is green. GitHub
   deletes the head branch on merge. After a merge, restart from `origin/main`.
