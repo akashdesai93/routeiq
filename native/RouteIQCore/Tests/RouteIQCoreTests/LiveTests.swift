@@ -421,6 +421,8 @@ final class LiveTests: XCTestCase {
         cruiseOnB(s, 250) { xM in (self.offered(xM, 950), .answered(own(xM))) }
         XCTAssertEqual(s.state.switches.count, 1)
         XCTAssertEqual(try item(s.state.switches, 0).code, .fasterRoute)
+        // The switch keeps the saving it claimed, for the drive log (#107): 5 minutes, less the drive since.
+        XCTAssertGreaterThan(try XCTUnwrap(try item(s.state.switches, 0).savingSec), 120)
         XCTAssertEqual(nameOf(try XCTUnwrap(s.state.route)), .A)
     }
 
@@ -1074,6 +1076,8 @@ final class LiveTests: XCTestCase {
         let applied = s.answer([fromHere(1050, 120)])
         XCTAssertEqual(try XCTUnwrap(s.state.route).id, "replanned")
         XCTAssertEqual(s.state.switches.last?.code, .offRoute)
+        XCTAssertNotNil(s.state.switches.last)
+        XCTAssertNil(s.state.switches.last?.savingSec)
         XCTAssertEqual(types(applied), ["follow-route", "speak"])
         XCTAssertEqual(s.spoken().last, "New route. 18 minutes to your destination.")
         // There is no previous route to keep after leaving it.

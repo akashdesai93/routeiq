@@ -194,11 +194,16 @@ public struct LiveSwitch: Hashable, Sendable {
     public var code: RerouteCode
     /// The engine's sentence for it.
     public var reason: String
+    /// The time the engine said the switch saves, in seconds: the fresh time of the route left
+    /// minus that of the new one. Nil when it claimed none (a closure ahead, a new route after
+    /// leaving the old one). For the drive log (#107).
+    public var savingSec: Double?
 
-    public init(atMs: Double, code: RerouteCode, reason: String) {
+    public init(atMs: Double, code: RerouteCode, reason: String, savingSec: Double? = nil) {
         self.atMs = atMs
         self.code = code
         self.reason = reason
+        self.savingSec = savingSec
     }
 }
 
@@ -883,7 +888,7 @@ public enum Live {
         let saving = decision.considered?.savingSec
         let sideStreet = chosen.source == .probe
         let onNew = Tracking.retrack(tracking, TrackedRoute(chosen.geometry), options: opts.tracking)
-        let made = LiveSwitch(atMs: nowMs, code: decision.code, reason: decision.reason)
+        let made = LiveSwitch(atMs: nowMs, code: decision.code, reason: decision.reason, savingSec: offRoute ? nil : saving)
         next.route = chosen
         next.tracking = onNew
         next.guidance = Guidance.armGuidance(chosen.guidance, onNew.alongRouteM, speakDue: false)

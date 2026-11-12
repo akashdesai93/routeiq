@@ -439,7 +439,7 @@ describe('Start drive and the live drive view', () => {
       status: 'arrived',
       summary: {
         tripSec: 1500,
-        switches: [{ atMs: T0 + 600_000, code: 'faster-route', reason: 'Switching: saves 3 minutes, turn in 0.8 miles' }],
+        switches: [{ atMs: T0 + 600_000, code: 'faster-route', reason: 'Switching: saves 3 minutes, turn in 0.8 miles', savingSec: 180 }],
         declined: 1,
         requestsUsed: 26,
       },
