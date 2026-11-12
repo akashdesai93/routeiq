@@ -572,7 +572,7 @@ engine, and applies a switch by itself. The event log lists every decision with 
 simulated time and the engine's reason, newest first. Pause, Resume and Stop are next to
 it; moving a pin, Swap and Reset end the drive. While a drive is on, the route list and
 the map show what the last check returned from the car's position, the route being
-driven is drawn in green with the car on it, and an amber dot marks where a switch
+driven is drawn in black on a white casing with the car on it, and an amber dot marks where a switch
 leaves the old route (hollow while the switch is still waiting to be confirmed).
 
 The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
@@ -983,11 +983,21 @@ plugin `RouteIQNative` is present, `src/device/native`):
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
 
-**The drive view** replaces the planning layout, full screen: the next turn (arrow,
-distance, road) on top; the map following the car, heading up, with the route being
-driven, the car and the turn-off of a switch; below it the arrival time, the minutes
-and miles left, one quiet line with the engine's latest reason, "checked N s ago" and
-the request count; and two large buttons, Mute and End. Every control is 56 px or more.
+**The drive view** replaces the planning layout, full screen, in the approved design
+(`design/README.md`): black glass on the map, condensed figures (Barlow Condensed, with
+Inter for sentences; both bundled with the app, never fetched). A turn card sits over
+the top of the map: the distance to the next maneuver is the hero, with its arrow and
+the street to turn onto under it. Where the road just carries on it reads "Continue on
+<road>", and "Continue straight" when no turn is listed at all; the hero is a distance
+either way. The map follows the car, heading up, with the route being driven, the car
+and the turn-off of a switch. The sheet below has one line, the minutes left (large)
+and the arrival time (smaller), and two 60 px buttons, More and End: two figures read
+at a glance. **More** opens the rest: the lights on the route being driven (a number
+only for a full count, "≥ N data missing" for a partial one, "Unknown" otherwise, never
+0 when unsure), the miles left, the automatic switch, the voice (Mute), one quiet line
+with the engine's latest reason, "checked N s ago" and the request count, and in the
+iPhone app "Drive diagnostics". Every control is 44 px or more, the cards keep clear of
+the phone's safe areas, and the one animation is off under `prefers-reduced-motion`.
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).

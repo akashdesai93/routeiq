@@ -19,6 +19,8 @@
     "e2e:report": "playwright show-report e2e-report/playwright"
   },
   "dependencies": {
+    "@fontsource/barlow-condensed": "5.3.0",
+    "@fontsource/inter": "5.3.0",
     "mapbox-gl": "3.34.2",
     "react": "19.3.1",
     "react-dom": "19.3.1"

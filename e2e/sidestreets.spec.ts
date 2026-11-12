@@ -274,7 +274,22 @@ test('when I start on the side-street route, it drives the side street', async (
   const plannedRequests = app.directionsRequests
 
   // The driver takes Parallel Street, the route on screen, all the way.
-  const log = await app.drive({ road: 'S', snapAtSec: [30, 600] })
+  // No turn ahead where the side street carries straight on: the card still leads with a distance (#45).
+  const turnCard = page.getByLabel('Next turn')
+  const log = await app.drive({
+    road: 'S',
+    snapAtSec: [30, 600],
+    lookAtSec: [
+      {
+        atSec: 30,
+        look: async () => {
+          await expect(turnCard.locator('.live-turn-distance')).toHaveText(/^\d+(\.\d)? mi$/)
+          await expect(turnCard.locator('.live-turn-road')).toHaveText('Continue on Parallel Street')
+          await expect(turnCard.locator('[data-arrow="straight"]')).toBeVisible()
+        },
+      },
+    ],
+  })
   await app.snap('arrived on Parallel Street: the summary')
 
   expect(log.arrived).toBe(true)

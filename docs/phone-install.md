@@ -91,7 +91,7 @@ and payment methods. The signing Apple ID does not need to be the one signed in 
      "While Using"; nobody has measured that on this app.
    - Leave **Precise Location** on.
    - If you tapped "Don't Allow": Settings > Privacy & Security > Location Services > RouteIQ.
-6. You should hear "RouteIQ started". If not: volume up, and check the mute button in the app's
+6. You should hear "RouteIQ started". If not: volume up, and check Voice behind More in the app's
    drive view. The ring/silent switch should not matter (the app uses the playback audio category).
 
 ## 4. The 10-minute check, at home, before the drive
@@ -108,7 +108,7 @@ Do this on foot or parked. It is the only real test of the thing this app exists
 4. Start some music, lock again. When RouteIQ speaks, the music should get quieter, then return.
 5. Unlock, open another app (Messages) for two minutes, keep moving. The voice should continue.
 6. Open RouteIQ. The map should be where you are, not where you were when you locked it, and the
-   drive view should say "checked N s ago" with N under about a minute.
+   drive view should say "checked N s ago" (behind More) with N under about a minute.
 7. Tap **End**.
 8. Tap **Drive diagnostics** in the top bar, then **Copy**, and send what it copied (step 6 below).
    Do this even if everything worked.
@@ -127,7 +127,7 @@ drive, and with the app in front it behaves like the browser version.
   - turn prompts at the usual distances;
   - "Switching to a faster route. Saves N minutes." if traffic changes;
   - after a phone call, the next prompt should come by itself.
-- Glance only when stopped: "checked N s ago" in the drive view should never be many minutes old.
+- Glance only when stopped: "checked N s ago" (behind More in the drive view) should never be many minutes old.
   If it is, route checks are not happening in the background (see the first two unverified items).
 - Things worth writing down afterwards: any silence longer than expected, any prompt that came
   late (after the turn), whether audio came from the car, whether a switch was announced.

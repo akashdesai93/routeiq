@@ -1,4 +1,13 @@
-import { formatDistance, formatDuration, type ArrowKind, type LiveState, type LiveView } from './core/index.ts'
+import { memo, useState, type ReactNode } from 'react'
+import {
+  formatDistance,
+  formatDuration,
+  formatSignalCount,
+  type ArrowKind,
+  type LiveState,
+  type LiveView,
+  type SignalCoverage,
+} from './core/index.ts'
 import { REPLAY_MULTIPLIERS, type ReplayMultiplier } from './drive/replay.ts'
 
 /** Development controls shown in the drive view during a replay. */
@@ -17,6 +26,10 @@ interface LiveDriveViewProps {
   /** True during a development replay: the view says so. */
   replaying?: boolean
   dev?: LiveDevControls | null
+  /** Shown at the end of the More sheet. The iPhone shell puts "Drive diagnostics" here. */
+  extra?: ReactNode
+  /** The More sheet starts open. For tests: a driver opens it with a tap. */
+  initiallyOpen?: boolean
   onKeepPrevious: () => void
   onMute: (muted: boolean) => void
   onEnd: () => void
@@ -100,11 +113,174 @@ function clockTime(ms: number): string {
 }
 
 /**
+ * A figure as it is typeset: the digits large, the unit small and dim beside
+ * them. The text itself is unchanged ("0.8 mi" still reads "0.8 mi").
+ */
+function Figure({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\d[\d.,:]*)/).map((part, i) =>
+        part === '' ? null : i % 2 === 1 ? (
+          part
+        ) : (
+          <span key={i} className="live-unit">
+            {part}
+          </span>
+        ),
+      )}
+    </>
+  )
+}
+
+interface TurnCardProps {
+  /** Null: no maneuver to show, only `line`. */
+  arrow: ArrowKind | null
+  /** The hero, already in words ("0.8 mi"). Null with no arrow. */
+  distance: string | null
+  /** The street to turn onto, or a plain sentence. */
+  line: string
+  /** `line` is a sentence ("Continue straight"), set in the text face; otherwise a street name, condensed. */
+  plain: boolean
+  /** Read out before `line` by a screen reader ("Turn right"). */
+  spokenPrefix: string | null
+  secondary: string | null
+}
+
+/**
+ * The turn card: the distance to the next maneuver as the hero, and under it
+ * the street. Given words only, so a clock tick that changes none of them
+ * does not render it again.
+ */
+const TurnCard = memo(function TurnCard({ arrow, distance, line, plain, spokenPrefix, secondary }: TurnCardProps) {
+  return (
+    <section className="live-top" aria-label="Next turn" aria-live="polite">
+      {arrow !== null && <TurnArrow kind={arrow} />}
+      <div className="live-turn-text">
+        {distance !== null && (
+          <span className="live-turn-distance">
+            <Figure text={distance} />
+          </span>
+        )}
+        <span className={plain ? 'live-turn-road live-turn-plain' : 'live-turn-road'}>
+          {spokenPrefix !== null && <span className="visually-hidden">{spokenPrefix}: </span>}
+          {line}
+        </span>
+        {secondary !== null && <span className="live-turn-secondary">{secondary}</span>}
+      </div>
+    </section>
+  )
+})
+
+/** One line: the time left, large, and the arrival time, smaller and dimmer. */
+const EtaLine = memo(function EtaLine({ left, arrive, fallback }: { left: string | null; arrive: string | null; fallback: string }) {
+  return (
+    <p className="live-eta">
+      {left !== null && arrive !== null ? (
+        <>
+          <strong className="live-eta-left">
+            <Figure text={left} />
+          </strong>
+          <span className="live-eta-arrive">
+            <span className="live-eta-label">Arrive </span>
+            <span className="live-eta-clock">{arrive}</span>
+          </span>
+        </>
+      ) : (
+        <span className="live-eta-place">{fallback}</span>
+      )}
+    </p>
+  )
+})
+
+/**
+ * The lights tile, in the three states of the route cards (#44): a full count
+ * is a number, a partial one a lower bound that says data is missing,
+ * anything else "Unknown". Which state it is comes from formatSignalCount
+ * (core), so it is never 0 when unsure.
+ */
+function lightsTile(count: number | null, coverage: SignalCoverage): { word: string; hint: string | null } {
+  if (count === null || formatSignalCount(count, coverage) === 'Signals: unknown') return { word: 'Unknown', hint: null }
+  if (coverage === 'partial') return { word: `≥ ${count}`, hint: 'data missing' }
+  return { word: String(count), hint: null }
+}
+
+interface MoreProps {
+  lights: string
+  lightsHint: string | null
+  distance: string | null
+  muted: boolean
+  status: string
+  replaying: boolean
+  dev: LiveDevControls | null
+  extra: ReactNode
+  onMute: (muted: boolean) => void
+}
+
+/** What is behind More: lights, distance, the automatic switch, the voice, and the quiet status line. */
+const MoreSheet = memo(function MoreSheet({ lights, lightsHint, distance, muted, status, replaying, dev, extra, onMute }: MoreProps) {
+  return (
+    <div className="live-more" id="live-more">
+      <div className="live-tiles">
+        <div className="live-tile" data-tile="lights">
+          <span className="live-tile-label">Lights on route</span>
+          <span className="live-tile-word">
+            {lights}
+            {lightsHint !== null && <span className="live-tile-hint"> {lightsHint}</span>}
+          </span>
+        </div>
+        <div className="live-tile" data-tile="distance">
+          <span className="live-tile-label">Distance</span>
+          <span className="live-tile-word">{distance === null ? '—' : <Figure text={distance} />}</span>
+        </div>
+        <div className="live-tile" data-tile="auto-switch">
+          <span className="live-tile-label">Auto-switch</span>
+          <span className="live-tile-word">On</span>
+        </div>
+        <button
+          type="button"
+          className="live-tile live-voice"
+          data-tile="voice"
+          aria-pressed={muted}
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          onClick={() => onMute(!muted)}
+        >
+          <span className="live-tile-label">Voice</span>
+          <span className="live-tile-word">{muted ? 'Off' : 'On'}</span>
+          <span className="live-toggle" aria-hidden="true" />
+        </button>
+      </div>
+      <p className="live-status" role="status">
+        {status}
+        {replaying && ' · GPS replay (simulated position)'}
+      </p>
+      {dev !== null && replaying && (
+        <div className="live-dev" role="group" aria-label="Replay controls (development)">
+          {REPLAY_MULTIPLIERS.map((m) => (
+            <button key={m} type="button" aria-pressed={dev.multiplier === m} onClick={() => dev.setMultiplier(m)}>
+              {m}×
+            </button>
+          ))}
+          <button type="button" aria-pressed={dev.whatIfDelaySec > 0} onClick={() => dev.setWhatIfDelaySec(dev.whatIfDelaySec > 0 ? 0 : 600)}>
+            What-if +10 min{dev.whatIfDelaySec > 0 ? ' (on)' : ''}
+          </button>
+        </div>
+      )}
+      {extra !== null && extra !== undefined && <div className="live-extra">{extra}</div>}
+    </div>
+  )
+})
+
+/**
  * The full-screen view of a live drive, laid out for a phone held in a
- * mount: the next turn on top, the map in the middle (drawn by MapView,
- * which this component sits around), and at the bottom the arrival time, a
- * quiet status line and two large controls. Presentation only: every word
- * and number comes from core/live.ts (liveView) and the session state.
+ * mount, in the approved design (design/README.md, "The merged direction"):
+ * black glass on the map (drawn by MapView, which this component sits
+ * around), a turn card on top with the distance to the next maneuver as the
+ * hero, and a sheet at the bottom with one line (time left, arrival time)
+ * and two controls. Everything else is behind More. Presentation only: every
+ * word and number comes from core/live.ts (liveView) and the session state.
+ *
+ * The parts are memoised and take words, not the state: the once-a-second
+ * tick renders only the part whose words changed.
  */
 export function LiveDriveView({
   state,
@@ -113,11 +289,14 @@ export function LiveDriveView({
   speechSupported = true,
   replaying = false,
   dev = null,
+  extra = null,
+  initiallyOpen = false,
   onKeepPrevious,
   onMute,
   onEnd,
   onRestart,
 }: LiveDriveViewProps) {
+  const [open, setOpen] = useState(initiallyOpen)
   const { status } = state
   const turn = view.nextTurn
   const banner = state.switchBanner
@@ -173,35 +352,50 @@ export function LiveDriveView({
     )
   }
 
+  // The turn card, in words. With a maneuver ahead the hero is always its distance, however
+  // far (#45): over a street to turn onto, or "Continue on <road>" when the road carries on.
+  let card: TurnCardProps
+  if (turn !== null) {
+    const straight = turn.arrow === 'straight'
+    card = {
+      arrow: turn.arrow,
+      distance: formatDistance(turn.distanceM),
+      line: straight ? (turn.primaryText === '' ? 'Continue straight' : `Continue on ${turn.primaryText}`) : turn.primaryText,
+      plain: straight || turn.arrow === 'arrive',
+      spokenPrefix: straight ? null : ARROW_LABEL[turn.arrow],
+      secondary: turn.secondaryText,
+    }
+  } else if (status === 'driving' && !view.offRoute && view.remainingM !== null) {
+    // A route with no turns listed: straight on for what is left of it.
+    card = { arrow: 'straight', distance: formatDistance(view.remainingM), line: 'Continue straight', plain: true, spokenPrefix: null, secondary: null }
+  } else {
+    card = {
+      arrow: null,
+      distance: null,
+      line:
+        status === 'locating'
+          ? 'Finding your position…'
+          : status === 'planning'
+            ? 'Finding a route…'
+            : view.offRoute
+              ? 'Off the route'
+              : `To ${destinationLabel}`,
+      plain: true,
+      spokenPrefix: null,
+      secondary: null,
+    }
+  }
+
+  const known = view.arrivalAtMs !== null && view.remainingSec !== null
+  const lights = lightsTile(state.route?.signalCount ?? null, state.route?.signalCoverage ?? 'none')
+  const statusLine =
+    status === 'driving'
+      ? `${view.statusLine} · ${view.checking ? 'checking now' : view.checkedAgoSec === null ? 'not checked yet' : `checked ${view.checkedAgoSec} s ago`} · ${view.requestsUsed} of ${view.maxRequests} requests`
+      : view.statusLine
+
   return (
     <>
-      <section className="live-top" aria-label="Next turn" aria-live="polite">
-        {turn !== null ? (
-          <>
-            <TurnArrow kind={turn.arrow} />
-            <div className="live-turn-text">
-              <span className="live-turn-distance">{formatDistance(turn.distanceM)}</span>
-              <span className="live-turn-road">
-                <span className="visually-hidden">{ARROW_LABEL[turn.arrow]}: </span>
-                {turn.primaryText}
-              </span>
-              {turn.secondaryText !== null && <span className="live-turn-secondary">{turn.secondaryText}</span>}
-            </div>
-          </>
-        ) : (
-          <div className="live-turn-text">
-            <span className="live-turn-road">
-              {status === 'locating'
-                ? 'Finding your position…'
-                : status === 'planning'
-                  ? 'Finding a route…'
-                  : view.offRoute
-                    ? 'Off the route'
-                    : `To ${destinationLabel}`}
-            </span>
-          </div>
-        )}
-      </section>
+      <TurnCard {...card} />
 
       <section className="live-bottom" aria-label="Live drive">
         {banner !== null && (
@@ -220,44 +414,27 @@ export function LiveDriveView({
           </p>
         ))}
         {!speechSupported && <p className="live-warning">This browser cannot speak: watch the screen for route changes.</p>}
-        <p className="live-eta">
-          {view.arrivalAtMs !== null && view.remainingSec !== null && view.remainingM !== null ? (
-            <>
-              <strong>{clockTime(view.arrivalAtMs)}</strong>
-              <span>{formatDuration(view.remainingSec)}</span>
-              <span>{formatDistance(view.remainingM)}</span>
-            </>
-          ) : (
-            <span>{destinationLabel}</span>
-          )}
-        </p>
-        <p className="live-status" role="status">
-          {view.statusLine}
-          {status === 'driving' && (
-            <>
-              {' · '}
-              {view.checking ? 'checking now' : view.checkedAgoSec === null ? 'not checked yet' : `checked ${view.checkedAgoSec} s ago`}
-              {' · '}
-              {view.requestsUsed} of {view.maxRequests} requests
-            </>
-          )}
-          {replaying && ' · GPS replay (simulated position)'}
-        </p>
-        {dev !== null && replaying && (
-          <div className="live-dev" role="group" aria-label="Replay controls (development)">
-            {REPLAY_MULTIPLIERS.map((m) => (
-              <button key={m} type="button" aria-pressed={dev.multiplier === m} onClick={() => dev.setMultiplier(m)}>
-                {m}×
-              </button>
-            ))}
-            <button type="button" aria-pressed={dev.whatIfDelaySec > 0} onClick={() => dev.setWhatIfDelaySec(dev.whatIfDelaySec > 0 ? 0 : 600)}>
-              What-if +10 min{dev.whatIfDelaySec > 0 ? ' (on)' : ''}
-            </button>
-          </div>
+        <EtaLine
+          left={known ? formatDuration(view.remainingSec!) : null}
+          arrive={known ? clockTime(view.arrivalAtMs!) : null}
+          fallback={destinationLabel}
+        />
+        {open && (
+          <MoreSheet
+            lights={lights.word}
+            lightsHint={lights.hint}
+            distance={view.remainingM === null ? null : formatDistance(view.remainingM)}
+            muted={state.muted}
+            status={statusLine}
+            replaying={replaying}
+            dev={dev}
+            extra={extra}
+            onMute={onMute}
+          />
         )}
         <div className="live-controls">
-          <button type="button" className="live-button" aria-pressed={state.muted} onClick={() => onMute(!state.muted)}>
-            {state.muted ? 'Unmute' : 'Mute'}
+          <button type="button" className="live-button live-more-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            {open ? 'Less' : 'More'}
           </button>
           <button type="button" className="live-button live-end" onClick={onEnd}>
             End
