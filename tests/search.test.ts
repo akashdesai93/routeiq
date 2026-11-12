@@ -356,8 +356,10 @@ describe('fetchSuggestions and fetchPlace', () => {
       failureOf(await fetchSuggestions({ ...where, fetchImpl })),
       failureOf(await fetchPlace({ ...picked, fetchImpl })),
     ]) {
-      expect(failure.kind).toBe('network')
-      expect(failure.message).toContain('internet connection')
+      expect(failure).toMatchObject({
+        kind: 'network',
+        message: 'Could not reach Mapbox search. Check your internet connection, or drag a pin instead.',
+      })
       expect(failure.message).not.toContain(TOKEN)
       expect(failure.message).not.toContain(where.query)
     }
@@ -371,7 +373,7 @@ describe('fetchSuggestions and fetchPlace', () => {
     const controller = new AbortController()
     const pending = fetchSuggestions({ ...where, signal: controller.signal, fetchImpl: hanging })
     controller.abort()
-    expect(failureOf(await pending).kind).toBe('aborted')
+    expect(failureOf(await pending)).toMatchObject({ kind: 'aborted', message: 'Search cancelled.' })
 
     const late = new AbortController()
     const answered = ((): Promise<Response> => {
