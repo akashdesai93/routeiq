@@ -11,7 +11,7 @@ import { JAM_ON_A_FROM_SECOND_CHECK, JAM_ONLY_THE_EAST_LOOP_MISSES } from './wor
 // The jam on the direct route starts at the second check; the engine sees a
 // loop round it win that check (pending) and the next (confirmed).
 
-const KEEPING = 'Keeping the previous route.'
+const KEEPING = 'Staying on your route.'
 
 test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
 

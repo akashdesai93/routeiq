@@ -635,7 +635,7 @@ public enum Live {
     public enum Spoken {
         public static let started = "RouteIQ started"
         public static let offRoute = "You are off the route. Finding a new one."
-        public static let keptPrevious = "Keeping the previous route."
+        public static let keptPrevious = "Staying on your route."
     }
 
     /// What the driver is told for each kind (the TS POSITION_ERROR_MESSAGES). The first three keep trying or need the driver; the text says which.
