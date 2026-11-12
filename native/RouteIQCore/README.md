@@ -17,7 +17,11 @@ same JSON fixtures straight from `tests/fixtures`.
 | `Signals.swift` | `signals.ts` | `signals.test.ts` |
 | `Rank.swift` | `rank.ts` | `rank.test.ts` |
 | `Select.swift` | `select.ts` | `signals.test.ts` (sameRouteGeometry, resolveSelectedId) |
-| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` (all but the "side streets found by probes" describe, which needs `probe.ts`) |
+| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` |
+| `Probe.swift` | `probe.ts` | `probe.test.ts`, `probeRoutes.test.ts` |
+| `Tracking.swift` | `tracking.ts` | `tracking.test.ts` |
+| `SpeechQueue.swift` | `speechQueue.ts` | `device.test.ts` (speech queue rules) |
+| `Handoff.swift` | `handoff.ts` | `handoff.test.ts` |
 | `Guidance.swift` | `guidance.ts` | `guidance.test.ts` |
 | `Contract.swift` | `contract.ts` (`CORE_CONTRACT_VERSION`) | checked against `docs/contracts/core-contract.json` |
 | `Format.swift` | `format.ts`, `facts.ts` | `routeFacts.test.ts`, `signals.test.ts` (formatSignalCount) |
@@ -44,14 +48,14 @@ What of version 2 is ported (#33, in stages):
   `RerouteState` (with `declined`), `RerouteObservation` (with `baseline` and `drivenSinceM`),
   `RerouteDecision` (with `current`) and every `RerouteCode`, including `route-unconfirmed`,
   `probe-unconfirmed` and `driver-declined`; `declineRoute`, `baselineProbe`, `MatchMeter`.
+- **Types the live drive uses:** `PositionFix`, `TrackingOptions`, `TrackingState`, `SpokenLine`,
+  `CheckProbeMemory`, `DriveProbeBudget` (stage B).
 
 When the version changes, compare `docs/contracts/core-contract.json` (`declarations`, one line
 per type) with the Swift types. The `history` there lists every version with its hash.
 
 Not ported yet:
 
-- `speechQueue.ts`, `tracking.ts`, `probe.ts`, `handoff.ts` (stage B of #33), and the probe
-  describe of `reroute.test.ts`, which needs `probe.ts`.
 - `live.ts`, the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`): stage C.
 - `places.ts` and `search.ts`: saved places (the `PlaceBook` contract) and search sessions,
   needed when the app gets a Plan screen.
