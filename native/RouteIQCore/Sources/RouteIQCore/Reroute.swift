@@ -764,11 +764,22 @@ public enum Reroute {
         options: RerouteOptions = .default,
         meter: MatchMeter? = nil
     ) -> RouteCandidate? {
+        findCurrentRouteIndex(route, positionAlongM: positionAlongM, candidates: candidates, options: options, meter: meter).map { candidates[$0] }
+    }
+
+    /// findCurrentRoute as a position in `candidates`, which stands in for the TypeScript's object identity.
+    static func findCurrentRouteIndex(
+        _ route: [LngLat],
+        positionAlongM: Double,
+        candidates: [RouteCandidate],
+        options: RerouteOptions = .default,
+        meter: MatchMeter? = nil
+    ) -> Int? {
         let opts = options.resolved()
         let ahead = aheadOf(route, positionAlongM, opts.offRouteM)
         guard let origin = ahead.first else { return nil }
         let project = Geo.localProjector(origin)
-        return closestToPath(ahead.map(project), candidates, project, opts, meter).map { candidates[$0] }
+        return closestToPath(ahead.map(project), candidates, project, opts, meter)
     }
 
     /// When a poll's fresh routes do not include the rest of the route being
