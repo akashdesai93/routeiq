@@ -1,0 +1,83 @@
+name: main is red
+
+# Keeps one issue, "main is red" (label p1), in step with the Gate on main (#140): opened, or
+# commented on, when the newest finished Gate run on main failed or was cancelled, and closed
+# when it is green again. Without it a red main is seen only by whoever opens the Actions tab.
+#
+# It looks at the newest finished run (by creation), not at the run that just finished, so
+# runs that finish out of order cannot reopen the issue after a newer green run. It needs no
+# checkout and no secret: the workflow's own token, with issues: write and actions: read.
+#
+# workflow_run fires only for this file as it is on main. workflow_dispatch is for a dry run
+# by hand (DRY_RUN prints what it would do and changes nothing).
+on:
+  workflow_run:
+    workflows: [Gate]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what it would do, change nothing
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: main-red
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Only Gate runs started by a push to main (not a pull request from a branch named main).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # lists the Gate runs on main
+      issues: write # opens, comments on and closes the "main is red" issue
+    steps:
+      - name: Open, update or close "main is red"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: main
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          title='main is red'
+          act() { if [ "$DRY_RUN" = true ]; then echo "dry run: $*"; else "$@"; fi; }
+
+          # Newest finished Gate run on the branch, started by a push.
+          run=$(gh api "repos/$REPO/actions/workflows/gate.yml/runs?branch=$BRANCH&event=push&status=completed&per_page=1" \
+                  --jq '.workflow_runs[0] // empty | [.id, .conclusion, .head_sha[:7], .html_url, (.head_commit.message | split("\n")[0])] | @tsv')
+          if [ -z "$run" ]; then echo "no finished Gate run on $BRANCH"; exit 0; fi
+          IFS=$'\t' read -r id conclusion sha url subject <<<"$run"
+          echo "newest finished Gate run on $BRANCH: $id $conclusion at $sha ($subject)"
+
+          issue=$(gh api "repos/$REPO/issues?state=open&labels=p1&per_page=100" \
+                    --jq "[.[] | select(.pull_request == null and .title == \"$title\")][0].number // empty")
+
+          case "$conclusion" in
+            success)
+              if [ -n "$issue" ]; then
+                act gh api -X POST "repos/$REPO/issues/$issue/comments" -f body="Green again: [Gate run $id]($url) passed at \`$sha\` ($subject). Closing."
+                act gh api -X PATCH "repos/$REPO/issues/$issue" -f state=closed -f state_reason=completed --jq .html_url
+              else
+                echo "main is green and no issue is open"
+              fi ;;
+            failure|cancelled|timed_out|startup_failure)
+              body="The Gate on \`$BRANCH\` is **$conclusion** at \`$sha\` ($subject): $url"$'\n\n'"Find the failing job in that run and fix it in a pull request. This issue closes by itself when the Gate on \`$BRANCH\` is green again (\`.github/workflows/main-red.yml\`)."
+              if [ -n "$issue" ]; then
+                # One comment per run: a rerun of the same run does not repeat it.
+                if gh api "repos/$REPO/issues/$issue/comments?per_page=100" --jq '.[].body' | grep -qF "$url"; then
+                  echo "issue #$issue already names run $id"
+                else
+                  act gh api -X POST "repos/$REPO/issues/$issue/comments" -f body="$body" --jq .html_url
+                fi
+              else
+                act gh api -X POST "repos/$REPO/issues" -f title="$title" -f body="$body" -f 'labels[]=p1' --jq .html_url
+              fi ;;
+            *)
+              echo "conclusion $conclusion: nothing to do" ;;
+          esac

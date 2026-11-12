@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildOverpassQuery,
@@ -29,11 +27,9 @@ import {
 } from '../src/providers/osm/tileSource.ts'
 import { memoryStore } from '../src/storage/kv.ts'
 import { fakeClock, fakeOverpass, overpassBody, settle } from './helpers/overpass.ts'
+import { fixture } from './helpers/fixtures.ts'
 
 // Hand-written bodies shaped like Overpass API JSON answers. No test here touches the network.
-function fixture(name: string): unknown {
-  return JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8'))
-}
 const TILE_BODY = fixture('overpass.tile.json')
 const TIMEOUT_BODY = fixture('overpass.timeout.json')
 

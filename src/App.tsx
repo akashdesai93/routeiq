@@ -13,6 +13,7 @@ import {
 import { tokenStatus, type TokenStatus } from './config.ts'
 import { isNativeShell } from './device/native/index.ts'
 import { DrivePanel } from './DrivePanel.tsx'
+import { FrozenWhile } from './FrozenWhile.tsx'
 import { DrivesPanel } from './DrivesPanel.tsx'
 import { OtherAppEtaField } from './OtherAppEtaField.tsx'
 import { cruiseSpeedMps } from './drive/simulation.ts'
@@ -265,6 +266,8 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
           {drivesOpen && !live.active && (
             <DrivesPanel log={drives.log} storageNote={drives.storageNote} onClear={drives.clear} onClose={() => setDrivesOpen(false)} />
           )}
+          {/* Hidden during a live drive (live.css): not rendered again until the drive ends (#95). */}
+          <FrozenWhile frozen={live.active}>
           <div className="side">
             <PlanPanel
               pins={pins}
@@ -305,6 +308,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
               <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />
             </RoutePanel>
           </div>
+          </FrozenWhile>
         </div>
       ) : (
         <main className="notice" role="alert">
