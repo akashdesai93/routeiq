@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 4** (Nov 12, 2026: version 3 plus the private drive log, #107). The Swift port does not match it yet;
+**Current version: 5** (Nov 12, 2026: version 4 plus the private drive log, #107). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -108,24 +108,29 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 4 | by definition |
+| Web app (`src/`) | 5 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 4 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
-- **4** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
-  none); the private drive log `DriveLog` (`DriveRecord`, `LoggedSwitch`, `LoggedSignals`, `DriveOutcome`)
-  joins the contract as data kept on the device.
-- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
-  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
-  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
-  its length). For the port: see the Swift-port note on PR #109.
+- **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
+  `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
+  `probe-unconfirmed`).
 - **2** (Nov 12, 2026, #86): the iPhone shell's plugin only; the Swift port is not affected.
   `NativeFix.simulated` (true on a test drive's made-up position), the new
   `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
   `startSimulatedRoute`, `stopSimulatedRoute` and `share`. The bridge schema gains
   `simulatedRouteRequest`, `simulatedStep` and `shareRequest`.
-- **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
-  `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
-  `probe-unconfirmed`).
+- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.
+- **4** (Nov 12, 2026, #29, #30, #71): the live drive's robustness fixes.
+  `LiveOptions.requestTimeoutSec` (a request not answered in time is a failed answer),
+  `LiveState.pickedAtMs` and the Start event's `routeFetchedAtMs` (a drive started on the
+  plan's route counts the plan's answer as its last check). No field removed or renamed; the
+  Swift port is not affected beyond these live-drive shapes.
+- **5** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
+  none); the private drive log `DriveLog` (`DriveRecord`, `LoggedSwitch`, `LoggedSignals`, `DriveOutcome`)
+  joins the contract as data kept on the device.

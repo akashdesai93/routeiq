@@ -118,6 +118,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
     token,
     destination: pins.destination.position,
     route: selectedRoute,
+    routeFetchedAtMs: routing.fetchedAtMs,
     rerouteOptions: sim.rerouteOptions,
     settings: sim.settings,
     whatIfDelaySec: sim.whatIfDelaySec,

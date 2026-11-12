@@ -11,6 +11,7 @@ import {
   type RerouteOptions,
   type RouteCandidate,
 } from './core/index.ts'
+import { sessionClock, sessionNow } from './device/clock.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
 import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
@@ -44,6 +45,8 @@ export interface LiveDriveConfig {
   readonly destination: LngLat
   /** The route picked on the plan screen: Start drive drives it (a side-street route too). Read at Start only. */
   readonly route: RouteCandidate | null
+  /** When Mapbox's answer with that route's travel times came, on the session clock (device/clock.ts). Read at Start only. */
+  readonly routeFetchedAtMs?: number | null
   /** The reroute thresholds, shared with the simulated drive's settings box. */
   readonly rerouteOptions: RerouteOptions
   /** The poll interval and the request budget, shared with the simulated drive's. */
@@ -89,6 +92,8 @@ export function replayLiveOptions(multiplier: number): Partial<LiveOptions> {
     // What is there to be read or pressed stays up as long as it would in real time.
     switchBannerSec: d.switchBannerSec * multiplier,
     pausedNoteSec: d.pausedNoteSec * multiplier,
+    // A real request gets as long in real time as on the road before it is given up.
+    requestTimeoutSec: d.requestTimeoutSec * multiplier,
   }
 }
 
@@ -126,7 +131,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [])
 
   const start = useCallback(() => {
-    const { token, destination, route, replay, testDrive = null } = latest.current
+    const { token, destination, route, replay, testDrive = null, routeFetchedAtMs = null } = latest.current
     if (token === null) return
     // "Try again" after a failure ends the drive that was under way: the log keeps it as ended.
     const previous = runnerRef.current
@@ -143,7 +148,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const speaker = (speakerRef.current ??= native?.speaker ?? createSpeaker())
     const replaySource = replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
     const source: PositionSource = replaySource ?? native?.source ?? geolocationSource()
-    const now = replaySource === null ? Date.now : replaySource.now
+    // The session clock never steps back with the wall clock (#30); the GPS sources stamp with it too.
+    const now = replaySource === null ? sessionNow : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
     // A development replay and the shell's test drive are made-up drives: they are not logged.
@@ -210,7 +216,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     setReplaying(replaySource !== null)
     setSimulated(replaySource === null && native !== null && native.simulated)
     setSpeechSupported(speaker.supported)
-    runner.start(destination, route)
+    // A replay runs on its own clock: the plan's time means nothing on it.
+    runner.start(destination, route, replaySource === null ? routeFetchedAtMs : null)
   }, [optionsOf])
 
   const end = useCallback(() => {
@@ -239,16 +246,16 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
 
   const multiplier = replaying ? (config.replay?.multiplier ?? null) : null
   const { settings, rerouteOptions } = config
-  const view = useMemo(
-    () =>
-      liveView(state, nowMs, {
-        ...(multiplier === null ? {} : replayLiveOptions(multiplier)),
-        pollIntervalSec: settings.pollIntervalSec,
-        maxRequests: settings.maxRequests,
-        reroute: rerouteOptions,
-      }),
-    [state, nowMs, multiplier, settings, rerouteOptions],
-  )
+  const view = useMemo(() => {
+    const v = liveView(state, nowMs, {
+      ...(multiplier === null ? {} : replayLiveOptions(multiplier)),
+      pollIntervalSec: settings.pollIntervalSec,
+      maxRequests: settings.maxRequests,
+      reroute: rerouteOptions,
+    })
+    // The arrival time is shown as a time of day: on the wall clock, whatever the session clock absorbed.
+    return replaying || v.arrivalAtMs === null ? v : { ...v, arrivalAtMs: sessionClock.toWall(v.arrivalAtMs) }
+  }, [state, nowMs, multiplier, settings, rerouteOptions, replaying])
 
   return {
     state,

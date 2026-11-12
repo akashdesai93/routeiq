@@ -38,6 +38,7 @@ npm run lint                   # oxlint
 npx vitest run                 # all unit tests
 npm run build                  # typecheck + vite build
 npm run e2e                    # end-to-end scenarios (headless Chromium, offline)
+npm run design:shots           # every screen at iPhone sizes into design-shots/ (skills: ux-review, design-tokens)
 npx playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm run e2e:build)
 (cd native/RouteIQCore && swift build --build-tests && swift test)   # native sessions only
 node --test native/scripts/pack-signal-bundle.test.mjs              # native: signal bundle packer
@@ -120,6 +121,22 @@ No "green for the sake of green". A test exists to catch a real failure a driver
 - **Coverage counts are not a goal.** Ten tests that pin real rules beat fifty that restate
   the implementation.
 - **Reviewers check this.** A PR whose tests wouldn't catch its own bug gets CHANGES.
+
+## Review findings become checks (owner rule, 2026-11-12)
+
+Copilot reviews every PR to `main` (drafts too, on every push) and CodeQL runs on every PR.
+Read both before calling a PR done, and triage each comment or alert:
+
+- **True issue:** fix it, and in the same PR add a guard so that class of issue cannot come
+  back: a test that fails without the fix (say which mutation you tried), a lint rule, or a
+  CI step. Only when nothing automated fits, add a line to the reviewer checklist
+  (`.claude/agents/route-logic-reviewer.md`).
+- **Not an issue:** reply on the thread in one line saying why, and resolve it.
+- **The same kind of finding twice:** a checklist line is no longer enough. Add the
+  automated guard (a lint rule or a small CI check) and show it catching a planted example.
+- In the cloud the code-scanning alerts API is not open to the session token. Read CodeQL
+  through the PR's review comments (`gh api $R/pulls/N/comments`) and the `CodeQL` check
+  run's annotations (`gh api $R/check-runs/<id>/annotations`).
 
 ## Task list and the autonomous loop
 

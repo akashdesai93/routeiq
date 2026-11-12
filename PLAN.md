@@ -123,6 +123,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    `src/live/runner.ts` runs the machine with whatever it is handed. A development
    GPS replay (`src/drive/replay.ts`) drives the same path with noise, dropouts, a
    stop, a tunnel and a wrong turn.
+   Robustness (Nov 12, 2026): a request not answered within 30 s
+   (`requestTimeoutSec`) is a failed answer, so one hung connection no longer stops
+   every later check (#29); fixes and the session share one clock that never steps
+   back with the wall clock (`src/device/clock.ts`, #30); a drive started on the
+   plan's route counts the plan's answer as its last check, so "checked N s ago" is
+   true from the start (#71). Open for later: the clock follows a forward step of the
+   wall clock on purpose (time asleep must count), so a forward correction of N s
+   still shortens the cooldown and no-return by N s, and can time out a check in flight.
    The limit: a web page only runs in front with the screen on. Open: none of it has
    been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
    audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Settled
