@@ -113,7 +113,10 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   const start = useCallback(() => {
     const { token, destination, route, replay } = latest.current
     if (token === null) return
-    runnerRef.current?.runner.dispose()
+    // "Try again" after a failure ends the drive that was under way: the log keeps it as ended.
+    const previous = runnerRef.current
+    previous?.observer?.end(previous.runner.state(), previous.now())
+    previous?.runner.dispose()
     // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
     // and go on with the phone locked (src/device/native). In a browser: the browser's own.
     const native = nativeDevice()

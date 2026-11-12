@@ -10,8 +10,8 @@ import type { LngLat, RouteSource, SignalCoverage } from './types.ts'
  *
  * Nothing in a record says where the drive was. Its two ends become one
  * coarse corridor key: each end rounded to a grid of about a kilometre, the
- * pair hashed. No coordinate, address or place name is kept, and no route
- * geometry (only its id, itself a hash).
+ * pair hashed. No coordinate, address or place name is kept, and nothing
+ * of the route's geometry (not even its id, a hash of it).
  *
  * The recorder (observeDrive, endDrive) is fed the live drive's state on
  * every change. On a 1 s tick it compares a few references and answers the
@@ -60,9 +60,9 @@ export interface LoggedSwitch {
   /**
    * The saving actually made: the time the route left was predicted to take
    * from the switch (new route's time plus the claimed saving), minus the time
-   * the rest of the drive really took. Null unless the switch was kept, a
-   * saving was claimed and the drive arrived. A prediction, not a re-run of
-   * the road not taken.
+   * the rest of the drive really took. Null unless it is the last switch
+   * kept, a saving was claimed and the drive arrived. A prediction, not a
+   * re-run of the road not taken.
    */
   readonly realisedSavingSec: number | null
   /** The source of the route switched to. */
@@ -86,8 +86,10 @@ export interface DriveRecord {
   readonly endedAtMs: number | null
   /** The coarse corridor key (see corridorKey). Never a position. */
   readonly corridor: string
-  /** The id of the first route (a geometry hash) and where it came from. */
-  readonly routeId: string
+  /**
+   * Where the first route came from. Its id is not kept: it is a hash of the
+   * exact geometry, and a guessed route could be checked against it.
+   */
   readonly routeSource: RouteSource
   /** The first route's traffic-aware time when the drive began. */
   readonly predictedSec: number
@@ -172,7 +174,6 @@ export const RECORDER_IDLE: DriveRecorder = { draft: null, done: false, seen: { 
 
 /** What the recorder needs from outside the live state, at the start of a drive. Used in memory only. */
 export interface DriveContext {
-  readonly destination: LngLat
   /** Another app's ETA noted at departure, in seconds. Null for none. */
   readonly otherAppSec: number | null
   /** The local hour (0–23) at `ms`. Passed in, so this module reads no clock and no time zone. */
@@ -193,14 +194,14 @@ function signalsOf(count: number | null, coverage: SignalCoverage): LoggedSignal
 function begin(state: LiveState, nowMs: number, context: DriveContext, options: Partial<DriveLogOptions>): DriveRecord | null {
   const route = state.route
   const fix = state.lastFix
-  if (route === null || fix === null) return null
+  const destination = state.destination
+  if (route === null || fix === null || destination === null) return null
   return {
     id: `d${nowMs}`,
     startedAtMs: nowMs,
     startHour: context.hourOf(nowMs),
     endedAtMs: null,
-    corridor: corridorKey([fix.lng, fix.lat], context.destination, options),
-    routeId: route.id,
+    corridor: corridorKey([fix.lng, fix.lat], destination, options),
     routeSource: route.source ?? 'provider',
     predictedSec: route.durationSec,
     actualSec: 0,
@@ -216,10 +217,16 @@ function begin(state: LiveState, nowMs: number, context: DriveContext, options: 
 
 const elapsedSec = (draft: DriveRecord, nowMs: number) => Math.max(0, (nowMs - draft.startedAtMs) / 1000)
 
-/** The switches with their realised saving, once the drive has arrived at `endMs`. */
+/**
+ * The switches with their realised saving, once the drive has arrived at
+ * `endMs`. Only the last kept switch gets one: its window (from the switch
+ * to arrival) holds no later switch. An earlier switch's window would take
+ * in the gains of the ones after it, so its realised saving stays unknown.
+ */
 function realise(draft: DriveRecord, endMs: number): readonly LoggedSwitch[] {
-  return draft.switches.map((s) => {
-    if (!s.accepted || s.claimedSavingSec === null || s.newRouteSec === null) return s
+  const last = draft.switches.findLastIndex((s) => s.accepted)
+  return draft.switches.map((s, i) => {
+    if (i !== last || s.claimedSavingSec === null || s.newRouteSec === null) return s
     const tookSec = Math.max(0, (endMs - draft.startedAtMs) / 1000 - s.atSec)
     return { ...s, realisedSavingSec: s.newRouteSec + s.claimedSavingSec - tookSec }
   })
@@ -242,7 +249,7 @@ function finish(draft: DriveRecord, state: LiveState, nowMs: number, outcome: 'a
  * recorder comes back, with nothing to write.
  *
  * - The drive beginning on its first route starts a record in memory: its
- *   corridor (from the first fix and the destination), the route's time then
+ *   corridor (from the first fix and the drive's own destination), the route's time then
  *   as the prediction, its length and lights. Nothing is written yet.
  * - A switch made, or turned down, is added and the record is written (as
  *   'unfinished'), so a drive the app does not see the end of is still kept.
@@ -353,7 +360,7 @@ function parseRecord(raw: unknown): DriveRecord | null {
   const r = raw
   if (typeof r.id !== 'string' || !/^d\d+$/.test(r.id)) return null
   if (typeof r.corridor !== 'string' || !/^c[0-9a-f]{12}$/.test(r.corridor)) return null
-  if (typeof r.routeId !== 'string' || !/^[\w-]{1,64}$/.test(r.routeId) || !isSource(r.routeSource)) return null
+  if (!isSource(r.routeSource)) return null
   if (!isNum(r.startedAtMs) || !isNumOrNull(r.endedAtMs) || !isNum(r.startHour) || r.startHour < 0 || r.startHour > 23) return null
   if (!isNum(r.predictedSec) || !isNum(r.actualSec) || !isNum(r.distanceM) || !isNumOrNull(r.otherAppSec)) return null
   if (!isNum(r.offRouteEvents) || !isNum(r.requests)) return null
@@ -373,7 +380,6 @@ function parseRecord(raw: unknown): DriveRecord | null {
     startHour: r.startHour,
     endedAtMs: r.endedAtMs,
     corridor: r.corridor,
-    routeId: r.routeId,
     routeSource: r.routeSource,
     predictedSec: r.predictedSec,
     actualSec: r.actualSec,

@@ -58,13 +58,14 @@ function route(id: string, durationSec: number, extra: Partial<RouteCandidate> =
 
 const fixAt = ([lng, lat]: LngLat, timeMs: number) => ({ lng, lat, accuracyM: 5, speedMps: 20, headingDeg: 180, timeMs })
 
-const context = (otherAppSec: number | null = null) => (): DriveContext => ({ destination: INDIAN_LAND, otherAppSec, hourOf: () => 8 })
+const context = (otherAppSec: number | null = null) => (): DriveContext => ({ otherAppSec, hourOf: () => 8 })
 
 /** A drive that has just begun on `r`, from Uptown. */
 function driving(r: RouteCandidate, extra: Partial<LiveState> = {}): LiveState {
   return {
     ...LIVE_IDLE,
     status: 'driving',
+    destination: INDIAN_LAND,
     startedAtMs: T0 - 3000,
     route: r,
     lastFix: fixAt(UPTOWN, T0),
@@ -122,7 +123,6 @@ describe('the recorder', () => {
       startedAtMs: T0,
       startHour: 8,
       corridor: corridorKey(UPTOWN, INDIAN_LAND),
-      routeId: 'route-aaaa',
       routeSource: 'provider',
       predictedSec: 1170,
       distanceM: 25_000,
@@ -200,6 +200,25 @@ describe('the recorder', () => {
     expect(observeDrive(step.recorder, arrived, T0 + 980_000, context()).write).toBeNull()
   })
 
+  it('gives a realised saving to the last kept switch only: an earlier one would be credited with the later gains', () => {
+    const a = route('route-aaaa', 1200)
+    let rec = observeDrive(RECORDER_IDLE, driving(a), T0, context()).recorder
+    const one = sw(T0 + 300_000, 60)
+    const two = sw(T0 + 600_000, 60)
+    rec = observeDrive(rec, driving(route('route-bbbb', 840), { switches: [one] }), T0 + 300_000, context()).recorder
+    rec = observeDrive(rec, driving(route('route-cccc', 480), { switches: [one, two] }), T0 + 600_000, context()).recorder
+    const arrived = { ...driving(route('route-cccc', 480)), status: 'arrived' as const, switches: [one, two] }
+    const step = observeDrive(rec, arrived, T0 + 1_080_000, context())
+    // The second: 8 + 1 minutes predicted on the route it left, 8 minutes taken.
+    expect(step.write!.switches.map((s) => s.realisedSavingSec)).toEqual([null, 60])
+  })
+
+  it('takes the corridor from the drive\'s own destination, not from anything passed in', () => {
+    const elsewhere: LngLat = [-80.7, 35.1]
+    const draft = observeDrive(RECORDER_IDLE, driving(route('route-aaaa', 1170), { destination: elsewhere }), T0, context()).recorder.draft!
+    expect(draft.corridor).toBe(corridorKey(UPTOWN, elsewhere))
+  })
+
   it('leaves the realised saving unknown for a closure, an off-route route and a drive ended early', () => {
     const a = route('route-aaaa', 1200)
     let rec = observeDrive(RECORDER_IDLE, driving(a), T0, context()).recorder
@@ -222,7 +241,6 @@ function record(id: number, extra: Partial<DriveRecord> = {}): DriveRecord {
     startHour: 8,
     endedAtMs: id + 1_000_000,
     corridor: 'c0123456789ab',
-    routeId: 'route-aaaa',
     routeSource: 'provider',
     predictedSec: 1200,
     actualSec: 1260,
@@ -278,6 +296,8 @@ describe('the log', () => {
     expect(text).not.toMatch(COORDINATE)
     expect(text).not.toContain(String(UPTOWN[0]).slice(0, 6))
     expect(text).not.toContain('geometry')
+    // Not even the route's id: it is a hash of the exact geometry.
+    expect(text).not.toContain('route-')
     expect(driveLogCsv(loadDriveLog(store))).not.toMatch(COORDINATE)
   })
 })

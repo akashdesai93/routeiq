@@ -291,7 +291,9 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     behind a setting (never loosening the reroute thresholds), #115;
     editing the other app's ETA after the drive; naming corridors; a drive the app is
     closed during without a switch is not kept (nothing is written before the first
-    switch or the end).
+    switch or the end); a drive that arrives on its first fix (started at the
+    destination) is not logged; the realised saving is measured for the last kept
+    switch only.
 
 ## Native iPhone + CarPlay (later)
 

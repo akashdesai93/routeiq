@@ -1197,18 +1197,20 @@ at the start against what the drive really took. Rules: `src/core/driveLog.ts`; 
 `src/storage/driveLog.ts`; screen: `src/DrivesPanel.tsx`.
 
 - **What a drive records:** when it began (the moment it set off on its first route) and
-  ended; a coarse **corridor key** for its two ends (below); the first route's id (a hash
-  of its geometry) and source (`provider` for Mapbox, `probe` for a side street); the
+  ended; a coarse **corridor key** for its two ends (below); the first route's source
+  (`provider` for Mapbox, `probe` for a side street; not its id, which is a hash of the
+  exact geometry and could confirm a guessed route); the
   first route's traffic-aware time then (the prediction), its length and its lights
   (unknown stays unknown, a partial count is a lower bound); the actual time; each switch
   with the saving the engine claimed and whether it was kept or turned down with "Keep
   previous route"; how often it said "off the route"; the route requests used; and the
   other app's ETA if one was noted.
-- **Saving actually made** for a kept switch: the time the route left was predicted to
+- **Saving actually made**, for the last kept switch of a drive: the time the route left was predicted to
   take from there (the new route's time plus the claimed saving) minus the time the rest
   of the drive really took. It is measured against a prediction, not against the road not
-  taken, and is unknown for a closure, a new route after leaving the route, and a drive
-  that did not arrive.
+  taken, and is unknown for an earlier switch (its window would take in the gains of the
+  later ones), a closure, a new route after leaving the route, and a drive that did not
+  arrive.
 - **Another app's ETA.** Under Start drive, "Other app's ETA (minutes)" takes what Google
   Maps or Waze showed for the same trip at departure ("19", "19 min" or "1:05"), for a
   side-by-side test. Optional; it is read when the drive sets off and kept with it only.
@@ -1322,7 +1324,8 @@ RouteIQ; a destination picked from search is kept in the recent list (below).
 **The drive log** (Drives screen) lives only on the device, in localStorage under
 `routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
 holds times, durations, distances, light counts, switch savings, request counts and, for
-each drive, a corridor key: the drive's first position and its destination, each rounded
+each drive, the route's source (Mapbox or side street, never the route itself or its
+id) and a corridor key: the drive's first position and its destination, each rounded
 to about a kilometre and hashed together, so a record holds no coordinate, address or
 place name. The rounding is what protects you; the hash only makes the key short. Someone
 holding the log and guessing a pair of 1 km squares could confirm the guess, so the log

@@ -9,7 +9,6 @@ import {
   type DriveRecord,
   type DriveRecorder,
   type LiveState,
-  type LngLat,
   type RecorderStep,
 } from './core/index.ts'
 import type { TextStore } from './storage/local.ts'
@@ -42,10 +41,10 @@ const localHour = (ms: number) => new Date(ms).getHours()
 /**
  * The private drive log as React state: read from the device once, written
  * on a switch and at the end of a drive (the rules are in core/driveLog.ts).
- * `trip` is read when the drive begins on its first route: the destination
- * (for the corridor key, in memory only) and the other app's ETA, if noted.
+ * `trip` is read when the drive begins on its first route: the other app's
+ * ETA, if noted. The corridor comes from the drive's own state, in memory.
  */
-export function useDriveLog(store: TextStore, trip: () => { destination: LngLat; otherAppSec: number | null }): DriveLogState {
+export function useDriveLog(store: TextStore, trip: () => { otherAppSec: number | null }): DriveLogState {
   const [log, setLog] = useState<DriveLog>(() => loadDriveLog(store))
   const [stored, setStored] = useState(true)
   const latest = useRef(log)

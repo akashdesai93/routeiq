@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "hash": "c3f14673fc04eeef4df27e3be7d597ce9c36c54a2c20cca13c5c47da04ef16f0",
+  "hash": "a999f2176817cabf955521c7996d51683fa3c837414f76a21356debeb3b865b6",
   "history": [
     {
       "version": 1,
@@ -8,7 +8,7 @@
     },
     {
       "version": 2,
-      "hash": "c3f14673fc04eeef4df27e3be7d597ce9c36c54a2c20cca13c5c47da04ef16f0"
+      "hash": "a999f2176817cabf955521c7996d51683fa3c837414f76a21356debeb3b865b6"
     }
   ],
   "declarations": {
@@ -18,7 +18,7 @@
     "DriveLog": "interface DriveLog { readonly version : typeof DRIVE_LOG_VERSION readonly drives : readonly DriveRecord [ ] }",
     "DriveOutcome": "type DriveOutcome = 'arrived' | 'ended' | 'unfinished'",
     "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number }",
-    "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeId : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome }",
+    "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome }",
     "GuidanceAnnouncement": "interface GuidanceAnnouncement { readonly atDistanceM : number readonly text : string }",
     "GuidanceCursor": "interface GuidanceCursor { readonly next : number }",
     "GuidanceStep": "interface GuidanceStep { readonly atDistanceM : number readonly location : LngLat readonly type : string readonly modifier : string | null readonly primaryText : string readonly secondaryText : string | null readonly announcements : readonly GuidanceAnnouncement [ ] readonly synthesized : boolean }",

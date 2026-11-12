@@ -93,11 +93,10 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
         : null,
     [replaySetup, replaySpeedMps, originPosition],
   )
-  // The private drive log: read when the drive begins on its first route. The destination
-  // becomes a coarse corridor key there and is not kept.
-  const tripForLog = useRef({ destination: pins.destination.position, otherAppSec: otherEta.sec })
+  // The private drive log: the other app's ETA is read when the drive begins on its first route.
+  const tripForLog = useRef({ otherAppSec: otherEta.sec })
   useEffect(() => {
-    tripForLog.current = { destination: pins.destination.position, otherAppSec: otherEta.sec }
+    tripForLog.current = { otherAppSec: otherEta.sec }
   })
   const drives = useDriveLog(driveLogStore, () => tripForLog.current)
   const setWhatIfDelaySec = sim.setWhatIfDelaySec
