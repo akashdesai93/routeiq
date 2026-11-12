@@ -24,3 +24,4 @@ export interface QueueResult {
 
 export function bestVerified(results: readonly QueueResult[]): QueueResult | null
 export function queueReport(run: { startedAt: string; endedAt: string; results: readonly QueueResult[]; left: string; note: string }): string
+export function labStartProblem(gh: (apiPath: string) => any, repo: string, now: Date | string): string | null
