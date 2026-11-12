@@ -89,7 +89,9 @@ export interface DriveOptions {
   hideAtSec?: number
   /** At this simulated second a hidden page is shown again: the phone was unlocked. Default: on arrival. */
   showAtSec?: number
-  /** Looks at the screen the moment it is shown at `showAtSec`, before any other fix or tick. */
+  /** The hidden page is shown again on the step after a switch or a new route is heard: the driver looks. */
+  showAfterHeard?: boolean
+  /** Looks at the screen the moment it is shown (`showAtSec`, `showAfterHeard`), before any other fix or tick. */
   onShow?: () => Promise<void>
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
@@ -271,7 +273,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, showAtSec, onShow, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [] } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, showAtSec, showAfterHeard = false, onShow, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [] } = options
     await pauseSoon(page, this.slowMomentAtStartMs)
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
@@ -306,6 +308,14 @@ export class App {
       await stopCounting()
       hidden = false
       await page.evaluate(() => {
+        // Animation frames held while hidden (below) run now, as a browser runs them on return.
+        const w = window as unknown as { __heldFrames?: { raf: typeof requestAnimationFrame; held: FrameRequestCallback[] } }
+        const frames = w.__heldFrames
+        if (frames !== undefined) {
+          window.requestAnimationFrame = frames.raf
+          delete w.__heldFrames
+          frames.held.forEach((cb) => frames.raf(cb))
+        }
         Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
         document.dispatchEvent(new Event('visibilitychange'))
       })
@@ -323,7 +333,7 @@ export class App {
     }
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
-      if (hidden && showAtSec !== undefined && sec >= showAtSec && sec < showAtSec + STEP_SEC) {
+      if (hidden && ((showAtSec !== undefined && sec >= showAtSec && sec < showAtSec + STEP_SEC) || (showAfterHeard && log.heard.length > 0))) {
         await show()
         await onShow?.()
       }
@@ -332,6 +342,18 @@ export class App {
         heardUpTo = (await this.spoken()).length
         commitsFrom = (await work()).commits
         await page.evaluate(() => {
+          // A hidden page gets no animation frames: they are held until it is shown, as a
+          // browser does. (A frame already asked for may still run once: that is why draw
+          // calls are counted from the step after.)
+          const w = window as unknown as { __heldFrames?: { raf: typeof requestAnimationFrame; held: FrameRequestCallback[] } }
+          if (w.__heldFrames === undefined) {
+            const frames = { raf: window.requestAnimationFrame.bind(window), held: [] as FrameRequestCallback[] }
+            w.__heldFrames = frames
+            window.requestAnimationFrame = (cb) => {
+              frames.held.push(cb)
+              return 0
+            }
+          }
           Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
           document.dispatchEvent(new Event('visibilitychange'))
         })

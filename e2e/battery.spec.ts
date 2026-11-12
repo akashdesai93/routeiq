@@ -53,20 +53,28 @@ test('with the phone locked nothing is drawn, and the drive says and does exactl
   expect(after.commits - before.commits - log.hiddenWork.commits).toBeGreaterThan(5)
   expect(after.draws - before.draws - log.hiddenWork.draws).toBeGreaterThan(5)
 
-  // The drive itself is the same: every line said, at the same second of the drive, ...
-  expect(lockedSaid).toEqual(seenSaid)
+  // The drive itself is the same: every line said, in the same order and within the same 2 s
+  // step of the drive. (Not to the millisecond: where the drive starts within a step depends
+  // on the real time lost at Start, the #71 race the harness keeps on purpose, so a check due
+  // at 179.4 s is answered in the step of 178 s on one run and of 180 s on another.)
+  expect(lockedSaid.map((l) => l.text)).toEqual(seenSaid.map((l) => l.text))
+  lockedSaid.forEach((l, i) => expect(Math.abs(l.atMs - seenSaid[i]!.atMs), l.text).toBeLessThanOrEqual(2000))
   expect(lockedSaid.filter((l) => l.text.startsWith('Switching to a faster route.'))).toHaveLength(1)
   expect(lockedSaid.at(-1)!.text).toMatch(/^You have arrived\./)
-  // ... the same requests, answered the same way, ...
+  // ... the same requests, answered with the same routes in the same order (their times differ
+  // by where the car was within that step: 50 m of the jammed road is 11 s), and the same
+  // probes finding the same roads, ...
   expect(app.directionsRequests).toBe(seen.directionsRequests)
-  expect(app.answers).toEqual(seen.answers)
-  expect(app.probes).toEqual(seen.probes)
+  expect(app.answers.map((a) => [a.n, a.routes.map((r) => r.name)])).toEqual(seen.answers.map((a) => [a.n, a.routes.map((r) => r.name)]))
+  const probed = (x: App) => x.probes.map((p) => [p.forRequest, p.duringDrive, p.road])
+  expect(probed(app)).toEqual(probed(seen))
   // ... the same switch at the same moment (seen as a banner, heard with the phone locked) ...
-  expect(seenLog.banners.map((b) => b.atSec)).toEqual(log.heard.map((h) => h.atSec))
+  expect(seenLog.banners).toHaveLength(1)
+  expect(Math.abs(seenLog.banners[0]!.atSec - log.heard[0]!.atSec)).toBeLessThanOrEqual(2)
   expect(log.banners).toEqual([])
   // ... and the same arrival, which the screen shows as soon as it is unlocked.
   expect(log.arrived).toBe(true)
-  expect(log.seconds).toBe(seenLog.seconds)
+  expect(Math.abs(log.seconds - seenLog.seconds)).toBeLessThanOrEqual(2)
   await expect(app.page.getByLabel('Drive summary')).toBeVisible()
 
   await info.attach('work per drive', {
@@ -80,48 +88,56 @@ test('with the phone locked nothing is drawn, and the drive says and does exactl
   await context.close()
 })
 
-/** What the drive view says: the next turn, the arrival time, the banner and the status line. */
-async function driveText(app: App): Promise<string> {
-  return app.page.evaluate(() =>
-    ['[aria-label="Next turn"]', '.live-eta', '.live-banner', '.live-status']
-      .map((selector) => (document.querySelector(selector) as HTMLElement | null)?.innerText ?? '')
-      .join(' | '),
-  )
+/** The drive view's arrival time ("8:21 AM"), in minutes of the day. */
+async function arrivalMinutes(app: App): Promise<number> {
+  const text = (await app.page.locator('.live-eta-clock').innerText()).trim()
+  const m = /^(\d{1,2}):(\d{2})\s*([AP]M)?$/i.exec(text)
+  expect(m, `an arrival time, not "${text}"`).not.toBeNull()
+  const h = Number(m![1])
+  const hour = m![3] === undefined ? h : (h % 12) + (m![3].toUpperCase() === 'PM' ? 12 : 0)
+  return hour * 60 + Number(m![2])
 }
 
 test('when I unlock the phone just after a switch it made while locked, the screen shows the switch at once, as if it had been on', async ({ app, browser }, info) => {
-  // The screen on all the way: what the drive view says at the end of every step.
+  // The screen on all the way: the arrival time the drive view showed with the switch banner.
   const context = await browser.newContext()
   const seen = new App(await context.newPage(), info)
   seen.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
   await seen.open({ fakeClock: true, shell: true, path: SHELL, storage: TOKEN })
   await seen.routesReady()
-  const shown = new Map<number, string>()
-  const looks = Array.from({ length: 200 }, (_, i) => ({ atSec: 2 * i, look: async () => void shown.set(2 * i, await driveText(seen)) }))
+  const arrivals = new Map<number, number>()
+  const looks = Array.from({ length: 200 }, (_, i) => ({ atSec: 2 * i, look: async () => void arrivals.set(2 * i, await arrivalMinutes(seen)) }))
   const seenLog = await seen.drive({ lookAtSec: looks, maxSec: 400 })
   expect(seen.unexpected).toEqual([])
   expect(seenLog.banners).toHaveLength(1)
-  const switchSec = seenLog.banners[0]!.atSec
+  const seenArrival = arrivals.get(seenLog.banners[0]!.atSec)!
   await context.close()
 
   // Locked at 30 s; the switch is heard; the phone is unlocked the next moment, before any other fix or tick.
   app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
   await app.open({ fakeClock: true, shell: true, path: SHELL, storage: TOKEN })
   await app.routesReady()
-  let atUnlock = ''
+  let banner = ''
+  let arrival = 0
   const log = await app.drive({
     hideAtSec: 30,
-    showAtSec: switchSec + 2,
-    maxSec: switchSec + 4,
+    showAfterHeard: true,
+    maxSec: 400,
     onShow: async () => {
       await expect(app.page.locator('.live-banner')).toBeVisible()
-      atUnlock = await driveText(app)
+      banner = await app.page.locator('.live-banner').innerText()
+      arrival = await arrivalMinutes(app)
+      await expect(app.page.getByRole('button', { name: /Keep previous/ })).toBeVisible()
       await app.snap('unlocked just after a switch made while locked: the banner and Keep previous route')
     },
   })
-  expect(log.heard.map((h) => h.atSec)).toEqual([switchSec])
-  // Exactly what the screen showed with the screen on at that moment: the turn, the arrival time, the banner.
-  expect(atUnlock).toBe(shown.get(switchSec))
-  expect(atUnlock).toContain('Switched to a faster route')
-  await expect(app.page.getByRole('button', { name: /Keep previous/ })).toBeVisible()
+  expect(log.heard).toHaveLength(1)
+  // The banner of the switch that was spoken: the same saving.
+  const saving = /Saves (\d+) minutes?/.exec(log.heard[0]!.text)![1]
+  expect(banner).toContain('Switched to a faster route')
+  expect(banner).toContain(`saves ${saving} minute`)
+  // The arrival time is today's, worked out from the clock now, not from when the screen went
+  // dark: the same minute as with the screen on (give or take the minute it can fall across).
+  // From the clock of the lock, two and a half minutes before, it would be 2 or 3 minutes early.
+  expect(Math.abs(arrival - seenArrival)).toBeLessThanOrEqual(1)
 })
