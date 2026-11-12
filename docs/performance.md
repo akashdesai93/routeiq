@@ -100,6 +100,25 @@ replaced by a recorder. Per second of driving:
 The cost of `setData` inside Mapbox (worker re-tiling, GPU upload) is not measured yet: it
 needs a real browser.
 
+### After #95: the hidden panels stay still during a drive
+
+`tests/renders.test.tsx` (in the unit tests, so CI runs it) drives the real `App` in jsdom
+for 20 s, with each fix and each tick of the 1 s clock delivered as separate updates, as a
+browser delivers them. Renders in those 20 s:
+
+| Component | `main` (`4728117`) | #95 |
+| --- | ---: | ---: |
+| `PlanPanel` | 40 | 0 |
+| `RoutePanel` | 40 | 0 |
+| `DrivePanel` | 40 | 0 |
+| `LiveDriveView` (shows each fix and the clock) | 40 | 40 |
+| `MapView` (renders for fixes only, never for the clock) | 20 | 20 |
+
+The panels are hidden by `live.css` while a drive is on; `src/FrozenWhile.tsx` keeps them
+mounted, with their state, and does not render them again until the drive ends, when they
+render once with the latest props. The test fails on `main` (40 renders of each panel) and
+when the panels are frozen for good (none after End).
+
 ## 4. Per-check cost (every 60 s) and per-plan cost
 
 `node scripts/perf/check.mjs`. The answer is 850.2 kB of JSON (136.8 kB gzipped) for three
@@ -188,7 +207,7 @@ Desktop numbers, on the synthetic 60 km / 3000-vertex route. "Now" is what was m
 | Pure logic per 1 s tick, p95 | 4 ms | 0.96 ms | ok |
 | Data handed to the map per fix | 1 kB (the car only) | 66.4 kB | over |
 | Component renders per fix: `MapView`, `LiveDriveView` | 1 each | 1 each (2 in a browser) | ok |
-| Component renders per fix: hidden panels (`PlanPanel`, `RoutePanel`, `DrivePanel`) | 0 | 1 each | over |
+| Component renders per fix: hidden panels (`PlanPanel`, `RoutePanel`, `DrivePanel`) | 0 | 0 (#95) | ok |
 | Whole check per 60 s, p95 | 50 ms (aim for 25 ms) | 49.4 ms | at the limit |
 | Any single call in a plan, p95 | 50 ms | 545 ms (`mergeProbeRoutes`) | over |
 | Directions requests per drive hour | 65 | at most 60 + 5 | ok |
