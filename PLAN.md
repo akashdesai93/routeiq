@@ -217,7 +217,9 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     `docs/contracts/core-contract.json`; JSON Schemas for the signal tile, the bundle index, the
     stored place book and the native plugin payloads in `docs/contracts/schemas`.
     `tests/contracts.test.ts` fails on a change of shape without a bump, and checks the shipped
-    tiles, index and place book against the schemas and the schemas against the types. Open for
+    tiles, index and place book against the schemas and the schemas against the types. Since
+    #169 a shape change is described in `docs/contracts/changes/<branch>.md` instead of bumping
+    the version in every pull request; the version is bumped once per Swift port. Open for
     later: the Swift port matches no version yet (#33); a schema for `RouteCandidate` itself if a
     service ever reads it as JSON.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
