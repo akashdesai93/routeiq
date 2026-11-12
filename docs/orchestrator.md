@@ -14,14 +14,19 @@ node scripts/orch/state.mjs --out tmp/orch     # sessions, PRs, issues, events, 
 
 It writes `state.json` and, split out of it, `sessions.json`, `prs.json`, `issues.json`,
 `events.json`, `decisions.json`, `health.json` and `phone-queue.json`, plus `board.md`,
-`morning.md` and `alert.md`. The thresholds are in `scripts/orch/defaults.mjs`:
+`morning.md` and `alert.md`. With `--dashboard <dir>` it also writes the owner's dashboard
+(Mission Control) files in the page's own shapes, exactly six: `sessions.json` (with `group`:
+working, review, phone, blocked or done), `prs.json` (open and merged, with `stage`, `checks`,
+`conflicting`), `issues.json` (with `stage`), `events.json`, `decisions.json` (with
+`recommended`) and `health.json` (one row: `main`, `phone_build`, `phone_state`,
+`heartbeat_at`, `notes`). The thresholds are in `scripts/orch/defaults.mjs`:
 
 | Threshold | Default |
 | --- | --- |
 | #17 comments read (by last update) | 48 h |
 | Orchestrator heartbeat stale (understudy acts) | 90 min |
 | Heartbeat alert | 3 h |
-| Session silent (working, waiting or blocked, with an open PR or issue) | 2 h |
+| Session silent (working, waiting or blocked, with an open PR or a claimed issue) | 2 h |
 | PR orphaned (red or conflicting, no push) | 2 h |
 | Claim belongs to someone else | 2 h |
 | Dispatched session that never posted | 1 h |
@@ -89,6 +94,10 @@ asks: none                        (or "orchestrator: <something only it can do>"
 ```
 
 `waiting` means "on review, CI or the phone"; `stopped` means the session has ended. A session
+that never said `stopped` has ended too once it has been quiet for the "session silent" time
+with no open PR of its own and no issue it claimed: `state.mjs` marks it `ended` (dashboard
+group `done`) and does not report it as silent. An optional `link: <url>` line gives the
+dashboard a link for the session. A session
 name is `cloud-<role>[-<issue or slug>]`, `local-<role>` or `agent-<slug>`, and stays the same
 for the session's life. Free text may follow the block; it is not parsed.
 
@@ -108,9 +117,13 @@ heartbeat: orchestrator
 session: <name>
 state: active                     (or "away until <UTC time>": the understudy acts at once)
 next tick: <minutes>
+tick: <this tick's UTC time, e.g. 2026-11-12T14:05Z>
 ```
 
-Its `updated_at` is the heartbeat. The orchestrator edits it every tick
+Its time is the later of the comment's `updated_at` and its `tick:` line (a tick ahead of the
+present counts as now). Write the `tick:` line every time: GitHub leaves `updated_at` alone
+when an edit does not change the body, so a tick that wrote the same four lines as the last
+one was not a heartbeat. The orchestrator edits it every tick
 (`node scripts/orch/state.mjs --print heartbeat-id` gives the comment id; create it if there is
 none). The understudy keeps its own `heartbeat: understudy` comment, edited on ticks where it acts.
 
