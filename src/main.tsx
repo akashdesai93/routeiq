@@ -4,7 +4,8 @@ import './index.css'
 import './fonts.css'
 import './live.css'
 import { shellDiagnostics } from './device/native/diagnostics.ts'
-import { nativePlugin, startNativeShell } from './device/native/index.ts'
+import { isNativeShell, nativePlugin, startNativeShell } from './device/native/index.ts'
+import { startOfflineShell } from './device/offline.ts'
 import { startLab, type RouteIQLab } from './lab/lab.ts'
 import { EARLY_FIXES, LAYOUT_FIXES, layoutProbe } from './lab/probe.ts'
 import { setDirectionsTransport } from './providers/mapbox/client.ts'
@@ -24,6 +25,9 @@ void forgetOldSignalData()
 // Inside the iPhone shell, route requests are made by iOS itself, so they go out with the phone locked.
 // In a browser this is null and the requests stay on fetch.
 setDirectionsTransport(startNativeShell())
+
+// Add to Home Screen and the offline shell (#9): in a browser only, never in the iPhone shell.
+startOfflineShell({ inShell: isNativeShell(), production: import.meta.env.PROD, base: import.meta.env.BASE_URL })
 
 // The phone lab (docs/phone-lab.md): off unless the shell app was started from the PC with its launch argument.
 void startLab({
