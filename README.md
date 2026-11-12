@@ -914,7 +914,9 @@ lead distance, the cooldown, no return. No threshold changed.
   below its time for the same path as an ordinary route (Rerouting, The second request). A
   probed route is asked through a via, so it is never measured against the current route's
   ordinary time: `decideReroute` compares it only with the current path asked the same way,
-  through via points (`observation.baseline`). When the check made no path check (the
+  through via points (`observation.baseline`), and never with more than its ordinary time
+  when the check has both (a path check can read high too; the lower is the safe one).
+  When the check made no path check (the
   current route was among the fresh routes), one is made after a probe that found a new
   path: through points of the current path where the probed routes leave it
   (`baselineProbe`). Without its answer (no room, a failed request, another road back) the

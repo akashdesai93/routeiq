@@ -1248,10 +1248,12 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
     pathCheckFailsAt?: readonly number[]
     /** Leave the path check out altogether, and compare S with A's ordinary time (the unlike comparison this rules out). */
     unlike?: boolean
+    /** The path check's time for A, when it reads otherwise than etaA x (1 - bias). */
+    pathCheckSec?: number
     options?: Partial<RerouteOptions>
   }
 
-  function probedDrive({ polls, etaA, etaS, bias = 0, startAlongM = 1000, probeFailsAt = [], pathCheckFailsAt = [], unlike = false, options = {} }: ProbedDrive) {
+  function probedDrive({ polls, etaA, etaS, bias = 0, startAlongM = 1000, probeFailsAt = [], pathCheckFailsAt = [], unlike = false, pathCheckSec, options = {} }: ProbedDrive) {
     const route = candidate('A', at(0, 0), 2400)!
     const heldUp = { typicalDurationSec: etaA - 300 }
     const viaAsked = (sec: number) => Math.round(sec * (1 - bias))
@@ -1271,7 +1273,7 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
       const candidates = mergeCheckProbes(fresh, null, probed)
       const found = candidates.length > fresh.length
       // The path check a probe needs: the current path asked through via points, as the shell asks it.
-      const pathCheck = !found || pathCheckFailsAt.includes(poll) || unlike ? null : [candidate('A', here, viaAsked(etaA), heldUp)!]
+      const pathCheck = !found || pathCheckFailsAt.includes(poll) || unlike ? null : [candidate('A', here, pathCheckSec ?? viaAsked(etaA), heldUp)!]
       const decision = decideReroute(
         state,
         { nowSec: poll * 60, route, positionAlongM: alongM, speedMps: 5, candidates, baseline: pathCheck },
@@ -1315,6 +1317,17 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
       expect(records.filter((r) => r.found).length).toBeGreaterThan(0)
       expect(records.some((r) => r.decision.code === 'confirming')).toBe(false)
     }
+  })
+
+  it('a path check that reads higher than the ordinary time never makes a side street look faster (#82 review)', () => {
+    // A: 2000 s ordinary, 2150 s through the path check; S 1960 s. Against the ordinary time S saves
+    // only 40 s, so it never switches: the lower of the two is the one measured against.
+    const { records, switchedTo } = probedDrive({ polls: 10, etaA: 2000, etaS: 1960, pathCheckSec: 2150 })
+    expect(switchedTo).toBeNull()
+    const onS = records.filter((r) => r.found)
+    expect(onS.length).toBeGreaterThan(0)
+    expect(new Set(onS.map((r) => r.decision.code))).toEqual(new Set(['saving-too-small']))
+    expect(onS[0]!.decision.considered!.savingSec).toBe(40)
   })
 
   it('a real 3-minute side street still switches with the via bias, compared like for like', () => {

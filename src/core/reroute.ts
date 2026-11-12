@@ -1000,8 +1000,8 @@ function usableEta(route: RouteCandidate): boolean {
  *    least `minSavingSec` AND at least `minSavingFraction` of the baseline.
  *    For a side-street probe (source 'probe'), asked through a via point, the
  *    baseline is the current path asked the same way (observation.baseline,
- *    matched to the current path), never its ordinary time: via-asked times
- *    run low (README). Without such a time this poll the probe cannot win or
+ *    matched to the current path), and never more than its ordinary time:
+ *    via-asked times run low (README), and either may read high. Without such a time this poll the probe cannot win or
  *    count towards confirmation ('probe-unconfirmed'). Probes are never the
  *    current route, the off-route pick or the route-lost pick.
  * 9. **No return**: an alternative that goes back to a route left less than
@@ -1228,7 +1228,9 @@ export function decideReroute(
       }
       continue
     }
-    const fromSec = against.durationSec
+    // Never more than the current route's ordinary time either: a path check can read high too (a
+    // later request, a via that snaps onto a slightly longer path), and the lower is the safe one.
+    const fromSec = isProbe(candidate) ? Math.min(against.durationSec, baselineSec) : against.durationSec
     const savingSec = fromSec - candidate.durationSec
     if (savingSec <= 0) continue
     const m = measure(candidate, savingSec, current.maneuvers, current.limitedAccessSpansM, observation.speedMps, plane, opts, drivenM)
