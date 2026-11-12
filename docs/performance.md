@@ -210,8 +210,9 @@ From the code (defaults in `DEFAULT_LIVE_OPTIONS`, `DEFAULT_PROBE_BUDGET`):
   60 km answer. At 60 checks that is about 8 MB an hour on the wire at most. A real answer
   has not been measured.
 - **Standing still:** checks stop after 120 s without movement (`stationaryPauseSec`) and
-  while the page is hidden in a browser. The GPS, the 1 s tick, the React renders and the
-  66 kB `setData` go on all the same. Probes are made at plan time only, never during a drive.
+  while the page is hidden in a browser. When this was written, the GPS, the 1 s tick, the
+  React renders and the 66 kB `setData` went on all the same. For what changed since, see
+  [Battery](#battery-98). Probes are made at plan time only, never during a drive.
 - **GPS accuracy (shell):** `RouteIQEngine.swift:111-114` asks for
   `kCLLocationAccuracyBestForNavigation`, `distanceFilter = kCLDistanceFilterNone`,
   `pausesLocationUpdatesAutomatically = false`. That is the most power-hungry setting Core
@@ -221,6 +222,74 @@ From the code (defaults in `DEFAULT_LIVE_OPTIONS`, `DEFAULT_PROBE_BUDGET`):
   failure (`STOP_EFFECTS` in `core/live.ts`). The shell sets `isIdleTimerDisabled`
   (`RouteIQEngine.swift:353`) through the same two effects, so it is released the same way.
   Battery drain on a device: not measured yet.
+
+## Battery (#98)
+
+The owner's decision on #98: the drive keeps `kCLLocationAccuracyBestForNavigation` the
+whole time. Power is saved everywhere else, and nothing may risk the must-have: the drive
+keeps running, rerouting and speaking while the phone is locked or another app is in front.
+
+**Nothing below was measured on a phone.** The cloud session that did this work has no
+device. The "before" and "after" numbers are counts in the e2e harness (headless Chromium
+with the shell's plugin stubbed) and in unit tests. They show that work is no longer done.
+They do not show how much battery that saves. The phone checks at the end of this section
+are what would show that.
+
+### What the real phone showed before (Nov 12, 2026, background drive, owner's report)
+
+- The web code used 0.2 to 38 % of a core while the app was in the background.
+- About one GPS fix and one native tick reached the web code per second.
+
+### The changes, one PR each
+
+| PR | What changes | Before | After | How it was counted |
+| --- | --- | --- | --- | --- |
+| #151 | Nothing is drawn while the screen cannot be seen (shell `appState` background, or the page hidden). The drive (GPS, checks, voice, drive log) is unchanged; the screen catches up in one update. | 1,111 React commits and 28,240 WebGL draw calls over 546 fixes while locked | 2 commits (the drive log's writes at the switch and the arrival) and 0 draw calls | `e2e/battery.spec.ts`: two drives of the same trip, locked and not; same spoken lines at the same seconds, same requests and answers |
+| #153 | Standing still (Swift, `RouteIQStillness`). After 10 s still (under 0.5 m/s, within 25 m), a fix only every 3 s and no tick in between. Moving off passes the next fix at once. Also: no native tick while fixes are flowing (they are the web app's clock already); ticks come back 1.5 s after fixes stop. Core Location settings untouched. | parked: 1 fix + 1 tick a second; moving: 1 fix + 1 tick a second | parked: 1 event every 3 s (206 fixes in 10 minutes instead of 600, and no extra ticks); moving: the fix only | `native/shell/scripts/test-swift-logic.sh`, `tests/stillness.test.ts` (the web drive asks, says and pauses the same with the thinned stream) |
+
+**Less work per fix while moving (step 2): no code change, on purpose.** After #94 and
+#151, the web work per second of driving with the screen off is the pure logic:
+`node scripts/perf/tick.mjs` gives 0.24 ms median and 0.39 ms p95 on a desktop for fix,
+tick, view model and map overlay together (`liveStep` on a fix is 0.24 ms of it, nearly
+all `trackFix`). At 3 to 5 times slower on a phone, that is about 1 to 2 ms a second, or
+0.1 to 0.2 % of a core. Skipping fixes that "did not move" would save part of that at the
+cost of a new rule in the tracker. That is not worth the risk, so it was not done. The
+timers were checked too. While the app is hidden, the web side wakes for each fix, the
+native tick, the shell pulse's own 1 s `setInterval` (`src/device/native/pulse.ts`), and
+`useLiveDrive`'s 1 s view timer (which no longer renders while hidden, #151). The native
+tick is dropped while fixes flow (#153). The two page timers stay: they are cheap,
+and they are the fallback clock if both native sources stop.
+
+### Why the standing-still hold cannot let iOS suspend the app
+
+iOS keeps an app with an active background location session running as long as
+Core Location is delivering updates to it. The hold changes nothing on the
+`CLLocationManager`. `desiredAccuracy`, `distanceFilter = kCLDistanceFilterNone`,
+`activityType = .automotiveNavigation` and `pausesLocationUpdatesAutomatically = false`
+are set once in `begin()` and never touched again, and `native/shell/tests/shell.test.mjs`
+fails if any of them changes (#153). Updates keep arriving in Swift at about 1 Hz while parked.
+The hold only decides which of them are passed on to the web view. Setting a
+`distanceFilter` or letting iOS pause updates would stop those deliveries while parked,
+and that is what lets iOS suspend a background app. Neither is used.
+
+### What the phone lab must measure
+
+Run each one on `main` before the PR and on the PR's build. Same phone, same iOS version,
+off the charger for the battery rows. The lab (`docs/phone-lab.md`, PR #113) samples CPU
+and memory and pulls the drive diagnostics.
+
+| Measure | How | PRs it judges | Expected if the PR works |
+| --- | --- | --- | --- |
+| CPU of the app while backgrounded during a drive | lab scenario with the app in the background for 10 minutes, moving; CPU samples of the app (WebContent process too) | #151 | well below the 0.2 to 38 % of a core seen before; no rise at unlock beyond one catch-up |
+| Screen after unlock | screenshot within 1 s of unlock, mid-drive and right after a switch | #151 | current drive view and map, switch banner and Keep previous route when within 8 s of a switch |
+| Fixes per second reaching the web layer while stationary | 10 minutes parked with a drive running (phone locked); Drive diagnostics: fixes count and longest gap between fixes | #153 | about 0.33 a second after the first 10 s (longest gap 3 to 4 s, and no `no tick for N s` line); 1 a second on `main` |
+| Time to first fix after moving | park 5 minutes locked, drive off; the time from the car moving to the drive view (or the next spoken turn) reacting, and in diagnostics no gap over 4 s around it | #153 | within 1 to 2 s, locked too; the first check goes out at once after the stop's pause |
+| Ticks per second reaching the web layer while moving | 10 minutes of driving locked; Drive diagnostics: ticks against fixes | #153 | ticks well below fixes (on `main` about one each a second) |
+| The drive still runs locked | the lab's locked wrong-turn scenario, plus a 10-minute parked stop in the middle | #151, #153 | the off-route line, the new route and the arrival are all spoken, and no "Waiting for a position fix" while parked |
+| Battery % per 30 minutes driving | 30 minutes of driving (or the 1x test drive with the GPS on), locked, off the charger; battery % before and after, and the iOS Battery screen's share for RouteIQ | both | lower than `main` (not measured yet) |
+| Battery % per 30 minutes parked | 30 minutes parked with a drive running, locked, off the charger | #153 | lower than `main` (not measured yet) |
+
+Until these are filled in from a phone, this section claims no battery gain.
 
 ## 6. Signal tiles
 
@@ -239,7 +308,7 @@ Desktop numbers, on the synthetic 60 km / 3000-vertex route. "Now" is what was m
 | Entry JS chunk (app + React, Mapbox split out), gzip | 150 kB | 479.5 kB (Mapbox included) | over |
 | Mapbox GL in its own cached chunk | yes | no | over |
 | CSS, gzip | 12 kB | 8.35 kB | ok |
-| Pure logic per 1 s tick, p95 | 4 ms | 0.96 ms | ok |
+| Pure logic per 1 s tick, p95 | 4 ms | 0.39 ms (Nov 12, after #94; was 0.96 ms) | ok |
 | Data handed to the map per fix | 1 kB (the car only) | 66.4 kB | over |
 | Component renders per fix: `MapView`, `LiveDriveView` | 1 each | 1 each (2 in a browser) | ok |
 | Component renders per fix: hidden panels (`PlanPanel`, `RoutePanel`, `DrivePanel`) | 0 | 0 (#95) | ok |
