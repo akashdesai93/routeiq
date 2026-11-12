@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as mapboxgl from 'mapbox-gl/esm'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import {
@@ -10,7 +10,8 @@ import {
 } from '../core/index.ts'
 import { tokenErrorHelp } from '../config.ts'
 import { SIGNAL_DATA_ATTRIBUTION } from './attribution.ts'
-import { driveFeatures, type DriveOverlay } from './driveFeatures.ts'
+import { driveMarkerFeatures, driveRouteFeatures, type DriveOverlay } from './driveFeatures.ts'
+import { DRIVE_ROUTE_LAYER, DRIVE_ROUTE_SOURCE, DRIVE_SOURCE, driveLayers } from './driveLayers.ts'
 import { PIN_COLOR, PIN_NAME, PIN_ROLES, type PinRole } from './pins.ts'
 import { routeFeatures } from './routeFeatures.ts'
 import { signalFeatures } from './signalFeatures.ts'
@@ -40,7 +41,6 @@ interface MapViewProps {
 const ROUTE_SOURCE = 'routes'
 const HIT_LAYER = 'routes-hit'
 const SIGNAL_SOURCE = 'route-signals'
-const DRIVE_SOURCE = 'drive'
 const FIT_PADDING = 80
 /** How close the map is when it follows the car. */
 const FOLLOW_ZOOM = 15.5
@@ -203,16 +203,18 @@ export function MapView({
       map.on('mouseleave', HIT_LAYER, () => {
         map.getCanvas().style.cursor = ''
       })
-      // The simulated drive, above everything else: the route being driven, the
-      // turn-off of a switch (hollow while the switch is still waiting), and the car.
-      map.addSource(DRIVE_SOURCE, { type: 'geojson', data: driveFeatures(null) })
+      // The drive, above everything else: the route being driven (its own source, set only
+      // when the route changes; the part behind the car is trimmed off, see driveLayers.ts),
+      // the turn-off of a switch (hollow while the switch is still waiting), and the car.
+      map.addSource(DRIVE_ROUTE_SOURCE, { type: 'geojson', data: driveRouteFeatures([]), lineMetrics: true })
+      map.addSource(DRIVE_SOURCE, { type: 'geojson', data: driveMarkerFeatures(null) })
       map.addLayer({
-        id: 'drive-route',
+        id: DRIVE_ROUTE_LAYER,
         type: 'line',
-        source: DRIVE_SOURCE,
+        source: DRIVE_ROUTE_SOURCE,
         filter: ['==', ['get', 'kind'], 'route'],
         layout,
-        paint: { 'line-color': '#1a7f37', 'line-width': 4 },
+        paint: { 'line-color': '#1a7f37', 'line-width': 4, 'line-trim-offset': [0, 0] },
       })
       map.addLayer({
         id: 'drive-turn',
@@ -295,11 +297,20 @@ export function MapView({
     source?.setData(signalFeatures(signals))
   }, [readyMap, signals])
 
+  // The drive: only what changed goes to the map (the route line once per route, then the car).
+  const driveLayer = useMemo(
+    () =>
+      readyMap
+        ? driveLayers({
+            getSource: (id) => readyMap.getSource<mapboxgl.GeoJSONSource>(id),
+            setPaintProperty: (layer, name, value) => readyMap.setPaintProperty(layer, name, value),
+          })
+        : null,
+    [readyMap],
+  )
   useEffect(() => {
-    if (!readyMap) return
-    const source = readyMap.getSource<mapboxgl.GeoJSONSource>(DRIVE_SOURCE)
-    source?.setData(driveFeatures(drive))
-  }, [readyMap, drive])
+    driveLayer?.update(drive)
+  }, [driveLayer, drive])
 
   // A live drive: the map follows the car, heading up. Leaving it turns the map north
   // again and shows the trip.

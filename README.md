@@ -583,6 +583,9 @@ it; moving a pin, Swap and Reset end the drive. While a drive is on, the route l
 the map show what the last check returned from the car's position, the route being
 driven is drawn in green with the car on it, and an amber dot marks where a switch
 leaves the old route (hollow while the switch is still waiting to be confirmed).
+The map gets the route's line only when the route changes; on each fix it gets the car
+(a few hundred bytes) and the part behind the car is trimmed off the line
+(`line-trim-offset`, src/map/driveLayers.ts), for the live drive too (#94).
 
 The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
 
@@ -883,6 +886,12 @@ is marked "via side streets" in the route list.
   plus a spur or loop out to the via: never faster, and not a side street. `coversRoute`
   checks one way only, so the probe's extra roads are allowed, and the sampling between
   vertices keeps a real cut-through that leaves a long straight segment.
+- **The comparison is linear.** Both tests walk along the line and look at the few
+  segments after the last one a point was near; only a miss measures further (the whole
+  line for the first 8 misses, then a segment grid, `segmentGrid` in src/core/geo.ts, the
+  one the reroute matcher uses). A point counts as near only when a segment really is
+  within 10 m, so the answers are those of measuring every segment (#93: a 60 km plan
+  went from about 0.4 s to under 5 ms on a desktop).
 
 | `DEFAULT_PROBE_BUDGET` | Default | Meaning |
 | --- | --- | --- |

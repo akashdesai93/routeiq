@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
+  distanceM,
   decideReroute,
   findCurrentRoute,
   INITIAL_CHECK_PROBES,
@@ -25,7 +26,7 @@ import {
   type DriveClock,
 } from '../src/drive/simulation.ts'
 import { fetchFreshRoutes } from '../src/drive/freshRoutes.ts'
-import { driveFeatures } from '../src/map/driveFeatures.ts'
+import { driveMarkerFeatures, driveRouteFeatures, routeProgress } from '../src/map/driveFeatures.ts'
 import { createOverpassClient } from '../src/providers/osm/client.ts'
 import { memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
 import { createTileSource, memoryTileStore, overpassLayer } from '../src/providers/osm/tileSource.ts'
@@ -571,27 +572,48 @@ describe('fetchFreshRoutes: one check, and the current path asked for when it is
   })
 })
 
-describe('driveFeatures', () => {
+describe('drive features', () => {
   const car: LngLat = [-80.85, 35.2]
-  const routeAhead: LngLat[] = [car, [-80.85, 35.1], [-80.86, 35.0]]
+  const route: LngLat[] = [car, [-80.85, 35.1], [-80.86, 35.0]]
 
   it('draws nothing without a drive', () => {
-    expect(driveFeatures(null)).toEqual({ type: 'FeatureCollection', features: [] })
+    expect(driveMarkerFeatures(null)).toEqual({ type: 'FeatureCollection', features: [] })
+    expect(driveRouteFeatures([])).toEqual({ type: 'FeatureCollection', features: [] })
   })
 
-  it('gives the route, then the turn-off, then the car on top', () => {
-    const { features } = driveFeatures({ car, routeAhead, turn: { at: [-80.85, 35.15], pending: true } })
+  it('gives the route as one line, and the turn-off then the car on top as points', () => {
+    const line = driveRouteFeatures(route).features
+    expect(line.map((f) => [f.properties.kind, f.geometry.type])).toEqual([['route', 'LineString']])
+    expect(line[0]!.geometry.coordinates).toEqual(route)
+    const { features } = driveMarkerFeatures({ car, route, alongM: 0, turn: { at: [-80.85, 35.15], pending: true } })
     expect(features.map((f) => [f.properties.kind, f.geometry.type, f.properties.pending])).toEqual([
-      ['route', 'LineString', false],
       ['turn', 'Point', true],
       ['car', 'Point', false],
     ])
-    expect(features[0]!.geometry.coordinates).toEqual(routeAhead)
-    expect(features[2]!.geometry.coordinates).toEqual(car)
+    expect(features[1]!.geometry.coordinates).toEqual(car)
   })
 
-  it('leaves out a route with no length (arrived) and a turn that is not there', () => {
-    const { features } = driveFeatures({ car, routeAhead: [car], turn: null })
+  it('leaves out a route with no length and a turn that is not there', () => {
+    expect(driveRouteFeatures([car]).features).toEqual([])
+    const { features } = driveMarkerFeatures({ car, route: [car], alongM: 0, turn: null })
     expect(features.map((f) => f.properties.kind)).toEqual(['car'])
+  })
+
+  it('trims off the share of the line behind the car, on the plane Mapbox measures it on', () => {
+    const progress = routeProgress(route)
+    const lengthM = alongRouteM(route).at(-1)!
+    expect(progress(0)).toBe(0)
+    expect(progress(-5)).toBe(0)
+    expect(progress(Number.NaN)).toBe(0)
+    expect(progress(lengthM)).toBe(1)
+    expect(progress(lengthM + 100)).toBe(1)
+    // The first leg runs due south (Mercator stretches it a little more than its meters), the
+    // second south-west; the share grows with the meters and is 0.5 nowhere near the vertex.
+    const firstM = distanceM(route[0]!, route[1]!)
+    expect(progress(firstM)).toBeGreaterThan(0.45)
+    expect(progress(firstM)).toBeLessThan(0.55)
+    const shares = [0.1, 0.3, 0.5, 0.7, 0.9].map((k) => progress(k * lengthM))
+    expect([...shares].sort((a, b) => a - b)).toEqual(shares)
+    expect(routeProgress([car])(10)).toBe(0)
   })
 })

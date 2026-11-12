@@ -9,9 +9,20 @@ import {
   recommendedRouteId,
   selectViaPoints,
   sideStreetNotice,
+  alongRouteM,
+  boundsOf,
+  distanceM,
+  isValidLngLat,
+  localProjector,
+  pointToSegment,
+  SAME_ROUTE_TOLERANCE_M,
+  sameRouteGeometry,
   type LngLat,
+  type MatchMeter,
   type RouteCandidate,
+  type XY,
 } from '../src/core/index.ts'
+import { everyPointNear } from '../src/core/select.ts'
 import { at, candidate, type RouteName } from './helpers/driveWorld.ts'
 
 // Side-street probing, PLAN step 11b: how many probes a plan may make, and how
@@ -229,5 +240,178 @@ describe('sideStreetNotice (the polite announcement when a probe takes the top s
     expect(sideStreetNotice(rankRoutes(PROVIDER()))).toBeNull()
     expect(sideStreetNotice([])).toBeNull()
     expect(notice(route('D', 1400), [])).toBeNull()
+  })
+})
+
+// #93: comparing a probed route with the known ones measured every vertex of one line against
+// every segment of the other, so a 60 km plan froze for half a second. The comparison now walks
+// along the line and looks further only on a miss (everyPointNear in select.ts). These tests say
+// that the answers are those of the old point-by-point comparison, kept here as the reference,
+// and that the work (segment distance checks plus grid entries, see MatchMeter) stays linear.
+describe('comparing long routes (#93)', () => {
+  type Corner = readonly [xM: number, yM: number]
+
+  /** The comparison before #93, verbatim: every point against every segment. */
+  const nearAll = (points: readonly XY[], line: readonly XY[], toleranceM: number) =>
+    points.every((p) => {
+      for (let i = 1; i < line.length; i++) if (pointToSegment(p, line[i - 1]!, line[i]!).distanceM <= toleranceM) return true
+      return false
+    })
+  function oldSameRoute(a: readonly LngLat[], b: readonly LngLat[], toleranceM: number): boolean {
+    const lineA = a.filter(isValidLngLat)
+    const lineB = b.filter(isValidLngLat)
+    if (lineA.length < 2 || lineB.length < 2) return false
+    const [west, south, east, north] = boundsOf(lineA)
+    const project = localProjector([(west + east) / 2, (south + north) / 2])
+    const xyA = lineA.map(project)
+    const xyB = lineB.map(project)
+    const apart = (p: XY, q: XY) => Math.hypot(p[0] - q[0], p[1] - q[1])
+    if (apart(xyA[0]!, xyB[0]!) > toleranceM || apart(xyA.at(-1)!, xyB.at(-1)!) > toleranceM) return false
+    return nearAll(xyA, xyB, toleranceM) && nearAll(xyB, xyA, toleranceM)
+  }
+  function oldCovers(probe: readonly LngLat[], known: readonly LngLat[], toleranceM: number, sampleM: number): boolean {
+    if (probe.length < 2 || known.length < 2) return false
+    const project = localProjector(known[0]!)
+    const samples: LngLat[] = []
+    for (let i = 0; i < known.length; i++) {
+      const prev = known[i - 1]
+      const p = known[i]!
+      if (prev !== undefined && Number.isFinite(sampleM) && sampleM > 0) {
+        const pieces = Math.ceil(distanceM(prev, p) / sampleM)
+        for (let k = 1; k < pieces; k++) samples.push([prev[0] + ((p[0] - prev[0]) * k) / pieces, prev[1] + ((p[1] - prev[1]) * k) / pieces])
+      }
+      samples.push(p)
+    }
+    return nearAll(samples.map(project), probe.map(project), toleranceM)
+  }
+
+  /** A seeded random number from 0 to 1 (the same every run). */
+  const rng = (seed: number) => () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+    return seed / 2_147_483_648
+  }
+  const lngLat = (xy: readonly Corner[]) => xy.map(([x, y]) => at(x, y))
+
+  /** A winding road from the origin, `n` vertices 5 to 60 m apart. */
+  function road(random: () => number, n: number): Corner[] {
+    const out: Corner[] = [[0, 0]]
+    let heading = random() * 2 * Math.PI
+    for (let i = 1; i < n; i++) {
+      heading += (random() - 0.5) * 1.2
+      const step = 5 + random() * 55
+      const [x, y] = out[i - 1]!
+      out.push([x + Math.cos(heading) * step, y + Math.sin(heading) * step])
+    }
+    return out
+  }
+  /** Ways the same road, or nearly the same, comes back, some of them within a meter or two of the tolerance. */
+  function variants(random: () => number, base: readonly Corner[]): Corner[][] {
+    const jitter = (m: number) => base.map(([x, y]): Corner => [x + (random() - 0.5) * m, y + (random() - 0.5) * m])
+    const shifted = (m: number) => base.map(([x, y]): Corner => [x + m, y])
+    const densified: Corner[] = base.flatMap((p, i) => {
+      const q = base[i + 1]
+      return q === undefined ? [p] : [p, [(p[0] + q[0]) / 2 + (random() - 0.5), (p[1] + q[1]) / 2 + (random() - 0.5)] as Corner]
+    })
+    const from = Math.floor(base.length / 3)
+    const to = Math.floor((2 * base.length) / 3)
+    const detour = (m: number) => base.map(([x, y], i): Corner => (i >= from && i <= to ? [x, y + m] : [x, y]))
+    const spur: Corner[] = [...base.slice(0, to), ...[1, 2, 3, 4, 3, 2, 1].map((k): Corner => [base[to]![0] + k * 40, base[to]![1] + k * 40]), ...base.slice(to)]
+    return [
+      [...base],
+      jitter(2),
+      jitter(19),
+      shifted(9.5),
+      shifted(10.5),
+      densified,
+      base.filter((_, i) => i % 3 !== 1 || i === base.length - 1),
+      detour(8),
+      detour(14),
+      detour(200),
+      spur,
+      [...base].reverse(),
+      base.slice(0, to),
+      road(random, base.length),
+    ]
+  }
+
+  it('gives the same answers as the point-by-point comparison', () => {
+    const random = rng(93)
+    let compared = 0
+    let same = 0
+    let covered = 0
+    for (let round = 0; round < 6; round++) {
+      const base = road(random, 40 + Math.floor(random() * 120))
+      const lines = variants(random, base).map(lngLat)
+      for (const a of lines) {
+        for (const b of lines) {
+          for (const toleranceM of [5, SAME_ROUTE_TOLERANCE_M, 30]) {
+            const wasSame = oldSameRoute(a, b, toleranceM)
+            expect(sameRouteGeometry(a, b, toleranceM)).toBe(wasSame)
+            if (wasSame) same++
+            for (const sampleM of [0, DEFAULT_PROBE_OPTIONS.coverSampleM]) {
+              const wasCovered = oldCovers(a, b, toleranceM, sampleM)
+              expect(coversRoute(a, b, toleranceM, sampleM)).toBe(wasCovered)
+              if (wasCovered) covered++
+            }
+            compared++
+          }
+        }
+      }
+    }
+    // Both answers come up often enough for the comparison to mean something.
+    expect(compared).toBe(6 * 14 * 14 * 3)
+    expect(same).toBeGreaterThan(compared / 10)
+    expect(same).toBeLessThan(compared / 2)
+    expect(covered).toBeGreaterThan(compared / 5)
+    expect(covered).toBeLessThan(compared)
+  })
+
+  // A 100 km plan, 5000 vertices a route: three routes from the provider, two probes that
+  // came back on two of them (the common case, and the slowest before #93) and one new side street.
+  const random = rng(7)
+  const lineA = road(random, 5000)
+  const lineB = lineA.map(([x, y], i): Corner => (i > 1500 && i < 3500 ? [x, y + 1000] : [x, y]))
+  const lineC = lineA.map(([x, y], i): Corner => (i > 1000 && i < 4000 ? [x, y - 800] : [x, y]))
+  const lineS = lineA.map(([x, y], i): Corner => (i > 2000 && i < 2400 ? [x, y - 300] : [x, y]))
+  const asRoute = (id: string, xy: readonly Corner[], durationSec: number): RouteCandidate => {
+    const geometry = lngLat(xy)
+    return { ...route('A', durationSec), id, geometry, distanceM: alongRouteM(geometry).at(-1)!, maneuvers: [] }
+  }
+  const known = [asRoute('a', lineA, 5000), asRoute('b', lineB, 5100), asRoute('c', lineC, 5200)]
+  const backOnKnown = [asRoute('probe-b', lineB.map(([x, y]) => [x + 2, y - 1]), 5150), asRoute('probe-c', lineC.map(([x, y]) => [x - 1, y + 2]), 5250)]
+  const sideStreet = asRoute('probe-s', lineS, 4900)
+  const vertices = 6 * 5000
+
+  it('a 100 km plan: linear work, at most 10 checks a vertex (about 5.6 now)', () => {
+    const meter: MatchMeter = { segmentChecks: 0, gridEntries: 0 }
+    const merged = mergeProbeRoutes(known, [...backOnKnown, sideStreet], SAME_ROUTE_TOLERANCE_M, DEFAULT_PROBE_OPTIONS.coverSampleM, meter)
+    expect(merged.map((r) => r.id)).toEqual(['a', 'b', 'c', 'probe-s'])
+    // The comparison before #93 measured every vertex against every segment: millions here.
+    expect(meter.segmentChecks + meter.gridEntries).toBeLessThanOrEqual(10 * vertices)
+  })
+
+  it('a probe drawn the other way: still linear', () => {
+    const meter: MatchMeter = { segmentChecks: 0, gridEntries: 0 }
+    const reversed = [...known[0]!.geometry].reverse()
+    expect(coversRoute(reversed, known[0]!.geometry, SAME_ROUTE_TOLERANCE_M, DEFAULT_PROBE_OPTIONS.coverSampleM, meter)).toBe(true)
+    expect(meter.segmentChecks + meter.gridEntries).toBeLessThanOrEqual(25 * 5000)
+  })
+
+  it('points in no order along the line: the grid takes over, still linear', () => {
+    const meter: MatchMeter = { segmentChecks: 0, gridEntries: 0 }
+    const shuffled = [...lineA]
+    const pick = rng(11)
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(pick() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!]
+    }
+    expect(everyPointNear(shuffled, lineA, SAME_ROUTE_TOLERANCE_M, meter)).toBe(true)
+    expect(everyPointNear([...shuffled, [0, 500]], lineA, SAME_ROUTE_TOLERANCE_M)).toBe(false)
+    expect(meter.gridEntries).toBeGreaterThan(0)
+    expect(meter.segmentChecks + meter.gridEntries).toBeLessThanOrEqual(30 * 5000)
+  })
+
+  it('counting changes nothing: the same answer with or without a meter', () => {
+    expect(mergeProbeRoutes(known, [...backOnKnown, sideStreet]).map((r) => r.id)).toEqual(['a', 'b', 'c', 'probe-s'])
   })
 })
