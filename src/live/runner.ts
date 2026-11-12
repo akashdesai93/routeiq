@@ -1,5 +1,7 @@
 import {
   LIVE_IDLE,
+  type CheckProbeMemory,
+  type DriveProbeBudget,
   liveStep,
   type LiveEffect,
   type LiveEvent,
@@ -32,6 +34,8 @@ export interface RoutesAnswer {
   readonly baseline?: readonly RouteCandidate[] | null
   /** How many requests the answer took, when not one. */
   readonly requests?: number
+  /** How many of them were side-street probes. Left out: none. */
+  readonly probes?: number
 }
 
 export interface RoutesQuery {
@@ -43,6 +47,14 @@ export interface RoutesQuery {
   readonly driving: { readonly route: RouteCandidate; readonly alongM: number } | null
   /** True when one more request may be spent on the current path's own travel time (see LiveEffect 'request-routes'). */
   readonly baseline: boolean
+  /** The side-street probes this check may make (see LiveEffect 'request-routes'). */
+  readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory; readonly budget: DriveProbeBudget }
+  /**
+   * To be called just before each request made for this query after the first
+   * (`probe` true for a side-street probe), so it is counted even if the query
+   * is cancelled before it answers.
+   */
+  readonly onRequest: (probe: boolean) => void
   readonly signal: AbortSignal
 }
 
@@ -139,11 +151,21 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
         const controller = new AbortController()
         inFlight = controller
         deps.onBusy?.(true)
-        const { requestId, purpose, origin, headingDeg, baseline } = effect
+        const { requestId, purpose, origin, headingDeg, baseline, probes } = effect
         const driving =
           state.route !== null && state.request !== null ? { route: state.route, alongM: state.request.alongM } : null
         void deps
-          .routes({ purpose, origin, destination, headingDeg, driving, baseline, signal: controller.signal })
+          .routes({
+            purpose,
+            origin,
+            destination,
+            headingDeg,
+            driving,
+            baseline,
+            probes,
+            onRequest: (probe) => dispatch({ type: 'request-sent', requestId, probe }),
+            signal: controller.signal,
+          })
           .catch((): RoutesAnswer => ({ routes: null, message: 'The route request failed.' }))
           .then((answer) => {
             if (inFlight !== controller || controller.signal.aborted) return
@@ -157,6 +179,7 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
               message: answer.message,
               baseline: answer.baseline,
               requests: answer.requests,
+              probes: answer.probes,
             })
           })
         return

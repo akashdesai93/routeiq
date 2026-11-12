@@ -82,6 +82,8 @@ export interface DriveOptions {
 export interface DriveLog {
   /** Every switch banner, in the order they appeared, with the second they appeared at. */
   banners: { atSec: number; text: string }[]
+  /** The drive view's quiet line (the engine's latest reason), each time it changed, with the second it showed. */
+  statusLines: { atSec: number; text: string }[]
   arrived: boolean
   seconds: number
 }
@@ -96,9 +98,14 @@ export class App {
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
   /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on. */
   readonly pathChecks: { n: number; road: string | null; vias: number }[] = []
-  /** Side-street probes (requests with a via point), in order: the road each one came back on, null for NoSegment. */
+  /**
+   * Side-street probes (one via point with a `radiuses` entry), in order: the road each one came
+   * back on, null for NoSegment. The plan screen's go out from the origin pin with no heading;
+   * a drive's go out from the moving car with its heading (`duringDrive`).
+   */
   readonly probes: {
     forRequest: number
+    duringDrive: boolean
     destination: LngLat
     road: string | null
     durationSec: number | null
@@ -242,7 +249,7 @@ export class App {
     let position: LngLat = UPTOWN
     let heading = 180
     let speed = 0
-    const log: DriveLog = { banners: [], arrived: false, seconds: 0 }
+    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0 }
     let lastBanner = ''
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
@@ -279,13 +286,19 @@ export class App {
       // fastForward fires each due timer once: the app sees the time pass, but the map draws one frame, not sixty a second.
       await page.clock.fastForward(STEP_SEC * 1000)
       const state = await this.settle()
+      if (state.status !== '' && state.status !== log.statusLines.at(-1)?.text) log.statusLines.push({ atSec: sec, text: state.status })
       if (state.banner !== '' && state.banner !== lastBanner) {
         log.banners.push({ atSec: sec, text: state.banner })
         // The banner made the sheet taller and the map shorter: one frame for the map to draw at its new size.
         await page.clock.runFor(20)
         await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
-        // The driver follows the app onto the route it switched to.
-        const next = world?.lastOffered[0]
+        // The driver follows the app onto the route it switched to: a side street a probe
+        // found during the drive, or else the fastest of what Mapbox offered.
+        const probed = this.probes.filter((p) => p.duringDrive && p.road !== null && p.road !== 'off-route').at(-1)?.road as RoadName | undefined
+        const next =
+          state.banner.includes('via side streets') && probed !== undefined && world !== undefined
+            ? { corners: world.cornersOf(probed) }
+            : world?.lastOffered[0]
         if (next !== undefined) {
           route = next.corners
           alongM = alongOf(route, position)
@@ -308,12 +321,14 @@ export class App {
    * Waits until no request is in flight in the page (two looks in a row), and
    * says what the drive view shows then.
    */
-  async settle(): Promise<{ banner: string; arrived: boolean }> {
+  async settle(): Promise<{ banner: string; status: string; arrived: boolean }> {
     let quiet = 0
     for (let i = 0; i < 4000; i++) {
       const look = await this.page.evaluate(() => ({
         inflight: (window as unknown as E2EWindow).__e2e.inflight,
         banner: document.querySelector('.live-banner')?.textContent ?? '',
+        // The engine's reason only, without "checked N s ago" and the request count after it.
+        status: (document.querySelector('.live-status')?.textContent ?? '').split(' · ')[0]!,
         arrived: document.querySelector('[aria-label="Drive summary"]') !== null,
       }))
       quiet = look.inflight === 0 ? quiet + 1 : 0
@@ -345,17 +360,20 @@ export class App {
           world = new World(from, to, { sideStreet })
           this.worlds.set(key, world)
         }
-        // A plan-screen side-street probe: one via and no bearings. The drive's own path check
-        // (baselineProbe) also sends vias, but from a moving car, with the heading as `bearings`.
-        if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && !url.searchParams.has('bearings')) {
-          // Through the via, answered with the traffic of the request it belongs to.
-          // The via's `radiuses` entry, as Mapbox reads it: no road that close is NoSegment.
-          const radiuses = url.searchParams.get('radiuses')
-          const viaRadius = Number(radiuses?.split(';')[1])
-          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, Number.isFinite(viaRadius) ? viaRadius : undefined)
+        // A side-street probe: one via with a `radiuses` entry of its own. The plan screen's
+        // come from the origin pin with no bearings; a drive's from the moving car, with its
+        // heading as `bearings`. The drive's own path check (baselineProbe) also sends vias,
+        // but with no `radiuses`: its points lie on the route being driven.
+        const radiuses = url.searchParams.get('radiuses')
+        const viaRadius = Number(radiuses?.split(';')[1])
+        if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && Number.isFinite(viaRadius)) {
+          // Through the via, answered with the traffic of the request it belongs to (the plan,
+          // or the drive's check it follows). As Mapbox reads the radius: no road that close is NoSegment.
+          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, viaRadius)
           const index =
             this.probes.push({
               forRequest: this.directionsRequests,
+              duringDrive: url.searchParams.has('bearings'),
               destination: to,
               road: probe.road,
               durationSec: probe.durationSec,

@@ -64,13 +64,28 @@ export const CORNERS = {
   E: [[0, 0], [18500, 0], [18500, 300], [19500, 300], [19500, 0], [20000, 0]],
 } as const satisfies Record<string, readonly Corner[]>
 
-export type RouteName = keyof typeof CORNERS
-export const ROUTE_NAMES = Object.keys(CORNERS) as RouteName[]
+/**
+ * Side streets the provider never offers among its routes (side-street
+ * probing, core/probe.ts): only a request through a via point beside A finds
+ * them. Not in ROUTE_NAMES, so drive() never offers one by itself.
+ * - S: leaves A at 6 km, runs 500 m south of it, rejoins at 14 km.
+ */
+export const SIDE_STREETS = {
+  S: [[0, 0], [6000, 0], [6000, -500], [14000, -500], [14000, 0], [20000, 0]],
+} as const satisfies Record<string, readonly Corner[]>
 
-const LINES = Object.fromEntries(ROUTE_NAMES.map((name) => [name, road(CORNERS[name])])) as unknown as Record<
-  RouteName,
+export type RouteName = keyof typeof CORNERS
+export type SideStreetName = keyof typeof SIDE_STREETS
+export const ROUTE_NAMES = Object.keys(CORNERS) as RouteName[]
+const ALL_CORNERS: Record<RouteName | SideStreetName, readonly Corner[]> = { ...CORNERS, ...SIDE_STREETS }
+
+const LINES = Object.fromEntries(Object.entries(ALL_CORNERS).map(([name, corners]) => [name, road(corners)])) as unknown as Record<
+  RouteName | SideStreetName,
   LngLat[]
 >
+
+/** The whole line of a route or side street, from the start (0, 0) to the end (20 km, 0). */
+export const lineOf = (name: RouteName | SideStreetName): readonly LngLat[] => LINES[name]
 
 /** Where on a line the point lies, in meters from the line's start. Null when it is more than a meter off it. */
 function alongOf(line: readonly LngLat[], point: LngLat): number | null {
@@ -93,7 +108,7 @@ let pollCounter = 0
  * polls). Null when the point is not on the route.
  */
 export function candidate(
-  name: RouteName,
+  name: RouteName | SideStreetName,
   from: LngLat,
   durationSec: number,
   extra: Partial<RouteCandidate> = {},
@@ -104,7 +119,7 @@ export function candidate(
   const geometry = lineFrom(full, fromM)
   if (geometry.length < 2) return null
   const maneuvers: Maneuver[] = [{ atDistanceM: 0, kind: 'depart', location: geometry[0]! }]
-  for (const [x, y] of CORNERS[name].slice(1, -1)) {
+  for (const [x, y] of ALL_CORNERS[name].slice(1, -1)) {
     const cornerM = alongOf(full, at(x, y))!
     if (cornerM > fromM) maneuvers.push({ atDistanceM: cornerM - fromM, kind: 'turn', location: at(x, y) })
   }
