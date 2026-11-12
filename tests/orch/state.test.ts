@@ -250,3 +250,13 @@ describe('what the owner reads', () => {
     expect(Object.keys(e0).sort()).toEqual(['at', 'kind', 'what', 'who'])
   })
 })
+
+// Comments typed in GitHub's web editor arrive with CRLF, and a Windows checkout gives the
+// fixture CRLF too: the state must be the same as from LF.
+describe('CRLF in comment bodies', () => {
+  it('derives exactly the same files from the night with every line ending CRLF', () => {
+    const crlf: Json = JSON.parse(JSON.stringify(night, (_k, v) => (typeof v === 'string' ? v.replace(/\n/g, '\r\n') : v)))
+    const now = '2026-11-12T11:33:00Z'
+    expect(outputs(derive(crlf, { now }))).toEqual(outputs(derive(night, { now })))
+  })
+})

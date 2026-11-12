@@ -13,6 +13,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { lf } from './lib/eol.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ROLES_DIR = join(ROOT, '.claude', 'orch', 'roles')
@@ -20,7 +21,8 @@ const RULES_FILE = join(ROOT, '.claude', 'orch', 'rules.md')
 const KNOWN = ['name', 'issues', 'prs', 'note', 'rules']
 
 /** Splits a template into its header fields and body. */
-export function parseTemplate(text) {
+export function parseTemplate(source) {
+  const text = lf(source) // a Windows checkout has CRLF files
   const m = /^<!-- role template\n([\s\S]*?)\n-->\n/.exec(text)
   if (!m) return { error: 'the template must start with a "<!-- role template" header' }
   const header = {}
@@ -68,7 +70,7 @@ export function renderPrompt(tpl, input, rulesText) {
     if (p.name === 'issues' && issues.length === 0) return { error: `${tpl.role} needs --issues` }
     if (p.name === 'prs' && prs.length === 0) return { error: `${tpl.role} needs --prs` }
   }
-  const note = (input.note || '').trim()
+  const note = lf(input.note).trim()
   if (note.split('\n').length > 6) return { error: 'keep --note to a few lines; anything longer belongs in the issue' }
   const values = {
     name,
@@ -76,7 +78,7 @@ export function renderPrompt(tpl, input, rulesText) {
     prs: prs.length ? ` (start with ${prs.map((n) => `#${n}`).join(', ')})` : '',
     note: note ? `### Specifics for this run\n\n${note}` : '',
   }
-  const rules = rulesText.replace(/\{\{name\}\}/g, name).trim()
+  const rules = lf(rulesText).replace(/\{\{name\}\}/g, name).trim()
   const text = tpl.body
     .replace(/\{\{rules\}\}/g, () => rules) // a function: `$&`, `$1`, `$$` in the rules stay text
     .replace(/\{\{(name|issues|prs|note)\}\}/g, (_, k) => values[k])
