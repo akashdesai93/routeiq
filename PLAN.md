@@ -196,6 +196,15 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    keeps them when opened from Safari); leg-by-leg Waze (navigate to each pin in turn);
    the native app should use the `comgooglemaps://` and `waze://` schemes when installed.
 10. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
+    Done (Nov 12, 2026, #7): `CORE_CONTRACT_VERSION` (1) in `src/core/contract.ts`; the
+    contracts and how to change one in `docs/contracts.md`; a type snapshot of every contract
+    declaration and what it refers to, with a hash and a version history, in
+    `docs/contracts/core-contract.json`; JSON Schemas for the signal tile, the bundle index, the
+    stored place book and the native plugin payloads in `docs/contracts/schemas`.
+    `tests/contracts.test.ts` fails on a change of shape without a bump, and checks the shipped
+    tiles, index and place book against the schemas and the schemas against the types. Open for
+    later: the Swift port matches no version yet (#33); a schema for `RouteCandidate` itself if a
+    service ever reads it as JSON.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
     faster cut-through that is not among them is never considered. Widen the search:
     - **Via probing (first).** A pure `src/core/probe.ts` picks candidate via points,

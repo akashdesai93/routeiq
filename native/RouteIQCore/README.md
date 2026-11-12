@@ -25,6 +25,24 @@ same JSON fixtures straight from `tests/fixtures`.
 | `RouteIQKit/SignalBundle.swift` | `providers/osm/bundle.ts`, `bundleLayer.ts`, `signalData.ts` (bundle only) | Parity: `Tests/RouteIQKitTests/Fixtures/signal-parity.json`, the web app's own counts on the real bundle |
 | `JS.swift` | (none) | JavaScript number and string semantics the TypeScript relies on |
 
+## Contract version
+
+The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/contract.ts`, and
+[docs/contracts.md](../../docs/contracts.md)). The current version is **1**.
+
+This port does not match version 1 yet. It predates the first frozen version and lags `main`
+(#33). Among the things missing:
+- `RouteCandidate.segmentTraffic` and `RouteCandidate.source`;
+- `RerouteState.declined` and `declineRoute`;
+- `RerouteOptions.matchMaxDivergenceM`;
+- the guidance steps;
+- the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`);
+- the place book.
+
+When it catches up, write the version it matches here. From then on, compare
+`docs/contracts/core-contract.json` (`declarations`, one line per type) with the Swift types when
+the version changes. The `history` there lists every version with its hash.
+
 Not ported yet:
 
 - `places.ts` and `search.ts`: saved places and search sessions, needed when the app gets a Plan

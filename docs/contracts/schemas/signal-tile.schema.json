@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "routeiq/signal-tile.schema.json",
+  "title": "OsmSignalTile",
+  "description": "One bundled signal tile, public/seed/osm-signals/<tileId>.json, and the shape held in the device cache (src/providers/osm/adapter.ts). Every OpenStreetMap node tagged highway=traffic_signals that RouteIQ counts, in one 0.1 degree tile. Data © OpenStreetMap contributors, ODbL 1.0.",
+  "type": "object",
+  "required": ["tileId", "fetchedAt", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "tileId": {
+      "description": "<x>_<y>: the tile's west and south edges in tenths of a degree (src/core/tiles.ts).",
+      "type": "string",
+      "pattern": "^-?\\d+_-?\\d+$"
+    },
+    "fetchedAt": {
+      "description": "How current the data is, milliseconds since 1970: for a bundled tile the date of the extract it was built from.",
+      "type": "number",
+      "minimum": 0
+    },
+    "nodes": {
+      "description": "Empty for a tile with no signals.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "node": {
+      "title": "OsmSignalNode",
+      "type": "object",
+      "required": ["id", "lng", "lat"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "The OpenStreetMap node id.", "type": "integer", "minimum": 0 },
+        "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 }
+      }
+    }
+  }
+}
