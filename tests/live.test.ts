@@ -1559,7 +1559,7 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.state.engine.declined![0]!.untilSec).toBeCloseTo(662, 0)
     expect(s.view().moment).toEqual({
       stage: 'kept',
-      title: 'Keeping the previous route.',
+      title: 'Staying on your route.',
       detail: "Won't offer that route again for 10 min.",
       canKeep: false,
     })

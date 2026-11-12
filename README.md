@@ -1224,7 +1224,7 @@ banner over the time line. Amber appears only here, and only for news.
 - **Kept**: "Keep my route" (at either stage) leaves the driver on, or puts them back on,
   the route they were on, and tells the engine not to offer the other route again for
   `noReturnSec` (10 minutes). A calm outline, not amber, for `switchBannerSec`:
-  "Keeping the previous route." (the spoken line) and "Won't offer that route again for
+  "Staying on your route." (the spoken line, as in the design, #43) and "Won't offer that route again for
   10 min." Once that time is up, a route that is still faster comes back as an ordinary
   pending offer titled "Still faster. Checking again." if it turns off within
   `heldTurnMatchM` (50 m) of where a route the driver turned down did; any other route is

@@ -423,7 +423,7 @@ export interface LiveStep {
 export const SPOKEN = {
   started: 'RouteIQ started',
   offRoute: 'You are off the route. Finding a new one.',
-  keptPrevious: 'Keeping the previous route.',
+  keptPrevious: 'Staying on your route.',
 } as const
 
 function times(n: number): string {
