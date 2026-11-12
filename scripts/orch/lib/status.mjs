@@ -208,7 +208,7 @@ export function parseHeartbeat(comment) {
 
 /** "lab-window: until 11:30 UTC" posted at `at`: the end of the window as an ISO time, or null. */
 export function parseLabWindow(comment) {
-  const m = /^lab-window:\s*(?:until\s+)?(\d{1,2}):(\d{2})\s*(?:UTC|Z)?\s*$/i.exec(firstLine(comment.body || ''))
+  const m = /^lab-window:\s*(?:until\s+)?(\d{1,2}):(\d{2})\s*(?:UTC|Z)?\s*(?:·\s*voice ok)?\s*$/i.exec(firstLine(comment.body || ''))
   if (!m) return null
   const at = new Date(comment.created_at)
   const end = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), Number(m[1]), Number(m[2])))

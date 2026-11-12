@@ -234,10 +234,12 @@ The lab is the only role that touches the phone. Details and the preflight are i
   comment on #17, posted by the orchestrator when the owner says so.
   Never starts by itself when the phone gets unlocked: the owner may be picking it up to leave.
 - No hardware buttons, no forced sleep. Location is only ever the simulated drive.
-- Quiet hours 03:00–12:00 UTC (22:00–07:00 in Charlotte): no scenario that speaks.
-- Tests only a build of the PR's current head commit; a stale build is refused.
+- Quiet hours 22:00–07:00 on the PC's clock: no scenario that speaks, unless the window says
+  `· voice ok`. `run.mjs` enforces it.
+- Tests only a build of the PR's current head commit; `preflight.mjs` refuses a stale one.
 - A credential or trust prompt on the PC or the phone: stop, post `state: blocked`, never retry.
-- The lab agent does not wake itself to poll; the queue script waits without a model.
+- The lab agent does not wake itself to poll; the queue script waits without a model, and
+  `queue.mjs --wait-unlocked` needs `--until`, the end of the owner's window.
 
 ## What changed after the first night, and why
 
