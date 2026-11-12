@@ -108,7 +108,7 @@ the declarations that changed.
 | Side | Matches | Notes |
 | --- | --- | --- |
 | Web app (`src/`) | 3 | by definition |
-| Swift port (`native/RouteIQCore`) | 3, in part: routes, signal tiles and bundle, reroute engine (#33 stage A) | live drive and place book not yet; see its README and #33 |
+| Swift port (`native/RouteIQCore`) | 3, for everything but the place book: routes, signal tiles and bundle, reroute engine, live drive (#33) | place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 3 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
