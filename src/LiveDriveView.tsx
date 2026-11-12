@@ -236,12 +236,13 @@ const MoreSheet = memo(function MoreSheet({ lights, lightsHint, distance, muted,
           <span className="live-tile-label">Auto-switch</span>
           <span className="live-tile-word">On</span>
         </div>
+        {/* A switch named by its own words ("Voice On"), so "tap Voice" works with Voice Control (#133). */}
         <button
           type="button"
+          role="switch"
           className="live-tile live-voice"
           data-tile="voice"
-          aria-pressed={muted}
-          aria-label={muted ? 'Unmute' : 'Mute'}
+          aria-checked={!muted}
           onClick={() => onMute(!muted)}
         >
           <span className="live-tile-label">Voice</span>
