@@ -1,6 +1,7 @@
 name: CI
 
-# The web checks: typecheck, lint, unit tests, the production build and its size budget.
+# The web checks: typecheck, lint, unit tests, the production build and its size budget,
+# and the iPhone shell's web side (its unit tests, web build and Xcode project, on Linux).
 # Called by gate.yml on every pull request and every push to main (it has no triggers of
 # its own, so each change runs once); it can also be started by hand.
 #
@@ -29,6 +30,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            native/shell/package-lock.json
 
       - run: npm ci
       - run: npm run typecheck
@@ -43,6 +47,28 @@ jobs:
 
       - name: Bundle size budget (scripts/bundle-budget.json)
         run: npm run size
+
+      # What a change to the web app can break in the iPhone shell, checked here in seconds:
+      # the shell's unit tests (Info.plist patch, bridge script, token search), the web app
+      # built into native/shell/www with no token and the bridge script (build-web.mjs fails
+      # on a token in the bundle, paths outside the site root, or missing signal tiles), and
+      # the Xcode project generated and patched from it (generate-ios.mjs checks the plugin
+      # is linked and registered and the web app was copied in). Compiling and packaging the
+      # .ipa needs macOS: shell-ios.yml, on the pull requests and pushes listed in gate.yml.
+      - name: Shell (native/shell) unit tests, web build with no token, Xcode project
+        working-directory: native/shell
+        env:
+          VITE_MAPBOX_TOKEN: ''
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm run ios:generate
+          if LC_ALL=C grep -r -a -l -E '[ps]k\.eyJ[A-Za-z0-9_-]{8,}' www ios; then
+            echo "::error::a Mapbox token was found in the shell's web build or Xcode project (files listed above)"
+            exit 1
+          fi
+          echo "no Mapbox token in native/shell/www or native/shell/ios"
 
       # Known vulnerabilities in what ships (no dev dependencies), in the three projects.
       # It warns and never fails the job: a new advisory must not block unrelated work.

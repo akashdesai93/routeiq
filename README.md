@@ -61,8 +61,9 @@ extracts on disk); see Data sources.
 
 CI runs on every pull request and every push to `main` from one workflow,
 `.github/workflows/gate.yml`. It calls `ci.yml` (`npm ci`, typecheck, lint, tests, the
-production build and its size budget, on Node 24 on Ubuntu) and `e2e.yml` (the end-to-end
-scenarios, report uploaded as the `e2e-report` artifact) every time, and the Swift tests
+production build and its size budget, the iPhone shell's web build and Xcode project, on
+Node 24 on Ubuntu) and `e2e.yml` (the end-to-end scenarios, dealt over eight runners by
+`e2e/shard.mjs`, merged into the `e2e-report` artifact) every time, and the Swift tests
 and the two macOS builds when their paths change. Its last job, `required`, is the one
 status check `main` requires: `main` is protected and every change arrives through a pull
 request. See [docs/branch-protection.md](docs/branch-protection.md).
