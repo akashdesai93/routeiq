@@ -63,7 +63,7 @@ stopped one is restarted by its next firing; nobody has to notice.
 | `blocked` | issue | held; with a `Held:` or `Blocked by #N` comment | anyone |
 | `needs-human` | issue or PR | waiting on the owner; with one `Decision needed:` comment. **Fails `required` on a PR** | anyone; only the owner's answer removes it |
 | `triage`, `review`, `p1`–`p3` (exactly one), `area:*` | issue | as before | anyone |
-| `needs-phone` | PR | must be checked on the real iPhone. **Fails `required` until `phone-verified` is added** | the author or reviewer; also implied by `PHONE CHECK NEEDED` in the PR body |
+| `needs-phone` | PR | must be checked on the real iPhone. **Fails `required` until `phone-verified` is added** | the author or reviewer; also implied by a line of the PR body that starts with `PHONE CHECK NEEDED` |
 | `phone-verified` | PR | the phone lab passed this PR | the phone lab or the owner only |
 | `do-not-merge` | PR | not finished. **Fails `required`.** Use it instead of a draft | the author |
 | `status-board` | #17 | the board | — |
@@ -141,7 +141,7 @@ protection asks for the one check `required` (`docs/branch-protection.md`).
 | web, e2e, native, macOS builds | `gate.yml` | as before |
 | skip-ci marker (#143) | `gate.yml` `merge-message` | the title or a commit carries `[skip ci]` or another skip marker |
 | hold labels | `gate.yml` `required` (`scripts/orch/gates.mjs`) | the PR has `do-not-merge` or `needs-human` |
-| phone | same | the PR has `needs-phone`, or its body says `PHONE CHECK NEEDED`, and has no `phone-verified` |
+| phone | same | the PR has `needs-phone`, or a line of its body starts with `PHONE CHECK NEEDED`, and has no `phone-verified` |
 | up to date by area | same | `main` changed an area this PR also changes (web app, iPhone shell, Swift core, native app, design, CI) after the PR's base: **update the branch** |
 | re-check when things change | `gates.yml` | re-runs `required` of a PR when its labels or body change, and of every PR in an area `main` just changed |
 | main red | `main-red.yml` | opens the `main is red` issue (p1) |

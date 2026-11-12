@@ -31,6 +31,12 @@ describe('phone gate', () => {
     expect(evaluate(pr({ labels: ['needs-phone', 'phone-verified'], body: PR_158_BODY }), null).ok).toBe(true)
   })
 
+  it('does not hold a PR that only quotes the marker (#159, and #167 explaining this gate)', () => {
+    expect(evaluate(pr({ body: '#158\'s own description said **"PHONE CHECK NEEDED before merge"**: at night' }), null).ok).toBe(true)
+    expect(evaluate(pr({ body: '| phone | `needs-phone`, or `PHONE CHECK NEEDED` in the body |' }), null).ok).toBe(true)
+    expect(gates(evaluate(pr({ body: 'Battery.\n\nPHONE CHECK NEEDED before merge' }), null))).toEqual(['phone'])
+  })
+
   it('does not hold a PR that only talks about phones', () => {
     expect(evaluate(pr({ body: 'Fixes the phone lab report test.' }), null).ok).toBe(true)
   })
