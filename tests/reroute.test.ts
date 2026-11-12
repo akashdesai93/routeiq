@@ -17,6 +17,7 @@ import {
   pointToSegment,
   rememberCheckProbes,
   type CheckProbeMemory,
+  type DriveProbeBudget,
   type LngLat,
   type MatchMeter,
   type RerouteDecision,
@@ -1402,9 +1403,11 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
     /** The path check's time for A, when it reads otherwise than etaA x (1 - bias). */
     pathCheckSec?: number
     options?: Partial<RerouteOptions>
+    /** The drive's probe budget (the back-off among it). */
+    budget?: Partial<DriveProbeBudget>
   }
 
-  function probedDrive({ polls, etaA, etaS, bias = 0, startAlongM = 1000, probeFailsAt = [], pathCheckFailsAt = [], unlike = false, pathCheckSec, options = {} }: ProbedDrive) {
+  function probedDrive({ polls, etaA, etaS, bias = 0, startAlongM = 1000, probeFailsAt = [], pathCheckFailsAt = [], unlike = false, pathCheckSec, options = {}, budget = {} }: ProbedDrive) {
     const route = candidate('A', at(0, 0), 2400)!
     const heldUp = { typicalDurationSec: etaA - 300 }
     const viaAsked = (sec: number) => Math.round(sec * (1 - bias))
@@ -1415,7 +1418,7 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
       const alongM = startAlongM + poll * 300
       const here = pointAtDistance(route.geometry, alongM)!.point
       const fresh = [candidate('A', here, etaA, heldUp), candidate('B', here, etaA + 200)].filter((c) => c !== null)
-      const vias = checkProbes({ route, alongM, fresh, memory, allowed: 1 })
+      const vias = checkProbes({ route, alongM, fresh, memory, allowed: 1, budget })
       // Past the point where S leaves A, this network has no road from the car onto S: no route that way.
       const probed = vias.flatMap((via) => {
         const side = probeFailsAt.includes(poll) || distanceToS(via) > 250 ? null : candidate('S', here, viaAsked(etaS), { typicalDurationSec: etaS })
@@ -1432,7 +1435,7 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
       )
       records.push({ decision, vias, found })
       state = decision.nextState
-      memory = rememberCheckProbes(memory, vias.length, decision, candidates)
+      memory = rememberCheckProbes(memory, vias.length, decision, candidates, 0, { route, alongM, baseline: pathCheck })
       if (decision.action === 'switch') {
         const to = candidates.find((c) => c.id === decision.toRouteId)!
         return { records, switchedTo: { poll, route: to }, memory }
@@ -1456,7 +1459,7 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
     expect(considered.turnInM).toBeCloseTo(4700, 0)
     expect(records[1]!.decision.reason).toBe('Switching: saves 3 minutes, turn in 2.9 miles')
     // A switch drops the via: the next check starts from the new route.
-    expect(memory).toEqual({ used: 2, round: 2, keep: null })
+    expect(memory).toEqual({ used: 2, round: 2, keep: null, losing: 0, losingSlowdown: null })
   })
 
   it('an equal-time side street never switches, however low the via-asked time comes back (#81)', () => {
@@ -1503,7 +1506,8 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
   })
 
   it('a side street that saves only 60 s never triggers a switch, however often it is found', () => {
-    const { records, switchedTo } = probedDrive({ polls: 12, etaA: 2000, etaS: 1940 })
+    // (The back-off after probes that keep losing is off here: this is about the engine. See the next test.)
+    const { records, switchedTo } = probedDrive({ polls: 12, etaA: 2000, etaS: 1940, budget: { losingChecks: 1e9 } })
     expect(switchedTo).toBeNull()
     // Nothing is being confirmed, so the two sides of the road take turns: S is south, found every other check.
     expect(records.map((r) => r.found)).toEqual(Array.from({ length: 12 }, (_, i) => i % 2 === 0))
@@ -1512,6 +1516,25 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
     expect(new Set(records.filter((r) => !r.found).map((r) => r.decision.code))).toEqual(new Set(['current-best']))
     expect(onS[0]!.decision.reason).toBe('Staying: faster route saves only 60 seconds')
     expect(onS[0]!.decision.considered!.savingSec).toBe(60)
+  })
+
+  it('probes that keep losing stop after three losses in a row, and the engine still never switches (#183)', () => {
+    const { records, switchedTo, memory } = probedDrive({ polls: 12, etaA: 2000, etaS: 1940 })
+    expect(switchedTo).toBeNull()
+    // The two sides take turns; only the south one finds S. A loss is S found and slower than
+    // staying by too little to switch: on checks 1, 3 and 5. The north probes (no road there)
+    // tell nothing. After the third loss no probe goes out: the slowdown ahead stays the same.
+    expect(records.map((r) => r.vias.length)).toEqual([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    expect(records.filter((r) => r.found)).toHaveLength(3)
+    expect(memory).toMatchObject({ round: 5, losing: 3, losingSlowdown: 2000 / 1700 })
+  })
+
+  it('probes that failed or found no road are not losses: a side street found later still switches (#183)', () => {
+    // The first and third probes fail (no answer): with them counted as losses the back-off would
+    // hold before S was ever confirmed.
+    const { switchedTo } = probedDrive({ polls: 8, etaA: 2000, etaS: 1820, probeFailsAt: [0, 2] })
+    expect(switchedTo).not.toBeNull()
+    expect(nameOf(switchedTo!.route)).toBe('S')
   })
 
   it('a side street is held to 5 % of the time left as well: 2.5 minutes on a 60-minute trip is not enough', () => {

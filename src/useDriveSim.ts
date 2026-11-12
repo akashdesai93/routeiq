@@ -220,7 +220,12 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       latest.current.rerouteOptions,
     )
     run.engine = decision.nextState
-    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates, probesSent)
+    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates, probesSent, {
+      route: run.route,
+      alongM: run.clock.alongM,
+      baseline: result.ok ? result.baseline : null,
+      rerouteOptions: latest.current.rerouteOptions,
+    })
     const viaSideStreets = decision.action === 'switch' && fresh?.find((c) => c.id === decision.toRouteId)?.source === 'probe'
     const reason = viaSideStreets ? `${decision.reason} (via side streets)` : decision.reason
     const said = result.ok ? reason : `${reason} (${result.message})`

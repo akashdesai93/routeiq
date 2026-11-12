@@ -283,6 +283,18 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       turns out to miss
       side streets on real trips; probes from inside the side street's own stretch see
       only what Mapbox offers from there.
+      Probe back-off and skip reasons (#183, items 2 and 4): after 3 losses in a row (a side
+      street found, compared like for like, not holding up) the checks stop probing until the
+      slowdown ahead changes by 0.1 (`probeBackoffHolds`, `DriveProbeBudget.losingChecks`,
+      `rearmSlowdownChange`), and a
+      check that sent no probe says why in the shell's diagnostics (`checkProbePlan`,
+      `ProbeSkip`). e2e: "when the side streets keep losing, it stops asking after three
+      losses". Open for later: the six unexplained checks of the desk drive (item 4) are read
+      from the next phone drive's "probes skipped" line; the likely reasons there are
+      "nothing to probe" (the stretches ahead were freeway) and "route not found" (the
+      route being driven was not among Mapbox's answers and the path check was not made).
+      The back-off has no time or distance decay, and it watches only the route being driven:
+      a side street that clears (a train crossing) does not re-arm it.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

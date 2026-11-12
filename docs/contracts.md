@@ -108,8 +108,8 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 7 | by definition |
-| Swift port (`native/RouteIQCore`) | 7, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment and each check's summary (#33, #84, #175) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
+| Web app (`src/`) | 8 | by definition |
+| Swift port (`native/RouteIQCore`) | 8, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment and each check's summary (#33, #84, #175) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
@@ -143,3 +143,7 @@ the declarations that changed.
   check's answer had; null when none came back or the previous route was kept) and `savingSec`
   (the considered alternative's like-for-like saving, `RerouteAlternative.savingSec`; 0 for
   `current-best`, null when the engine could not compare). Read by the drive diagnostics; the reroute engine is unchanged.
+- **8** (Nov 12, 2026, #183): the back-off after side-street probes that keep losing.
+  `DriveProbeBudget` gains `losingChecks` and `rearmSlowdownChange`; `CheckProbeMemory` gains
+  `losing` and `losingSlowdown`; the new `ProbeSkip` (why a check sent no probe) and
+  `CheckProbePlan`. Ported to Swift (`Probe.checkProbePlan`, `Probe.probeBackoffHolds`).

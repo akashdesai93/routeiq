@@ -1,6 +1,6 @@
 {
-  "version": 7,
-  "hash": "b30ca72be747763fadd9ce65826e53f2242280a43e320be0b81196c43103976c",
+  "version": 8,
+  "hash": "927ffb8e61478d0552c81b05144ed665591c4b822dfb84d1b65b4260b2bf828b",
   "history": [
     {
       "version": 1,
@@ -29,15 +29,19 @@
     {
       "version": 7,
       "hash": "b30ca72be747763fadd9ce65826e53f2242280a43e320be0b81196c43103976c"
+    },
+    {
+      "version": 8,
+      "hash": "927ffb8e61478d0552c81b05144ed665591c4b822dfb84d1b65b4260b2bf828b"
     }
   ],
   "declarations": {
-    "CheckProbeMemory": "interface CheckProbeMemory { readonly used : number readonly round : number readonly keep : LngLat | null }",
+    "CheckProbeMemory": "interface CheckProbeMemory { readonly used : number readonly round : number readonly keep : LngLat | null readonly losing : number readonly losingPace : number | null }",
     "CongestionLevel": "type CongestionLevel = 'low' | 'moderate' | 'heavy' | 'severe' | 'unknown'",
     "DistanceSpanM": "type DistanceSpanM = readonly [ startM : number , endM : number ]",
     "DriveLog": "interface DriveLog { readonly version : typeof DRIVE_LOG_VERSION readonly drives : readonly DriveRecord [ ] }",
     "DriveOutcome": "type DriveOutcome = 'arrived' | 'ended' | 'unfinished'",
-    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number }",
+    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number readonly losingChecks : number readonly rearmPaceChange : number }",
     "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome }",
     "GuidanceAnnouncement": "interface GuidanceAnnouncement { readonly atDistanceM : number readonly text : string }",
     "GuidanceCursor": "interface GuidanceCursor { readonly next : number }",

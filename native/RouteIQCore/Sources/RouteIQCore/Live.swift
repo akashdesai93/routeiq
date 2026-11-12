@@ -1017,7 +1017,10 @@ public enum Live {
         var next = state
         next.request = nil
         next.engine = decision.nextState
-        next.probes = Probe.rememberCheckProbes(state.probes, probes, decision, routes, alreadyCounted: probesCounted)
+        next.probes = Probe.rememberCheckProbes(
+            state.probes, probes, decision, routes, alreadyCounted: probesCounted,
+            driven: (route: route.geometry, alongM: sent.alongM, baseline: baseline, rerouteOptions: opts.reroute)
+        )
         next.lastDecision = LiveState.Decision(action: decision.action, code: .reroute(decision.code), reason: reason, atMs: nowMs, routes: routes?.count, savingSec: decision.considered?.savingSec ?? (decision.code == .currentBest ? 0 : nil))
         guard let routes else { return LiveStep(state: next, effects: []) }
 

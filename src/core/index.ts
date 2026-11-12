@@ -193,6 +193,8 @@ export {
 export {
   checkProbeAllowance,
   checkProbes,
+  checkProbePlan,
+  probeBackoffHolds,
   DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
@@ -207,6 +209,8 @@ export {
   sideStreetNotice,
   type CheckProbeInput,
   type CheckProbeMemory,
+  type CheckProbePlan,
+  type ProbeSkip,
   type DriveProbeBudget,
   type ProbeBudget,
   type ProbeOptions,

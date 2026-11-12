@@ -485,7 +485,47 @@ final class ProbeTestsDuringADrive: XCTestCase {
 
     // it('has one documented budget')
     func testSideStreetProbesDuringADrive_hasOneDocumentedBudget() {
-        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8))
+        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, losingChecks: 3, rearmSlowdownChange: 0.1))
+    }
+
+    // it('holds after 3 losing checks in a row, until the pace ahead changes by 15 %') (#183)
+    func testBackoff_holdsAfter3LossesInARowUntilTheSlowdownAheadChanges() {
+        func m(_ losing: Int, _ slowdown: Double?) -> CheckProbeMemory { CheckProbeMemory(losing: losing, losingSlowdown: slowdown) }
+        XCTAssertFalse(Probe.probeBackoffHolds(m(2, 1.6), slowdownNow: 1.6))
+        XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.6))
+        XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.69))
+        XCTAssertFalse(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.71))
+        XCTAssertFalse(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.49))
+        XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.51))
+        XCTAssertTrue(Probe.probeBackoffHolds(m(3, nil), slowdownNow: 3))
+        XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: nil))
+        XCTAssertFalse(Probe.probeBackoffHolds(m(5, 1.6), slowdownNow: 1.6, budget: DriveProbeBudget(losingChecks: 6)))
+    }
+
+    private func plan(fresh: [RouteCandidate]? = nil, route: RouteCandidate? = nil, alongM: Double = 1000, memory: CheckProbeMemory = .initial, allowed: Double = 1) -> CheckProbePlan {
+        Probe.checkProbePlan(CheckProbeInput(route: (route ?? self.route).geometry, alongM: alongM, fresh: fresh ?? [freshA(), freshB()], memory: memory, allowed: allowed))
+    }
+
+    // describe('checkProbePlan: why a check sends no probe (#183)'), it('each reason, in the order the rules are asked')
+    func testCheckProbePlan_eachReasonInTheOrderTheRulesAreAsked() {
+        let backedOff = CheckProbeMemory(losing: 3, losingSlowdown: 1.25)
+        XCTAssertNil(plan().skipped)
+        XCTAssertEqual(plan().points.count, 1)
+        XCTAssertEqual(plan(fresh: [], allowed: 0).skipped, .budget)
+        XCTAssertEqual(plan(fresh: []).skipped, .routeNotFound)
+        XCTAssertEqual(plan(route: Fx.world(.C, 1700), alongM: 9000).skipped, .routeNotFound)
+        let onTime = [DriveWorld.candidate(.A, here, 1500) { $0.typicalDurationSec = 1450 }!, freshB()]
+        XCTAssertEqual(plan(fresh: onTime).skipped, .notHeldUp)
+        XCTAssertEqual(plan(fresh: onTime, memory: backedOff).skipped, .notHeldUp)
+        let allFreeway = [DriveWorld.candidate(.A, here, 1500) { $0.typicalDurationSec = 1200; $0.limitedAccessSpansM = [DistanceSpanM(0, 30_000)] }!, freshB()]
+        XCTAssertEqual(plan(fresh: allFreeway).skipped, .nothingToProbe)
+        XCTAssertEqual(plan(memory: backedOff), CheckProbePlan(points: [], skipped: .backingOff))
+        XCTAssertNil(plan(memory: CheckProbeMemory(losing: 3, losingSlowdown: 1.14)).skipped)
+        XCTAssertEqual(plan(memory: CheckProbeMemory(losing: 3, losingSlowdown: 1.16)).skipped, .backingOff)
+        // The via of a side street being confirmed is asked even when backing off, or with nothing new to probe beside.
+        let keep = at(9000, -500)
+        XCTAssertEqual(plan(memory: CheckProbeMemory(keep: keep, losing: 3, losingSlowdown: 1.25)), CheckProbePlan(points: [keep], skipped: nil))
+        XCTAssertEqual(plan(fresh: allFreeway, memory: CheckProbeMemory(keep: keep)), CheckProbePlan(points: [keep], skipped: nil))
     }
 
     // MARK: describe('checkProbeAllowance: probes share the drive request budget')
@@ -675,6 +715,23 @@ final class ProbeTestsDuringADrive: XCTestCase {
         var switched = confirming(s.id, s)
         switched.action = .switchRoute
         XCTAssertNil(Probe.rememberCheckProbes(memory, 1, switched, [b, s]).keep)
+    }
+
+    // it('counts a loss only for a side street that came back, was compared like for like and did not hold up (#183)')
+    func testRememberCheckProbes_countsALossOnlyForASideStreetComparedLikeForLike() {
+        let s = sideStreet()
+        let b = freshB()
+        let lost = RerouteDecision(action: .stay, toRouteId: nil, reason: "", code: .savingTooSmall, considered: nil, current: nil, nextState: .initial)
+        let driven = (route: route.geometry, alongM: 1000.0, baseline: [RouteCandidate]?.none, rerouteOptions: RerouteOptions.default)
+        let once = Probe.rememberCheckProbes(.initial, 1, lost, [freshA(), b, s], driven: driven)
+        XCTAssertEqual([Double(once.losing), once.losingSlowdown ?? -1], [1, 1.25])
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, lost, [freshA(), b], driven: driven).losing, 1)
+        var unconfirmed = lost
+        unconfirmed.code = .probeUnconfirmed
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, unconfirmed, [freshA(), b, s], driven: driven).losing, 1)
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 0, lost, [freshA(), b, s], driven: driven).losing, 1)
+        XCTAssertNil(Probe.rememberCheckProbes(.initial, 1, lost, [freshA(), b, s]).losingSlowdown)
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, confirming(s.id, s), [b, s]).losing, 0)
     }
 
     // it('a failed check keeps it, as the engine keeps its confirmation; a check without probes takes no turn')

@@ -1012,11 +1012,29 @@ lead distance, the cooldown, no return. No threshold changed.
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
   check that is cancelled before it answers (End, off the route, "Keep my route")
   count too, and 60 and 20 are exact.
+- **Back-off (#183).** After `losingChecks` (3) losses in a row the checks stop probing. A
+  loss is a check whose probe came back with a side street that was compared like for like
+  (with the path check) and did not hold up (it is not being confirmed). A probe that found
+  no road, failed or timed out, or one whose like-for-like time was missing, tells nothing
+  and is not counted (unknown is not a loss). They start again when the traffic ahead
+  changes: the route's slowdown (its fresh time over its typical one, as the check found it)
+  is `rearmSlowdownChange` (0.1, as from 1.6 to 1.7 times the usual time) higher or lower
+  than at the last loss. A share, not seconds: the same slow traffic is fewer seconds late
+  as less of the trip is left, and that is no change. A switch, or a probed
+  route that holds up, starts the count again. The via of a probed route being confirmed is
+  never held back, not even where nothing new is left to probe beside. An unknown delay
+  re-arms nothing. A desk drive on a real corridor had sent 18 probes that all lost by 4 to
+  6 minutes.
 - **Said as such.** A switch onto a probed route says "Switching to a faster route via side
   streets. Saves 4 minutes. Turn in 1.1 miles.", and the banner shows that line word for
   word; the simulated drive's log adds "(via side streets)".
 - **Diagnostics.** In the iPhone shell's drive diagnostics a probe is logged as
   "request N (probe)" and a path check as "request N (path check)", with a count of each.
+  A check that sent no probe says why, tallied as "probes skipped: N: …", most first, from a
+  fixed list (`ProbeSkip`, `PROBE_SKIPS`): no request to spare (the caps, the path check's
+  request, or the checks until arrival), your route was not among the answers, your route
+  was not held up, no side street to try (freeway only, or near the end), or backing off.
+  An event is noted only when the reason changes.
   A probe that finds no road (NoSegment) or no route is a normal answer, not a fault.
 
 | `DEFAULT_DRIVE_PROBE_BUDGET` | Default | Meaning |
@@ -1025,6 +1043,8 @@ lead distance, the cooldown, no return. No threshold changed.
 | `requestsPerDrive` | 20 | Most probe requests per drive, out of `maxRequests` (60) |
 | `minDelaySec` | 120 s | A route with no jam reported ahead is probed only when it is this far over its typical time |
 | `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
+| `losingChecks` | 3 | Losses in a row (a side street found, compared like for like, not holding up) after which the checks stop probing |
+| `rearmSlowdownChange` | 0.1 | How much the slowdown ahead (fresh time over typical) must change, either way, to end the back-off |
 
 What a check costs: 1 request, plus 1 for the path check when the route being driven is
 not among the fresh routes, plus 0 or 1 probe, plus 1 path check after a probe that found
