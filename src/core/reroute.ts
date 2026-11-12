@@ -1,4 +1,15 @@
-import { alongRouteM, isValidLngLat, lineFrom, localProjector, pointAtDistance, pointToSegment, type XY } from './geo.ts'
+import {
+  alongRouteM,
+  isValidLngLat,
+  lineFrom,
+  localProjector,
+  pointAtDistance,
+  pointToSegment,
+  segmentGrid,
+  type MatchMeter,
+  type SegmentGrid,
+  type XY,
+} from './geo.ts'
 import { DEFAULT_ETA_TIE_WINDOW_SEC, rankRoutes } from './rank.ts'
 import { SAME_ROUTE_TOLERANCE_M } from './select.ts'
 import type { DistanceSpanM, LngLat, Maneuver, RouteCandidate } from './types.ts'
@@ -418,88 +429,12 @@ function isNear(p: XY, line: readonly XY[], toleranceM: number): boolean {
 
 const apart = (p: XY, q: XY) => Math.hypot(p[0] - q[0], p[1] - q[1])
 
+export type { MatchMeter } from './geo.ts'
+
 function lengthOf(line: readonly XY[]): number {
   let total = 0
   for (let i = 1; i < line.length; i++) total += apart(line[i - 1]!, line[i]!)
   return total
-}
-
-/**
- * Counts the work of matching (findCurrentRoute), for tests and benchmarks:
- * point-to-segment distance checks, and entries put in a segment grid. A
- * count, not a time, so that it is the same on every machine.
- */
-export interface MatchMeter {
-  segmentChecks: number
-  gridEntries: number
-}
-
-/** Answers how far a point is from a line, looking only at the segments near it. */
-interface SegmentGrid {
-  /**
-   * The distance from `p` to the line when it is at most the grid's reach,
-   * Infinity when it is farther. Stops looking at the first segment within
-   * `enoughM` (and then says only that it is within that).
-   */
-  readonly distanceWithin: (p: XY, enoughM: number) => number
-}
-
-/**
- * A bounding-box index of a line's segments: square cells as wide as `reachM`,
- * each listing the segments that pass through it (a long segment is cut into
- * pieces no longer than a cell, so that it is listed only in cells it really
- * crosses). A point then looks at the segments of the 3 x 3 cells around it,
- * a handful, instead of the whole line: any segment within `reachM` of the
- * point crosses one of them. Built once per line and comparison.
- */
-function segmentGrid(line: readonly XY[], reachM: number, meter?: MatchMeter): SegmentGrid {
-  const cellM = Math.max(1, reachM)
-  const cells = new Map<number, number[]>()
-  // Two cell numbers in one key: rows within 2^21 cells (2000 km at 1 m) of the origin never collide.
-  const key = (ix: number, iy: number) => ix * 4_194_304 + iy
-  const cellOf = (v: number) => Math.floor(v / cellM)
-  for (let i = 1; i < line.length; i++) {
-    const a = line[i - 1]!
-    const b = line[i]!
-    const pieces = Math.max(1, Math.ceil(apart(a, b) / cellM))
-    for (let k = 0; k < pieces; k++) {
-      const x0 = a[0] + ((b[0] - a[0]) * k) / pieces
-      const y0 = a[1] + ((b[1] - a[1]) * k) / pieces
-      const x1 = a[0] + ((b[0] - a[0]) * (k + 1)) / pieces
-      const y1 = a[1] + ((b[1] - a[1]) * (k + 1)) / pieces
-      for (let ix = cellOf(Math.min(x0, x1)); ix <= cellOf(Math.max(x0, x1)); ix++) {
-        for (let iy = cellOf(Math.min(y0, y1)); iy <= cellOf(Math.max(y0, y1)); iy++) {
-          const listed = cells.get(key(ix, iy))
-          // A segment's pieces come one after another, so it can only be listed twice at the end.
-          if (listed === undefined) cells.set(key(ix, iy), [i])
-          else if (listed.at(-1) !== i) listed.push(i)
-          else continue
-          if (meter !== undefined) meter.gridEntries++
-        }
-      }
-    }
-  }
-  // Which segments this query has measured already (a segment can be listed in several of its cells).
-  const seen = new Int32Array(line.length)
-  let query = 0
-  return {
-    distanceWithin: (p, enoughM) => {
-      query++
-      let best = Infinity
-      for (let ix = cellOf(p[0] - cellM); ix <= cellOf(p[0] + cellM); ix++) {
-        for (let iy = cellOf(p[1] - cellM); iy <= cellOf(p[1] + cellM); iy++) {
-          for (const i of cells.get(key(ix, iy)) ?? []) {
-            if (seen[i] === query) continue
-            seen[i] = query
-            if (meter !== undefined) meter.segmentChecks++
-            best = Math.min(best, pointToSegment(p, line[i - 1]!, line[i]!).distanceM)
-            if (best <= enoughM) return best
-          }
-        }
-      }
-      return best <= cellM ? best : Infinity
-    },
-  }
 }
 
 /** A stretch of a line, in meters from its start. */
