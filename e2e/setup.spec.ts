@@ -7,7 +7,7 @@ test('with no token, it shows setup help instead of a map', async ({ app, page }
   // The second test build has no token at all.
   await app.open({ path: `http://localhost:${NO_TOKEN_PORT}/` })
   await expect(page.getByText('.env.local').first()).toBeVisible()
-  await expect(page.locator('[data-testid="map"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid="map"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Start drive' })).toHaveCount(0)
   await app.snap('setup help: no token')
 })
