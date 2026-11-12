@@ -6,7 +6,8 @@ import { numbersIn, parseDecision, parseDispatch, parseHeartbeat, parseLabWindow
 
 const HOLD_LABELS = ['do-not-merge', 'needs-human']
 const WORKFLOW_LABELS = ['ready', 'in-progress', 'review', 'blocked']
-const PHONE_MARKER = /PHONE CHECK NEEDED/i
+// The marker counts at the start of a line (as PRs write it), not quoted inside a sentence or a table.
+const PHONE_MARKER = /^[ \t>]*(?:\*\*|#+[ \t]*)?PHONE CHECK NEEDED\b/im
 
 const hoursBetween = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / 3600e3
 const round1 = (x) => Math.round(x * 10) / 10
