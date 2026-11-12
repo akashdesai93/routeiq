@@ -199,13 +199,19 @@ jobs:
   # The single required status check. It does not list e2e-report (see above).
   # `if: always()` matters: without it a failed job above
   # would skip this one, and GitHub counts a skipped required check as passed.
+  # On a pull request it also holds the PR gates (scripts/orch/gates.mjs, docs/orchestrator.md):
+  # `do-not-merge` / `needs-human`, `needs-phone` (or PHONE CHECK NEEDED in the body) without
+  # `phone-verified`, and "up to date by area". It reads them live, so gates.yml can re-run just
+  # this job when a label, the body or main changes.
   required:
     name: required
     needs: [changes, web, e2e, native-core, native-app, shell-ios, shell-unit, merge-message]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read # the sparse checkout of scripts/orch; compares main with the tested commit
+      pull-requests: read # the PR's labels, body and files
     steps:
       - name: Every job that had to run succeeded
         env:
@@ -237,3 +243,20 @@ jobs:
             failed=1
           done
           exit "$failed"
+
+      - if: always() && github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/orch
+          sparse-checkout-cone-mode: true
+
+      - name: PR gates (hold labels, phone, up to date by area)
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # The merge commit this run tested; its first parent is the main it saw.
+          TESTED: ${{ github.sha }}
+        run: node scripts/orch/gates.mjs --pr "$PR" --tested "$TESTED"
