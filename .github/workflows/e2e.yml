@@ -1,7 +1,7 @@
 name: E2E
 
 # The end-to-end scenarios (npm run e2e): the production build in headless
-# Chromium, fully offline. No secrets: the test builds use a dummy pk.test
+# Chromium (and a small smoke set in WebKit), fully offline. No secrets: the test builds use a dummy pk.test
 # token and every outside request is answered by the test itself.
 #
 # Called by gate.yml on every pull request and every push to main (it has no triggers
@@ -39,10 +39,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium-webkit
 
-      # Headless Chromium only (no full browser), plus the system libraries it needs.
-      - run: npx playwright install --with-deps --only-shell chromium
+      # Headless Chromium (no full browser) for the suite, and WebKit for the small iPhone
+      # smoke set (e2e/webkit.smoke.spec.ts, #136), plus the system libraries they need.
+      - run: npx playwright install --with-deps --only-shell chromium webkit
 
       - run: npm run e2e
 

@@ -83,7 +83,7 @@ and the last trip survive a reload", "with a token Mapbox rejects, it says what 
 drive, a side street found mid-drive takes me round it".
 
 ```powershell
-npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
+npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone smoke set
 npm run e2e                                    # builds, runs every scenario, about 1 minute
 start e2e-report\index.html                    # the one-page report
 ```
@@ -110,6 +110,14 @@ start e2e-report\index.html                    # the one-page report
   onto a new route when the app announces one, and can take a wrong turn or wander with
   GPS noise. The voice records every line in order instead of speaking. A 17-minute drive
   takes about 40 seconds.
+- **WebKit smoke set:** `e2e/webkit.smoke.spec.ts` runs in WebKit, the engine of the
+  iPhone app's web view, at an iPhone's size with touch (Playwright project `webkit-iphone`;
+  every other scenario runs in Chromium only). It reads the screenshot's pixels, not the
+  DOM: within 1 s of each moment the driving screen must not be one flat colour, must show
+  a light map with the route and the car in ink, and must show words on the turn card and
+  the sheet. It checks this after Start drive, after lock and unlock, and after the map's
+  WebGL context was taken and never given back (#136). Keep it small, because every
+  scenario in it runs in a second browser in CI.
 - **Evidence:** `e2e-report/index.html` shows each scenario with its screenshots, the
   spoken lines with their drive time, what the made-up traffic server answered to each
   route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
@@ -1161,6 +1169,18 @@ the phone's safe areas, and the one animation is off under `prefers-reduced-moti
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
+
+*Drawing on the iPhone (#136).* In the iPhone app's web view (WebKit), the first version
+of this screen came up black: the page held the turn card and the drive ran, but nothing
+composited over the map was drawn, and only the black of the view's container showed.
+So during a drive nothing around the map clips its contents or paints the screen dark
+(the ground under the map is the map's own light colour), the map is drawn at its
+container's size when the drive view opens and closes and whenever the page comes back
+to the front (only when the size changed: resizing a canvas blanks it), and when iOS
+takes the map's WebGL context and has not given it back 2 s
+(`CONTEXT_RESTORE_WAIT_MS`, `src/map/MapView.tsx`) after the page came to the front, the
+map is built again, at most 3 times (`MAX_REBUILDS`: each build is a map load Mapbox counts). None of this runs per GPS fix. The WebKit smoke set (End-to-end
+scenarios) checks it from the screen's pixels.
 
 **Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):
 

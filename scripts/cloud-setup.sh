@@ -92,15 +92,16 @@ install_node() {
 install_chromium_deps() {
   local repo="$1" bin; bin="$(node_bin)"
   [ -d "$repo/node_modules/@playwright/test" ] || { warn "no node_modules yet; skipping Playwright"; return 1; }
-  if ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-* >/dev/null 2>&1; then
-    log "Playwright headless Chromium already installed"; return 0
+  if ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-* >/dev/null 2>&1 \
+    && ls -d "$HOME"/.cache/ms-playwright/webkit-* >/dev/null 2>&1; then
+    log "Playwright headless Chromium and WebKit already installed"; return 0
   fi
   # Same command as .github/workflows/e2e.yml.
   if [ "$(id -u)" = 0 ]; then
-    (cd "$repo" && PATH="$bin:$PATH" npx playwright install --with-deps --only-shell chromium) \
+    (cd "$repo" && PATH="$bin:$PATH" npx playwright install --with-deps --only-shell chromium webkit) \
       || warn "playwright install failed (allowlist cdn.playwright.dev and playwright.download.prss.microsoft.com)"
   else
-    (cd "$repo" && PATH="$bin:$PATH" npx playwright install --only-shell chromium) \
+    (cd "$repo" && PATH="$bin:$PATH" npx playwright install --only-shell chromium webkit) \
       || warn "playwright install failed (allowlist cdn.playwright.dev and playwright.download.prss.microsoft.com)"
   fi
 }
