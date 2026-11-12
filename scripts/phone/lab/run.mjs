@@ -9,13 +9,12 @@
 // included). It is cleared at the end, on failure and on Ctrl+C.
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { buildTrack, pathFrom, toGpx } from '../make-gpx.mjs'
+import { buildTrack, pathFrom } from '../make-gpx.mjs'
 import { PRESETS } from '../presets.mjs'
 import { checkLockedWrongTurn, checkPlanShowsRoutes, checkSoak, notRun, parseLabReport, planFromCaptions, redact } from './assertions.mjs'
-import { BACKGROUND_APP, createPhone, sleep } from './phone.mjs'
+import { BACKGROUND_APP, connectPhone, sleep } from './phone.mjs'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -128,9 +127,9 @@ async function main(argv) {
     steps.push(text)
     console.log(text)
   }
-  const phone = createPhone({ log: say })
-  const shot = (name) => {
-    const ok = phone.screenshot(path.join(dir, name))
+  let phone = null
+  const shot = async (name) => {
+    const ok = await phone.screenshot(path.join(dir, name))
     if (ok) files.push(name)
     say(ok ? `screenshot ${name}` : `screenshot ${name} could not be taken`)
   }
@@ -144,8 +143,8 @@ async function main(argv) {
     else if (!files.includes(name)) files.push(name)
     return parseLabReport(text)
   }
-  const sample = () => {
-    const s = { at: clock(), ...phone.processSample(), battery: phone.battery() }
+  const sample = async () => {
+    const s = { at: clock(), ...(await phone.processSample()), battery: phone.battery() }
     samples.push(s)
     return s
   }
@@ -168,8 +167,9 @@ async function main(argv) {
 
   let failure = null
   try {
-    device = phone.describe()
-    bundle = phone.bundleId()
+    phone = await connectPhone({ log: say })
+    device = phone.device
+    bundle = phone.bundle
     app = `RouteIQ ${phone.appVersion()}`
     say(`found ${device.model}, iOS ${device.ios}, ${app}`)
 
@@ -185,7 +185,7 @@ async function main(argv) {
     phone.removeReport()
 
     if (scenario === 'starts-and-plans') {
-      phone.launch(bundle, { args: labArgs('plan') })
+      if ((await phone.launch(bundle, { args: labArgs('plan') })) === null) throw new Error('the app did not start')
       say('app started')
       let seen = null
       let lab = null
@@ -194,11 +194,11 @@ async function main(argv) {
         lab = report()
         if (lab !== null) seen = { routes: lab.routes, startDrive: lab.screen === 'plan', via: 'the lab report' }
         else if (waited >= 10_000) {
-          const captions = phone.captions()
+          const captions = await phone.captions()
           if (captions !== null) seen = { ...planFromCaptions(captions), via: 'the screen reader (this build has no lab hook)' }
         }
       }
-      shot('plan.png')
+      await shot('plan.png')
       if (lab !== null) report('lab-report.txt')
       if (seen === null) checks = [notRun('the app starts and the plan screen lists routes', 'the screen could not be read (is the phone locked?)')]
       else {
@@ -214,14 +214,15 @@ async function main(argv) {
       const start = pathFrom(waypoints, fromM)[0]
 
       simulated = { from: clock(), to: '?', cleared: false }
-      phone.clearLocation()
-      let stopHold = phone.holdLocation(start)
-      cleanups.push(() => stopHold())
+      if (!(await phone.setLocation(start))) throw new Error('the simulated position could not be set')
       say(`simulated position: standing on the ${preset} drive, ${fromM} m in`)
-      await pause(4000)
+      await pause(3000)
 
-      phone.launch(bundle, { args: labArgs('drive') })
-      say('app started in lab mode: it presses Start drive once the routes are there')
+      // The scenario names the simulated start: the app starts the drive only when the phone
+      // reports a position there, so a lab drive never runs on the phone's real position.
+      const whole = (degrees) => `${degrees < 0 ? 'm' : ''}${Math.round(Math.abs(degrees) * 1e5)}`
+      if ((await phone.launch(bundle, { args: labArgs(`drive-at-${whole(start[0])}-${whole(start[1])}`) })) === null) throw new Error('the app did not start')
+      say('app started in lab mode: it presses Start drive once the routes are there and the phone is at the simulated start')
       let lab = null
       for (let waited = 0; waited < 150_000; waited += 5000) {
         await pause(5000)
@@ -232,26 +233,28 @@ async function main(argv) {
       if (lab === null) {
         // A build from before the lab: nothing can press Start drive. Show what can be shown.
         say('the app wrote no lab report: this build has no lab hook, so no drive can be started without a tap')
-        shot('plan.png')
-        phone.launch(BACKGROUND_APP)
+        await phone.clearLocation()
+        await shot('plan.png')
+        await phone.launch(BACKGROUND_APP)
         say('app sent to the background')
         await pause(5000)
-        phone.launch(bundle, { keep: true })
+        await phone.launch(bundle, { keep: true })
         await pause(3000)
-        shot('back-in-front.png')
+        await shot('back-in-front.png')
         checks = [notRun('drive diagnostics', 'this build has no lab hook: install a build with it (docs/phone-lab.md)')]
       } else if (lab.screen !== 'drive') {
-        shot('no-drive.png')
+        await phone.clearLocation()
+        await shot('no-drive.png')
         report('lab-report.txt')
         checks = [notRun('drive diagnostics', `the drive did not start: screen ${lab.screen}, status ${lab.status}, ${lab.routes} routes`)]
       } else {
         say(`driving: status ${lab.status}`)
-        shot('drive-started.png')
+        await shot('drive-started.png')
         const stopSyslog = phone.startSyslog()
         cleanups.push(() => stopSyslog())
-        say(`sample ${JSON.stringify(sample())}`)
+        await sample()
 
-        phone.launch(BACKGROUND_APP)
+        await phone.launch(BACKGROUND_APP)
         say('app sent to the background (Calculator in front)')
         if (options.lock) {
           await pause(2000)
@@ -261,11 +264,7 @@ async function main(argv) {
 
         let player = null
         if (options.gps) {
-          const gpx = path.join(tmpdir(), `routeiq-lab-${process.pid}.gpx`)
-          writeFileSync(gpx, toGpx(buildTrack(waypoints, { speedMps: options.speed, fromM, maxSec: awaySec, holdSec: 0 }), { name: `RouteIQ lab ${preset}` }))
-          cleanups.push(() => rmSync(gpx, { force: true }))
-          stopHold()
-          player = phone.playLocation(gpx)
+          player = phone.playTrack(buildTrack(waypoints, { speedMps: options.speed, intervalSec: 1, fromM, maxSec: awaySec, holdSec: 0 }))
           cleanups.push(() => player.stop())
           say(`replaying the ${preset} drive at ${options.speed} m/s for ${awaySec} s`)
         } else say(`NOT replaying the drive (--no-gps): the phone stands still for ${awaySec} s`)
@@ -274,19 +273,25 @@ async function main(argv) {
         for (let waited = 0; waited < awaySec; waited += every) {
           await pause(Math.min(every, awaySec - waited) * 1000)
           const now = report()
-          const s = sample()
+          const s = await sample()
           say(`away ${Math.min(waited + every, awaySec)} s: status ${now?.status ?? '?'}, fixes ${now?.diagnostics?.fixes.count ?? '?'}, ticks ${now?.diagnostics?.ticks.count ?? '?'}, requests ${now?.diagnostics?.requests.sent ?? '?'}, web code CPU ${s.webContent?.cpuPercent ?? '?'} %`)
+        }
+        if (player !== null) {
+          player.stop()
+          const played = await player.done
+          say(`replay ended: the phone took ${played.sent} positions and refused ${played.refused}`)
+          if (played.refused > played.sent / 10) throw new Error('the phone refused too many simulated positions for the run to mean anything')
         }
         // Time for a spoken line and a route answer that are still under way.
         await pause(15_000)
         const awayEnd = report('lab-report-away.txt')
         say(`end of the time away: app ${awayEnd?.diagnostics?.appState ?? '?'}`)
 
-        phone.launch(bundle, { keep: true })
+        await phone.launch(bundle, { keep: true })
         say('app brought back to the front')
         await pause(5000)
-        shot('back-in-front.png')
-        const captions = phone.captions()
+        await shot('back-in-front.png')
+        const captions = await phone.captions()
         if (captions !== null) {
           writeFileSync(path.join(dir, 'screen-text.txt'), captions.map(redact).join('\n'))
           files.push('screen-text.txt')
@@ -318,15 +323,17 @@ async function main(argv) {
         // Keep cleaning up.
       }
     }
-    if (simulated !== null) {
-      simulated.cleared = phone.clearLocation()
-      simulated.to = clock()
-      say(simulated.cleared ? 'simulated position cleared: the phone is back on its real GPS' : 'CLEAR FAILED: run scripts\\phone\\sim-drive.ps1 -ClearOnly, or restart the phone')
-    }
-    if (bundle !== null) {
-      // Out of lab mode: a plain start ends the lab drive and leaves the app in front as the owner knows it.
-      phone.launch(bundle)
-      say('app restarted without the lab')
+    if (phone !== null) {
+      // Out of lab mode first: a plain start ends the lab drive (and its use of the position) and
+      // leaves the app in front as the owner knows it. Only then back to the real GPS.
+      if (bundle !== null) say((await phone.launch(bundle)) !== null ? 'app restarted without the lab' : 'the app could not be restarted')
+      const cleared = await phone.clearLocation()
+      const again = await phone.disconnect({ clear: simulated !== null })
+      if (simulated !== null) {
+        simulated.cleared = cleared || again
+        simulated.to = clock()
+        say(simulated.cleared ? 'simulated position cleared: the phone is back on its real GPS' : 'CLEAR FAILED: run scripts\\phone\\sim-drive.ps1 -ClearOnly, or restart the phone')
+      }
     }
     process.off('SIGINT', onSignal)
   }

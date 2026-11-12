@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './fonts.css'
+import './live.css'
 import { shellDiagnostics } from './device/native/diagnostics.ts'
 import { nativePlugin, startNativeShell } from './device/native/index.ts'
 import { startLab } from './lab/lab.ts'

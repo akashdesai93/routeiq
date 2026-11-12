@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDriveDiagnostics } from '../src/device/native/diagnostics.ts'
-import { createLab, LAB_REPORT_MS, LAB_ROUTES_WAIT_MS, labScenario, startLab, statusWord, type LabDocument, type LabPlugin, type RouteIQLab } from '../src/lab/lab.ts'
+import { createLab, driveStart, LAB_POSITION_RETRY_MS, LAB_REPORT_MS, LAB_ROUTES_WAIT_MS, LAB_START_RADIUS_M, labScenario, startLab, statusWord, type LabDocument, type LabPlugin, type RouteIQLab } from '../src/lab/lab.ts'
 
 // The phone lab's test hook (src/lab/lab.ts, docs/phone-lab.md): it must not exist unless the
 // app was started with the lab's launch argument, and what it writes out for the PC must not
@@ -103,13 +103,26 @@ describe("the lab presses the app's own buttons", () => {
     expect(lab.read().canStartDrive).toBe(false)
   })
 
-  /** Runs startLab with a clock and a timer the test moves by hand. */
-  async function autopilot(scenario: string, doc: LabDocument) {
+  // Trade and Tryon, the start of the lab's preset drives, and a point 1 km away.
+  const AT_START = 'drive-at-m8084316-3522716'
+  const START = { lng: -80.84316, lat: 35.22716 }
+  const ELSEWHERE = { lng: -80.84316, lat: 35.23616 }
+
+  /** Runs startLab with a clock and a timer the test moves by hand. `position`: what the phone says when asked where it is. */
+  async function autopilot(scenario: string, doc: LabDocument, position: { lng: number; lat: number } | Error = START) {
     let nowMs = 1_000_000
     let beat = () => {}
     const reports: string[] = []
+    const asked = { times: 0 }
+    const where = { now: position }
     await startLab({
-      plugin: labPlugin({ enabled: true, scenario }, reports),
+      plugin: {
+        ...labPlugin({ enabled: true, scenario }, reports),
+        getCurrentPosition: () => {
+          asked.times++
+          return where.now instanceof Error ? Promise.reject(where.now) : Promise.resolve(where.now)
+        },
+      },
       diagnostics: createDriveDiagnostics(() => nowMs),
       target: { document: doc },
       now: () => nowMs,
@@ -119,39 +132,95 @@ describe("the lab presses the app's own buttons", () => {
     })
     return {
       reports,
-      pass(ms: number) {
+      asked,
+      where,
+      async pass(ms: number) {
         nowMs += ms
         beat()
+        // Lets the answer to "where are you?" arrive.
+        await new Promise((resolve) => setTimeout(resolve, 0))
       },
     }
   }
 
-  it('scenario "drive" presses Start drive once, as soon as routes are listed and the button is enabled', async () => {
+  it('at the simulated start, the drive scenario presses Start drive once, as soon as routes are listed and the button is enabled', async () => {
     const start = el('Start drive', true)
-    const run = await autopilot('drive', planPage(start))
-    run.pass(1000)
+    const run = await autopilot(AT_START, planPage(start))
+    await run.pass(1000)
     expect(start.clicks).toBe(0)
+    expect(run.asked.times).toBe(0)
     start.disabled = false
-    run.pass(1000)
-    run.pass(1000)
+    await run.pass(1000)
+    await run.pass(LAB_POSITION_RETRY_MS)
+    await run.pass(LAB_POSITION_RETRY_MS)
+    expect(start.clicks).toBe(1)
+    expect(run.asked.times).toBe(1)
+  })
+
+  it('on any other position (the real GPS) it never presses Start drive, and says so without saying where', async () => {
+    const start = el('Start drive')
+    const run = await autopilot(AT_START, planPage(start), ELSEWHERE)
+    for (let i = 0; i < 5; i++) await run.pass(LAB_POSITION_RETRY_MS)
+    expect(start.clicks).toBe(0)
+    expect(run.asked.times).toBeGreaterThan(1)
+    expect(run.reports.at(-1)).toContain('the phone is not at the simulated start: not starting the drive')
+    expect(run.reports.at(-1)).not.toMatch(/\d\.\d{3,}/)
+  })
+
+  it('it starts once the simulated position reaches the phone', async () => {
+    const start = el('Start drive')
+    const run = await autopilot(AT_START, planPage(start), ELSEWHERE)
+    await run.pass(LAB_POSITION_RETRY_MS)
+    expect(start.clicks).toBe(0)
+    run.where.now = { lng: START.lng + 0.001, lat: START.lat }
+    await run.pass(LAB_POSITION_RETRY_MS)
     expect(start.clicks).toBe(1)
   })
 
-  it('scenario "drive" does not press Start drive while no route is listed, and gives up after the wait', async () => {
+  it('just outside the radius is not the start', async () => {
     const start = el('Start drive')
-    const run = await autopilot('drive', planPage(start, 0))
-    run.pass(1000)
-    run.pass(LAB_ROUTES_WAIT_MS)
+    // 0.003 degrees of latitude is about 330 m; the radius is 250 m.
+    const run = await autopilot(AT_START, planPage(start), { lng: START.lng, lat: START.lat + 0.003 })
+    await run.pass(LAB_POSITION_RETRY_MS)
+    expect(LAB_START_RADIUS_M).toBe(250)
     expect(start.clicks).toBe(0)
-    run.pass(LAB_REPORT_MS)
-    expect(run.reports.at(-1)).toContain('gave up waiting for routes')
+  })
+
+  it('no position from the phone: no drive', async () => {
+    const start = el('Start drive')
+    const run = await autopilot(AT_START, planPage(start), new Error('denied'))
+    await run.pass(LAB_POSITION_RETRY_MS)
+    expect(start.clicks).toBe(0)
+  })
+
+  it('a scenario that names no start never starts a drive, whatever it is called', async () => {
+    for (const scenario of ['drive', 'drive-at', 'drive-at-999999999-0', 'drive-at-m8084316-9100000']) {
+      const start = el('Start drive')
+      const run = await autopilot(scenario, planPage(start))
+      for (let i = 0; i < 3; i++) await run.pass(LAB_POSITION_RETRY_MS)
+      expect(start.clicks, scenario).toBe(0)
+      expect(run.asked.times, scenario).toBe(0)
+    }
+    expect(driveStart(AT_START)).toEqual(START)
+    expect(driveStart('drive-at-12345-m3300000')).toEqual({ lng: 0.12345, lat: -33 })
+  })
+
+  it('without routes it does not ask for the position, and gives up after the wait', async () => {
+    const start = el('Start drive')
+    const run = await autopilot(AT_START, planPage(start, 0))
+    await run.pass(1000)
+    await run.pass(LAB_ROUTES_WAIT_MS)
+    expect(start.clicks).toBe(0)
+    expect(run.asked.times).toBe(0)
+    await run.pass(LAB_REPORT_MS)
+    expect(run.reports.at(-1)).toContain('gave up: no routes, or the phone never reached the simulated start')
   })
 
   it('scenario "plan" never presses Start drive, and still writes its report', async () => {
     const start = el('Start drive')
     const run = await autopilot('plan', planPage(start))
-    run.pass(1000)
-    run.pass(LAB_REPORT_MS)
+    await run.pass(1000)
+    await run.pass(LAB_REPORT_MS)
     expect(start.clicks).toBe(0)
     expect(run.reports.length).toBeGreaterThan(0)
     expect(run.reports.at(-1)).toMatch(/^RouteIQ lab report\nscenario plan, /)

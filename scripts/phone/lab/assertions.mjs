@@ -124,26 +124,38 @@ export function checkRequestAnsweredWhileAway(d) {
   return verdict(name, answered.length > 0, `${sent.length} sent while not active, ${answered.length} of them answered with HTTP 2xx`)
 }
 
+const toSec = (time) => {
+  const [h, m, sec] = time.split(':').map(Number)
+  return h * 3600 + m * 60 + sec
+}
+
+/** A new route is asked for at once when the car is off the route; the banner follows the answer within this many seconds. */
+const NEW_ROUTE_WINDOW_SEC = 15
+
 /**
- * The car left the route and got a new one: the screen showed "off the route", a route request
- * (not a side-street probe) went out and was answered after that, and the screen went back to
- * driving.
+ * The car left the route and got a new one. The app shows "New route from here" only for a
+ * route it took because the car was off the route, so that banner is the evidence, together
+ * with the route request (not a side-street probe) that went out just before it and was
+ * answered, and the drive going on afterwards. "Off the route" itself is on the screen for
+ * less than a second when Mapbox answers quickly, so it is not required to have been seen.
  */
 export function checkOffRouteThenNewRoute(report) {
   const name = 'off the route, then a new route: asked for, answered, and driving again'
   const d = report.diagnostics
-  const off = report.history.findIndex((h) => h.what === 'status off-route')
-  if (off === -1) return verdict(name, false, 'the screen never showed "off the route"')
-  const offAt = report.history[off].time
-  const back = report.history.slice(off + 1).find((h) => h.what === 'status driving')
-  if (back === undefined) return verdict(name, false, `off the route at ${offAt}, and never driving again after it`)
+  const newRoute = report.history.find((h) => h.what === 'banner new-route-after-off-route')
+  if (newRoute === undefined) {
+    const off = report.history.find((h) => h.what === 'status off-route')
+    return verdict(name, false, off === undefined ? 'the car never left the route: no "New route from here" on the screen' : `off the route at ${off.time}, and no new route after it`)
+  }
   if (d === null) return verdict(name, false, 'no diagnostics to find the route request in')
-  const asked = d.events.filter((e) => e.time >= offAt && e.time <= back.time).flatMap((e) => (e.what.match(/^request (\d+) sent$/) ?? []).slice(1))
+  const at = toSec(newRoute.time)
+  const asked = d.events.filter((e) => at - toSec(e.time) >= 0 && at - toSec(e.time) <= NEW_ROUTE_WINDOW_SEC).flatMap((e) => (e.what.match(/^request (\d+) sent$/) ?? []).slice(1))
   const answered = asked.filter((n) => d.events.some((e) => new RegExp(`^request ${n} answered, HTTP 2\\d\\d,`).test(e.what)))
+  const driving = report.status === 'driving'
   return verdict(
     name,
-    answered.length > 0,
-    `off the route at ${offAt}, driving again at ${back.time}, ${asked.length} route request(s) in between, ${answered.length} answered`,
+    answered.length > 0 && driving,
+    `new route from where the car was at ${newRoute.time}, ${asked.length} route request(s) just before it, ${answered.length} answered, ${driving ? 'driving on at the end' : `at the end the screen showed "${report.status}"`}`,
   )
 }
 

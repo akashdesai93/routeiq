@@ -24,6 +24,9 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "keepAwake", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "httpGet", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "httpCancel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startSimulatedRoute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopSimulatedRoute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "lab", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "labReport", returnType: CAPPluginReturnPromise)
     ]
@@ -134,6 +137,95 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             self.engine?.keepAwake(on)
             call.resolve()
+        }
+    }
+
+    // MARK: - Test drive (simulated positions)
+
+    /// The "Test drive": "fix" events are made up from now on, along `points`
+    /// ([lng, lat] pairs) at `speedMps`, following `script` (steps with `atM`
+    /// and `speedMps` and/or `stopSec`). Rejects with the code "invalid" when
+    /// no point is usable. The points are the web app's made-up route; they
+    /// are never put in a message or a log.
+    @objc func startSimulatedRoute(_ call: CAPPluginCall) {
+        var points: [(lng: Double, lat: Double)] = []
+        for item in call.getArray("points") ?? [] {
+            if points.count >= RouteIQSimulation.maxPoints { break }
+            guard let pair = item as? NSArray, pair.count >= 2,
+                  let lng = pair[0] as? NSNumber, let lat = pair[1] as? NSNumber else { continue }
+            points.append((lng: lng.doubleValue, lat: lat.doubleValue))
+        }
+        var steps: [RouteIQSimulation.Step] = []
+        for item in call.getArray("script") ?? [] {
+            guard let step = item as? NSDictionary, let atM = step["atM"] as? NSNumber else { continue }
+            steps.append(RouteIQSimulation.Step(
+                atM: atM.doubleValue,
+                speedMps: (step["speedMps"] as? NSNumber)?.doubleValue,
+                stopSec: (step["stopSec"] as? NSNumber)?.doubleValue
+            ))
+        }
+        let speedMps = call.getDouble("speedMps") ?? 0
+        DispatchQueue.main.async {
+            guard let engine = self.engine else {
+                call.reject("The location engine is not loaded", "unavailable")
+                return
+            }
+            if engine.startSimulatedRoute(points: points, speedMps: speedMps, steps: steps) {
+                call.resolve()
+            } else {
+                call.reject("The simulated route has no usable point", "invalid")
+            }
+        }
+    }
+
+    @objc func stopSimulatedRoute(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.engine?.stopSimulatedRoute()
+            call.resolve()
+        }
+    }
+
+    // MARK: - Share
+
+    /// Opens the iOS share sheet with the given text (the drive diagnostics:
+    /// counts and timings). Resolves when the sheet is closed, with whether
+    /// something was done with it. The text goes to the sheet and nowhere else.
+    @objc func share(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        DispatchQueue.main.async {
+            guard !text.isEmpty, let root = self.bridge?.viewController else {
+                call.reject("There is nothing to share", "unavailable")
+                return
+            }
+            // Whatever is on top presents it; a sheet already up cannot present another.
+            var presenter: UIViewController = root
+            while let above = presenter.presentedViewController {
+                if above is UIActivityViewController {
+                    call.reject("The share sheet is already open", "busy")
+                    return
+                }
+                presenter = above
+            }
+            // A presenter that is going away or is not on screen would fail without a word.
+            guard !presenter.isBeingDismissed, presenter.viewIfLoaded?.window != nil else {
+                call.reject("The share sheet cannot be shown right now", "unavailable")
+                return
+            }
+            let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+            // iOS can report more than once (an activity cancelled back to the sheet): answer the first time only.
+            var answered = false
+            sheet.completionWithItemsHandler = { _, completed, _, _ in
+                if answered { return }
+                answered = true
+                call.resolve(["completed": completed])
+            }
+            // On an iPad the sheet is a popover and needs to know where from.
+            if let popover = sheet.popoverPresentationController, let view = presenter.view {
+                popover.sourceView = view
+                popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 1, width: 1, height: 1)
+                popover.permittedArrowDirections = []
+            }
+            presenter.present(sheet, animated: true)
         }
     }
 

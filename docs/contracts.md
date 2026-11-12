@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 1** (Nov 12, 2026, `main` at 08526ec, side-street probes in the drive included). The Swift port does not match it yet;
+**Current version: 2** (Nov 12, 2026: version 1 plus the shell's test drive and share sheet, #86). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -48,7 +48,7 @@ The formats that cross a file or a bridge have a JSON Schema (draft 2020-12) in
 | `signal-tile.schema.json` | one bundled tile | every file in `public/seed/osm-signals` |
 | `signal-index.schema.json` | the bundle's `index.json` | the shipped `index.json` |
 | `place-book.schema.json` | the stored place book | `serializePlaceBook` output, empty and full |
-| `native-bridge.schema.json` | plugin payloads: `fix`, `locationError`, `appState`, `httpGet` request, answer and error codes (`tick` has no payload) | sample payloads |
+| `native-bridge.schema.json` | plugin payloads: `fix`, `locationError`, `appState`, `httpGet` request, answer and error codes, the `startSimulatedRoute` request and its steps, the `share` request (`tick` has no payload) | sample payloads |
 
 `tests/contracts.test.ts` checks two things:
 - **The data:** the shipped tiles and index, and the stored place book, validate against their schemas.
@@ -107,12 +107,17 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 1 | by definition |
+| Web app (`src/`) | 2 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 1 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80) |
+| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
 - **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
   `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
   `probe-unconfirmed`).
+- **2** (Nov 12, 2026, #86): the iPhone shell's plugin only; the Swift port is not affected.
+  `NativeFix.simulated` (true on a test drive's made-up position), the new
+  `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
+  `startSimulatedRoute`, `stopSimulatedRoute` and `share`. The bridge schema gains
+  `simulatedRouteRequest`, `simulatedStep` and `shareRequest`.

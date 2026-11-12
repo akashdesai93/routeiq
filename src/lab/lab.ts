@@ -16,6 +16,7 @@
  * they are never put in the report.
  */
 
+import { distanceM } from '../core/geo.ts'
 import type { DriveDiagnostics } from '../device/native/diagnostics.ts'
 
 /** The two plugin methods the lab uses. Both are missing in a build without the lab. */
@@ -23,17 +24,37 @@ export interface LabPlugin {
   lab?: () => Promise<{ enabled?: boolean; scenario?: string }>
   labReport?: (options: { text: string }) => Promise<unknown>
   addListener?: (event: 'tick', listener: () => void) => Promise<unknown>
+  getCurrentPosition?: () => Promise<{ lng: number; lat: number }>
 }
 
 /** How often the screen is looked at, and how often the report is written out, in milliseconds. */
 export const LAB_SAMPLE_MS = 1_000
 export const LAB_REPORT_MS = 3_000
-/** How long the `drive` scenario waits for routes before giving up, in milliseconds. */
+/** How long a drive scenario waits for routes and for the simulated position before giving up, in milliseconds. */
 export const LAB_ROUTES_WAIT_MS = 90_000
+/** A drive is started only when the phone reports a position this close to the simulated start, in meters. */
+export const LAB_START_RADIUS_M = 250
+/** How often the position is asked for while waiting for the simulated one, in milliseconds. */
+export const LAB_POSITION_RETRY_MS = 3_000
 /** How many history lines are kept. */
 export const LAB_HISTORY_LIMIT = 300
 /** Scenario names are short words; anything else is refused. */
 const SCENARIO = /^[a-z][a-z0-9-]{0,31}$/
+/** `drive-at-<lng>-<lat>`: whole numbers of 1/100000 degree, `m` for minus. Example: drive-at-m8084316-3522716. */
+const DRIVE_AT = /^drive-at-(m?)(\d{1,8})-(m?)(\d{1,7})$/
+
+/**
+ * Where a `drive-at-…` scenario expects the phone to be: the PC's simulated
+ * start. Null for any other scenario. The lab never starts a drive anywhere
+ * else, so a lab drive cannot run on the phone's real position.
+ */
+export function driveStart(scenario: string): { lng: number; lat: number } | null {
+  const m = DRIVE_AT.exec(scenario)
+  if (m === null) return null
+  const lng = (m[1] === 'm' ? -1 : 1) * (Number(m[2]) / 1e5)
+  const lat = (m[3] === 'm' ? -1 : 1) * (Number(m[4]) / 1e5)
+  return Math.abs(lng) <= 180 && Math.abs(lat) <= 90 ? { lng, lat } : null
+}
 
 /** What is on the screen, as a person would read it. Not written to the report. */
 export interface LabScreen {
@@ -134,7 +155,7 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDep
   const history: string[] = []
   let dropped = 0
   let lastWord: string | null = null
-  let lastBanner = false
+  let lastBanner: string | null = null
   let reports = 0
 
   const note = (what: string) => {
@@ -183,9 +204,10 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDep
       note(`status ${word}`)
       lastWord = word
     }
-    const banner = screen.banner !== null
+    // The banner's words name roads and times; only which of the two kinds it is gets written down.
+    const banner = screen.banner === null ? null : screen.banner.startsWith('New route from here') ? 'new-route-after-off-route' : 'switched-route'
     if (banner !== lastBanner) {
-      note(banner ? 'route-change banner shown' : 'route-change banner gone')
+      note(banner === null ? 'banner gone' : `banner ${banner}`)
       lastBanner = banner
     }
   }
@@ -254,7 +276,10 @@ export interface StartLabOptions {
  * the report out every few seconds, and runs the scenario:
  *
  * - `plan`: nothing more (the PC looks at the plan screen).
- * - `drive`: presses Start drive once the routes are there.
+ * - `drive-at-<lng>-<lat>`: presses Start drive once the routes are there
+ *   AND the phone reports a position within LAB_START_RADIUS_M of that
+ *   point, which is where the PC put the simulated position. On the phone's
+ *   real position it never starts.
  */
 export async function startLab({ plugin, diagnostics, target, now = Date.now, every = (ms, fn) => setInterval(fn, ms) }: StartLabOptions): Promise<RouteIQLab | null> {
   const scenario = await labScenario(plugin)
@@ -267,7 +292,29 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
   const startedAt = now()
   let lastSample = -Infinity
   let lastReport = -Infinity
-  let autopilot: 'waiting' | 'done' = scenario === 'drive' ? 'waiting' : 'done'
+  const start = driveStart(scenario)
+  let autopilot: 'waiting' | 'asking' | 'done' = start !== null ? 'waiting' : 'done'
+  let lastAsked = -Infinity
+  /** Asks the phone where it is and starts the drive only at the simulated start. Says yes or no, never where. */
+  const startAtSimulatedPosition = (at: number) => {
+    if (start === null || typeof plugin.getCurrentPosition !== 'function') return
+    autopilot = 'asking'
+    lastAsked = at
+    plugin.getCurrentPosition().then(
+      (fix) => {
+        const near = typeof fix?.lng === 'number' && typeof fix?.lat === 'number' && distanceM([fix.lng, fix.lat], [start.lng, start.lat]) <= LAB_START_RADIUS_M
+        if (!near) {
+          lab.note('the phone is not at the simulated start: not starting the drive')
+          autopilot = 'waiting'
+        } else if (lab.startDrive()) autopilot = 'done'
+        else autopilot = 'waiting'
+      },
+      () => {
+        lab.note('no position from the phone: not starting the drive')
+        autopilot = 'waiting'
+      },
+    )
+  }
   const beat = () => {
     const at = now()
     if (at - lastSample < LAB_SAMPLE_MS - 50) return
@@ -276,11 +323,10 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
       lab.sample()
       if (autopilot === 'waiting') {
         const screen = lab.read()
-        if (screen.screen === 'plan' && screen.routes > 0 && screen.canStartDrive && lab.startDrive()) autopilot = 'done'
-        else if (at - startedAt > LAB_ROUTES_WAIT_MS) {
-          lab.note('gave up waiting for routes')
+        if (at - startedAt > LAB_ROUTES_WAIT_MS) {
+          lab.note('gave up: no routes, or the phone never reached the simulated start')
           autopilot = 'done'
-        }
+        } else if (screen.screen === 'plan' && screen.routes > 0 && screen.canStartDrive && at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
       }
       if (at - lastReport >= LAB_REPORT_MS) {
         lastReport = at

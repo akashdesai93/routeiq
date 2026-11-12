@@ -102,12 +102,16 @@ function drive(script: Script = {}): string {
       else log.requestEnded(n, 'network')
       if (reroute === 'answered' && !staysOffRoute) {
         status.textContent = 'Watching for a faster route.'
+        found['.live-banner'] = [{ textContent: 'New route from here' }]
         say(!speechCutOff)
       }
     }
   }
   if (tickGapSec > 0) nowMs += tickGapSec * 1000
-  for (let s = half; s < awaySec; s++) second(true, !fixesStopAway)
+  for (let s = half; s < awaySec; s++) {
+    second(true, !fixesStopAway)
+    if (s === half + 8) delete found['.live-banner']
+  }
   log.appState('active')
   for (let s = 0; s < 10; s++) second()
   return lab.report()
@@ -140,7 +144,7 @@ describe('reading what the app wrote', () => {
     expect(r.diagnostics.requests).toEqual({ sent: 2, away: 1, answered: 2, failed: 0, cancelled: 0, waiting: 0 })
     expect(r.diagnostics.speech).toEqual({ started: 3, finished: 3, cutOff: 0 })
     expect(r.diagnostics.events.find((e) => e.what === 'request 2 sent')).toEqual({ time: '21:41:21', what: 'request 2 sent', state: 'background' })
-    expect(r.history.map((h) => h.what)).toEqual(['status locating', 'status driving', 'status off-route', 'status driving'])
+    expect(r.history.map((h) => h.what)).toEqual(['status locating', 'status driving', 'status off-route', 'status driving', 'banner new-route-after-off-route', 'banner gone'])
   })
 
   it('text that is not a report or not a diagnostics log is null, not zeros', () => {
@@ -160,7 +164,7 @@ describe('"drives locked with a wrong turn": each check passes on a good drive a
 
   it('the position NOT replayed (the car never leaves the route): the off-route check fails, and only checks that depend on it', () => {
     expect(failed({ offRoute: false })).toEqual([NAMES.request, NAMES.offRoute])
-    expect(checkOffRouteThenNewRoute(report({ offRoute: false })).detail).toBe('the screen never showed "off the route"')
+    expect(checkOffRouteThenNewRoute(report({ offRoute: false })).detail).toBe('the car never left the route: no "New route from here" on the screen')
   })
 
   it('fixes stop while away: the fixes check fails', () => {
@@ -208,6 +212,19 @@ describe('"drives locked with a wrong turn": each check passes on a good drive a
 
   it('off the route, a new route answered, but the screen never goes back to driving: the off-route check fails', () => {
     expect(failed({ staysOffRoute: true })).toEqual([NAMES.offRoute])
+  })
+
+  it('a route switched for being faster is not a new route after leaving the route', () => {
+    const r = report()
+    const switched = { ...r, history: r.history.map((h) => (h.what === 'banner new-route-after-off-route' ? { ...h, what: 'banner switched-route' } : h)) }
+    expect(checkOffRouteThenNewRoute(switched).pass).toBe(false)
+  })
+
+  it('a new route whose request went out a minute earlier does not count as asked for off the route', () => {
+    const r = report()
+    const late = { ...r, history: r.history.map((h) => (h.what === 'banner new-route-after-off-route' ? { ...h, time: '21:42:40' } : h)) }
+    expect(checkOffRouteThenNewRoute(r).pass).toBe(true)
+    expect(checkOffRouteThenNewRoute(late).pass).toBe(false)
   })
 
   it('a spoken line cut off: the speech check fails', () => {
