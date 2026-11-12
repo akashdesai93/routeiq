@@ -3,8 +3,15 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
+  checkProbeAllowance,
+  checkProbes,
   type CongestionLevel,
+  DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
+  INITIAL_CHECK_PROBES,
+  INITIAL_REROUTE_STATE,
+  mergeCheckProbes,
+  rememberCheckProbes,
   distanceM,
   localProjector,
   pointToSegment,
@@ -394,5 +401,176 @@ describe('selectViaPoints with live traffic (segmentTraffic)', () => {
       expect(p.congestedSpanM![1]).toBeCloseTo(Math.min(along[3]!, along.at(-1)! - DEFAULT_PROBE_OPTIONS.endpointClearanceM), 0)
     }
     expectWellPlaced(points, candidates)
+  })
+})
+
+describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
+  /** The car on A, 1 km along: what a check from there returns. */
+  const here = at(1000, 0)
+  /** Held up: 5 minutes over its typical time, so a check probes. */
+  const freshA = () => candidate('A', here, 1500, { typicalDurationSec: 1200 })!
+  const freshB = () => candidate('B', here, 1600)!
+  const route = world('A', 1700)
+
+  it('has one documented budget', () => {
+    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8 })
+  })
+
+  describe('checkProbeAllowance: probes share the drive request budget', () => {
+    it('one probe per check, with room left over for the check of the current path', () => {
+      // 60 requests: this check is the 10th.
+      expect(checkProbeAllowance({ requestsUsed: 10, probesUsed: 3 }, 60)).toBe(1)
+      // The 59th request: one is left, and it is the path check's.
+      expect(checkProbeAllowance({ requestsUsed: 59, probesUsed: 3 }, 60)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 3 }, 60)).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 60, probesUsed: 3 }, 60)).toBe(0)
+    })
+
+    it('stops at the per-drive cap', () => {
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 19 }, 60)).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 20 }, 60)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 25 }, 60)).toBe(0)
+    })
+
+    it('takes a budget of its own, rounded down; under 1 or not a number turns probing off', () => {
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2 })).toBe(2)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2.9 })).toBe(2)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 0.5 })).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: NaN })).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerDrive: 0 })).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: NaN, probesUsed: 0 }, 60)).toBe(0)
+      // Two probes on the 58th request: only one fits before the path check's room.
+      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 0 }, 60, { requestsPerCheck: 2 })).toBe(1)
+    })
+  })
+
+  describe('checkProbes: where a check probes', () => {
+    it('beside the route being driven, from the car, by the plan screen rules', () => {
+      const fresh = [freshA(), freshB()]
+      const vias = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 3 })
+      expect(vias).toEqual(selectViaPoints(fresh).map((p) => p.position))
+      expect(vias).toHaveLength(2)
+      // Clear of the car by the endpoint clearance, and of every known route.
+      for (const via of vias) {
+        expect(distanceM(via, here)).toBeGreaterThanOrEqual(DEFAULT_PROBE_OPTIONS.endpointClearanceM)
+        for (const c of fresh) expect(lineDistanceM(via, c.geometry)).toBeGreaterThanOrEqual(DEFAULT_PROBE_OPTIONS.clearOfRoutesM)
+      }
+    })
+
+    it('beside the route being driven even when another fresh route is faster', () => {
+      const fresh = [candidate('A', here, 1600, { typicalDurationSec: 1300 })!, candidate('B', here, 1400)!]
+      const vias = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })
+      // Beside A (y = 0), not beside B (1 km north): 500 m to the south, where there is more room.
+      const [, y] = localProjector(at(0, 0))(vias[0]!)
+      expect(y).toBeCloseTo(-500, -1)
+      // With the current route not found (and no answer for it), nothing: the engine compares nothing this check,
+      // and a probe could come back as the current path and stand in for it.
+      expect(checkProbes({ route: world('C', 1700), alongM: 9000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })).toEqual([])
+    })
+
+    it('the points take turns, check by check', () => {
+      const fresh = [freshA(), freshB()]
+      const all = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 3 })
+      const turn = (round: number) => checkProbes({ route, alongM: 1000, fresh, memory: { ...INITIAL_CHECK_PROBES, round }, allowed: 1 })
+      expect([turn(0), turn(1), turn(2), turn(3)]).toEqual([[all[0]], [all[1]], [all[0]], [all[1]]])
+    })
+
+    it('the via of a side street being confirmed comes first, and a point at the same place is not asked twice', () => {
+      const fresh = [freshA(), freshB()]
+      const all = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 3 })
+      const keep: LngLat = at(9000, -500)
+      expect(checkProbes({ route, alongM: 1000, fresh, memory: { ...INITIAL_CHECK_PROBES, round: 1, keep }, allowed: 1 })).toEqual([keep])
+      const two = checkProbes({ route, alongM: 1000, fresh, memory: { ...INITIAL_CHECK_PROBES, keep }, allowed: 2 })
+      expect(two[0]).toEqual(keep)
+      expect(two).toHaveLength(2)
+      // A kept via right beside one of the points replaces it.
+      const near: LngLat = [all[0]![0] + 0.0001, all[0]![1]]
+      expect(checkProbes({ route, alongM: 1000, fresh, memory: { ...INITIAL_CHECK_PROBES, keep: near }, allowed: 3 })).toEqual([near, all[1]])
+    })
+
+    it('a kept via that is behind the car, too close to it or to the end, or on a known road is dropped', () => {
+      const fresh = [freshA(), freshB()]
+      const plain = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })
+      const keeping = (keep: LngLat) => checkProbes({ route, alongM: 1000, fresh, memory: { ...INITIAL_CHECK_PROBES, keep }, allowed: 1 })
+      expect(keeping(at(500, -500))).toEqual(plain) // behind the car
+      expect(keeping(at(1600, -500))).toEqual(plain) // within 1 km of it
+      expect(keeping(at(19500, -500))).toEqual(plain) // within 1 km of the destination
+      expect(keeping(at(9000, 1000))).toEqual(plain) // on B
+      expect(keeping([NaN, 35])).toEqual(plain)
+    })
+
+    it('nothing when nothing may be asked, there are no routes, or nothing is left to probe', () => {
+      const fresh = [freshA(), freshB()]
+      expect(checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 0 })).toEqual([])
+      expect(checkProbes({ route, alongM: 1000, fresh: [], memory: INITIAL_CHECK_PROBES, allowed: 1 })).toEqual([])
+      // 2.5 km from the end: under the 3 km a probe needs, and a kept via is not asked either.
+      const near = candidate('A', at(17500, 0), 400, { typicalDurationSec: 100 })!
+      expect(checkProbes({ route, alongM: 17500, fresh: [near], memory: { ...INITIAL_CHECK_PROBES, keep: at(19000, -500) }, allowed: 1 })).toEqual([])
+    })
+
+    it('only when the route being driven is held up: a jam reported ahead, or 2 minutes over its typical time', () => {
+      const plain = (a: RouteCandidate) => checkProbes({ route, alongM: 1000, fresh: [a, freshB()], memory: INITIAL_CHECK_PROBES, allowed: 1 })
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1500 })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: null })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1381 })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1380 })!)).toHaveLength(1)
+      // A jam Mapbox reports on it ahead, with no delay over the typical time: probed, beside the jam.
+      const a = candidate('A', here, 1500, { typicalDurationSec: 1500 })!
+      const congestion = a.geometry.slice(1).map((_, i) => (i >= 20 && i < 30 ? 'severe' : 'low') as CongestionLevel)
+      expect(plain({ ...a, segmentTraffic: { congestion, durationSec: null } })).toHaveLength(1)
+      // The threshold is the budget's.
+      expect(
+        checkProbes({ route, alongM: 1000, fresh: [candidate('A', here, 1500, { typicalDurationSec: 1450 })!, freshB()], memory: INITIAL_CHECK_PROBES, allowed: 1, budget: { minDelaySec: 30 } }),
+      ).toHaveLength(1)
+    })
+
+    it('keeps clear of the answer for the current path too', () => {
+      // A is not offered; the path check answered with it.
+      const vias = checkProbes({ route, alongM: 1000, fresh: [freshB()], baseline: [freshA()], memory: INITIAL_CHECK_PROBES, allowed: 3 })
+      expect(vias.length).toBeGreaterThan(0)
+      for (const via of vias) expect(lineDistanceM(via, freshA().geometry)).toBeGreaterThanOrEqual(DEFAULT_PROBE_OPTIONS.clearOfRoutesM)
+    })
+  })
+
+  describe('mergeCheckProbes', () => {
+    it('adds a new path after the fresh routes, tagged; drops one that is a fresh route or the current path asked for', () => {
+      const a = freshA()
+      const b = freshB()
+      const s = { ...candidate('S', here, 1400)!, via: at(9000, -500) }
+      const again = { ...candidate('A', here, 1450)!, via: at(9000, 500) }
+      const merged = mergeCheckProbes([b], [a], [again, s])
+      expect(merged.map((r) => r.id)).toEqual([b.id, s.id])
+      expect(merged[1]).toMatchObject({ source: 'probe', via: s.via })
+      expect(mergeCheckProbes([a, b], null, [])).toEqual([a, b])
+    })
+  })
+
+  describe('rememberCheckProbes', () => {
+    const s = { ...candidate('S', here, 1400)!, source: 'probe' as const, via: at(9000, -500) as LngLat }
+    const b = freshB()
+    const confirming = (id: string) => ({
+      action: 'stay' as const,
+      considered: { routeId: id, savingSec: 200, turnInM: 5000, turnAt: at(6000, 0), requiredLeadM: 400, onFreeway: false },
+      nextState: { ...INITIAL_REROUTE_STATE, pending: { geometry: s.geometry, polls: 1 } },
+    })
+
+    it('keeps the via of the side street being confirmed, and counts the probes', () => {
+      expect(rememberCheckProbes(INITIAL_CHECK_PROBES, 1, confirming(s.id), [b, s])).toEqual({ used: 1, round: 1, keep: s.via })
+    })
+
+    it('drops it when the route being confirmed is not a probed one, nothing is pending, or on a switch', () => {
+      const memory = { used: 4, round: 4, keep: s.via }
+      expect(rememberCheckProbes(memory, 1, confirming(b.id), [b, s]).keep).toBeNull()
+      const none = { action: 'stay' as const, considered: confirming(s.id).considered, nextState: INITIAL_REROUTE_STATE }
+      expect(rememberCheckProbes(memory, 1, none, [b, s]).keep).toBeNull()
+      expect(rememberCheckProbes(memory, 1, { ...confirming(s.id), action: 'switch' }, [b, s]).keep).toBeNull()
+    })
+
+    it('a failed check keeps it, as the engine keeps its confirmation; a check without probes takes no turn', () => {
+      const memory = { used: 4, round: 4, keep: s.via }
+      const failed = { action: 'stay' as const, considered: null, nextState: INITIAL_REROUTE_STATE }
+      expect(rememberCheckProbes(memory, 0, failed, null)).toEqual(memory)
+      expect(rememberCheckProbes(memory, 0, confirming(s.id), [b, s])).toEqual({ used: 4, round: 4, keep: s.via })
+    })
   })
 })

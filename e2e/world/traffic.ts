@@ -3,8 +3,9 @@
 // first screen, 2 and on the drive's checks for faster routes, about one a
 // minute from the first minute (the drive starts on the route picked on the
 // plan screen, with no request of its own: #66). A side-street probe (a
-// request with a via point) does not count: it is answered with the traffic of
-// the plan it belongs to. The drive's check of its own path (also with vias)
+// request with one via point beside a route, on the plan screen or during a
+// drive) does not count: it is answered with the traffic of the plan or the
+// check it belongs to. The drive's check of its own path (also with vias)
 // does count.
 
 import { FREE_FLOW, type Traffic } from './roads.ts'
@@ -37,4 +38,19 @@ export const NOISY_BUT_NOTHING_FASTER: Traffic = (route, at, n) => {
 export const JAM_WHERE_ALL_THREE_SHARE: Traffic = (route, at, n) => {
   const jammed = Math.abs(at.side - 300) < 50 && at.f > 0.25 && at.f < 0.4
   return FREE_FLOW(route, at, n) * (jammed ? 2 : 1)
+}
+
+/**
+ * The jam of JAM_WHERE_ALL_THREE_SHARE (Main Corridor just after it jogs east,
+ * where A, B and C all run), only from request `fromRequest` on and `factor`
+ * times the usual pace. From 2: the trip is planned in free flow (A is
+ * recommended, Parallel Street last), and the jam builds by the drive's first
+ * check. Parallel Street misses it; what it then saves depends on `factor`
+ * (about 4 minutes at 3x, about a minute at 2x).
+ */
+export function jamWhereAllThreeShare(factor: number, fromRequest = 2): Traffic {
+  return (route, at, n) => {
+    const jammed = n >= fromRequest && Math.abs(at.side - 300) < 50 && at.f > 0.25 && at.f < 0.4
+    return FREE_FLOW(route, at, n) * (jammed ? factor : 1)
+  }
 }

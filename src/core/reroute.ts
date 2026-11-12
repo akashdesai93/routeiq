@@ -229,6 +229,15 @@ export interface RerouteObservation {
    * against this baseline saves at least what is said.
    */
   readonly baseline?: readonly RouteCandidate[] | null
+  /**
+   * How far the driver has gone along the current route since the query was
+   * sent, in meters, when the caller measures it (GPS): the answer is judged
+   * where the driver is when it is used, not where it was asked from. Every
+   * turn-off is that much nearer, for the too-late rule and for what is said.
+   * Left out, or not a positive number: 0 (the simulated drive, whose clock
+   * stands still while a query is out).
+   */
+  readonly drivenSinceM?: number
 }
 
 /** Why a decision came out as it did, for logs and tests. The `reason` text says the same in words. */
@@ -244,6 +253,7 @@ export type RerouteCode =
   | 'current-best'
   | 'saving-too-small'
   | 'saving-share-too-small'
+  | 'probe-unconfirmed'
   | 'recently-abandoned'
   | 'driver-declined'
   | 'too-late'
@@ -882,6 +892,7 @@ function measure(
   speedMps: number,
   plane: Plane,
   options: RerouteOptions,
+  drivenM: number,
 ): Measured | null {
   const line = candidate.geometry.filter(isValidLngLat)
   const xy = line.map(plane.project)
@@ -892,12 +903,14 @@ function measure(
   // driver really has to act, so the sooner of the two is used.
   const own = firstOwnManeuver(candidate, currentManeuvers, plane)
   const byManeuver = own !== null && own.atDistanceM < split.atM
-  const turnInM = byManeuver ? Math.max(0, own.atDistanceM) : split.atM
+  const askedTurnInM = byManeuver ? Math.max(0, own.atDistanceM) : split.atM
+  // From where the driver is now: the turn-off came nearer while the answer was out.
+  const turnInM = Math.max(0, askedTurnInM - drivenM)
   const turnAt = byManeuver ? own.location : split.at
   // Freeway when the road at the turn-off is controlled-access on the candidate's
   // own record, or else on the current route's. Unknown road class is not freeway:
   // the speed rule (minLeadTimeSec) still stretches the lead at freeway speeds.
-  const onFreeway = insideSpan(candidate.limitedAccessSpansM ?? currentSpans, turnInM)
+  const onFreeway = insideSpan(candidate.limitedAccessSpansM ?? currentSpans, askedTurnInM)
   const speed = Number.isFinite(speedMps) && speedMps > 0 ? speedMps : 0
   const requiredLeadM = Math.max(
     options.minLeadDistanceM,
@@ -985,6 +998,12 @@ function usableEta(route: RouteCandidate): boolean {
  *    an equal ETA is not worth a change of route in the middle of a drive.
  * 8. **Minimum saving**: baseline ETA minus the alternative's ETA must be at
  *    least `minSavingSec` AND at least `minSavingFraction` of the baseline.
+ *    For a side-street probe (source 'probe'), asked through a via point, the
+ *    baseline is the current path asked the same way (observation.baseline,
+ *    matched to the current path), and never more than its ordinary time:
+ *    via-asked times run low (README), and either may read high. Without such a time this poll the probe cannot win or
+ *    count towards confirmation ('probe-unconfirmed'). Probes are never the
+ *    current route, the off-route pick or the route-lost pick.
  * 9. **No return**: an alternative that goes back to a route left less than
  *    `noReturnSec` ago (see returnOverlapFraction) needs `returnSavingFactor`
  *    times both minimums.
@@ -995,7 +1014,8 @@ function usableEta(route: RouteCandidate): boolean {
  *    maneuver that the current route does not share, whichever is sooner.
  *    It must be at least max(`minLeadDistanceM`, speed x `minLeadTimeSec`)
  *    ahead, and at least `freewayLeadDistanceM` when it is on controlled-
- *    access road (limitedAccessSpansM).
+ *    access road (limitedAccessSpansM). Ahead of where the driver is now:
+ *    observation.drivenSinceM is taken off first.
  * 11. **Confirmation**: the winner must be the same alternative (same path
  *    ahead) for `confirmPolls` polls in a row. A poll with no winner, or a
  *    different one, starts the count again.
@@ -1044,6 +1064,15 @@ export function decideReroute(
   if (candidates.length === 0 || plane === null) return stay('no-routes', 'no routes available right now', noWinner)
   // A route without a travel time ranks last (see rankRoutes) and is never switched to.
   const ranked = rankRoutes(candidates, { etaTieWindowSec: opts.etaTieWindowSec }).map((r) => r.route)
+  // Side-street probes (source 'probe') are asked through a via point: their times are compared
+  // only with a time for the current path asked the same way (rule 8), and they are never the
+  // current route, the off-route pick or the route-lost pick.
+  const isProbe = (c: RouteCandidate) => c.source === 'probe'
+  const provided = ranked.filter((c) => !isProbe(c))
+  const drivenM =
+    observation.drivenSinceM !== undefined && Number.isFinite(observation.drivenSinceM) && observation.drivenSinceM > 0
+      ? observation.drivenSinceM
+      : 0
 
   const switchTo = (
     code: RerouteCode,
@@ -1076,7 +1105,7 @@ export function decideReroute(
       ? observation.offRouteM
       : nearestOnLine(startsAt, observation.route.geometry.filter(isValidLngLat).map(plane.project)).distanceM
   if (offBy > opts.offRouteM) {
-    return switchTo('off-route', 'off the planned route, taking the fastest route from here', ranked[0]!, null)
+    return switchTo('off-route', 'off the planned route, taking the fastest route from here', provided[0] ?? ranked[0]!, null)
   }
 
   const sinceSwitchSec = base.lastSwitchAtSec === null ? Infinity : nowSec - base.lastSwitchAtSec
@@ -1101,7 +1130,7 @@ export function decideReroute(
 
   // Rule 4.
   const isCurrent = (c: RouteCandidate) => continuesPath(plane.ahead, c.geometry.filter(isValidLngLat).map(plane.project), opts)
-  const offered = closestToPath(plane.ahead, ranked, plane.project, opts)
+  const offered = closestToPath(plane.ahead, provided, plane.project, opts)
   // Rule 5: not offered, so the answer to the request for the current path itself, if there is one.
   const baseline = Array.isArray(observation.baseline)
     ? (observation.baseline as readonly RouteCandidate[]).filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
@@ -1136,8 +1165,8 @@ export function decideReroute(
     }
     const spans = spansAhead(observation.route.limitedAccessSpansM, observation.positionAlongM)
     let closest: RerouteAlternative | null = null
-    for (const candidate of ranked.filter(usableEta)) {
-      const m = measure(candidate, null, observation.route.maneuvers, spans, observation.speedMps, plane, opts)
+    for (const candidate of provided.filter(usableEta)) {
+      const m = measure(candidate, null, observation.route.maneuvers, spans, observation.speedMps, plane, opts, drivenM)
       if (m === null || wasDeclined(m)) continue
       closest ??= m.alternative
       if (tooLate(m.alternative)) continue
@@ -1160,6 +1189,12 @@ export function decideReroute(
       ? { durationSec: current.durationSec, distanceM: current.distanceM, asked: current !== offered }
       : null
 
+  // The current path's time asked through via points, like a probe's: the answer for the current
+  // path itself when it was asked for. Probes are compared with it and nothing else.
+  const comparableEta = (c: RouteCandidate) => usableEta(c) && (!opts.requireTypicalDuration || c.typicalDurationSec !== null)
+  const asked = current !== offered ? current : baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts)
+  const viaCurrent = asked !== null && comparableEta(asked) ? asked : null
+
   // Rule 6.
   const baselineSec = current.durationSec
   if (!usableEta(current)) return stay('no-eta', 'no travel time for the current route', foundNoWinner, null, known)
@@ -1177,9 +1212,28 @@ export function decideReroute(
   let winner: Measured | null = null
   let refusal: { code: RerouteCode; reason: string; considered: RerouteAlternative } | null = null
   for (const candidate of comparable) {
-    const savingSec = baselineSec - candidate.durationSec
+    // Like for like: a probed route against the current path asked the same way, through via points.
+    const against = isProbe(candidate) ? viaCurrent : current
+    if (against === null) {
+      // No such time this check: a side street that looks faster cannot count, not even towards confirmation.
+      if (candidate.durationSec < baselineSec) {
+        const m = measure(candidate, null, current.maneuvers, current.limitedAccessSpansM, observation.speedMps, plane, opts, drivenM)
+        if (m !== null) {
+          refusal ??= {
+            code: 'probe-unconfirmed',
+            reason: 'a side street may be faster, but its time could not be compared like for like',
+            considered: m.alternative,
+          }
+        }
+      }
+      continue
+    }
+    // Never more than the current route's ordinary time either: a path check can read high too (a
+    // later request, a via that snaps onto a slightly longer path), and the lower is the safe one.
+    const fromSec = isProbe(candidate) ? Math.min(against.durationSec, baselineSec) : against.durationSec
+    const savingSec = fromSec - candidate.durationSec
     if (savingSec <= 0) continue
-    const m = measure(candidate, savingSec, current.maneuvers, current.limitedAccessSpansM, observation.speedMps, plane, opts)
+    const m = measure(candidate, savingSec, current.maneuvers, current.limitedAccessSpansM, observation.speedMps, plane, opts, drivenM)
     if (m === null) continue
     const a = m.alternative
     const refuse = (code: RerouteCode, reason: string) => {
@@ -1189,10 +1243,10 @@ export function decideReroute(
       refuse('saving-too-small', `faster route saves only ${spokenDuration(savingSec)}`)
       continue
     }
-    if (savingSec < opts.minSavingFraction * baselineSec) {
+    if (savingSec < opts.minSavingFraction * fromSec) {
       refuse(
         'saving-share-too-small',
-        `faster route saves only ${spokenDuration(savingSec)} of the remaining ${spokenDuration(baselineSec)}`,
+        `faster route saves only ${spokenDuration(savingSec)} of the remaining ${spokenDuration(fromSec)}`,
       )
       continue
     }
@@ -1204,7 +1258,7 @@ export function decideReroute(
     if (
       left !== null &&
       (savingSec < opts.returnSavingFactor * opts.minSavingSec ||
-        savingSec < opts.returnSavingFactor * opts.minSavingFraction * baselineSec)
+        savingSec < opts.returnSavingFactor * opts.minSavingFraction * fromSec)
     ) {
       refuse(
         'recently-abandoned',
