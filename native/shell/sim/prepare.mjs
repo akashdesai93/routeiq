@@ -19,7 +19,7 @@ import { build } from 'esbuild';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import * as plist from 'plist';
+import plist from 'plist';
 import { injectSim, SIM_FILE } from '../scripts/web-checks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

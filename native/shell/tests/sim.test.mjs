@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import * as plist from 'plist';
+import plist from 'plist';
 import { hasSimHook, injectBridge, injectSim, SIM_FILE } from '../scripts/web-checks.mjs';
 import { patchInfoPlist } from '../scripts/info-plist.mjs';
 import { allowLocalHttp } from '../sim/prepare.mjs';
