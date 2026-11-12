@@ -488,7 +488,7 @@ final class ProbeTestsDuringADrive: XCTestCase {
         XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, losingChecks: 3, rearmSlowdownChange: 0.1))
     }
 
-    // it('holds after 3 losing checks in a row, until the pace ahead changes by 15 %') (#183)
+    // it('holds after 3 losing checks in a row, until the pace ahead changes by 0.1 of the slowdown') (#183)
     func testBackoff_holdsAfter3LossesInARowUntilTheSlowdownAheadChanges() {
         func m(_ losing: Int, _ slowdown: Double?) -> CheckProbeMemory { CheckProbeMemory(losing: losing, losingSlowdown: slowdown) }
         XCTAssertFalse(Probe.probeBackoffHolds(m(2, 1.6), slowdownNow: 1.6))
@@ -497,7 +497,8 @@ final class ProbeTestsDuringADrive: XCTestCase {
         XCTAssertFalse(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.71))
         XCTAssertFalse(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.49))
         XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: 1.51))
-        XCTAssertTrue(Probe.probeBackoffHolds(m(3, nil), slowdownNow: 3))
+        XCTAssertFalse(Probe.probeBackoffHolds(m(3, nil), slowdownNow: 3))
+        XCTAssertFalse(Probe.probeBackoffHolds(m(3, nil), slowdownNow: nil))
         XCTAssertTrue(Probe.probeBackoffHolds(m(3, 1.6), slowdownNow: nil))
         XCTAssertFalse(Probe.probeBackoffHolds(m(5, 1.6), slowdownNow: 1.6, budget: DriveProbeBudget(losingChecks: 6)))
     }
@@ -721,16 +722,22 @@ final class ProbeTestsDuringADrive: XCTestCase {
     func testRememberCheckProbes_countsALossOnlyForASideStreetComparedLikeForLike() {
         let s = sideStreet()
         let b = freshB()
-        let lost = RerouteDecision(action: .stay, toRouteId: nil, reason: "", code: .savingTooSmall, considered: nil, current: nil, nextState: .initial)
+        let lost = RerouteDecision(action: .stay, toRouteId: nil, reason: "", code: .savingTooSmall, considered: nil, current: nil, probeCompared: true, nextState: .initial)
         let driven = (route: route.geometry, alongM: 1000.0, baseline: [RouteCandidate]?.none, rerouteOptions: RerouteOptions.default)
         let once = Probe.rememberCheckProbes(.initial, 1, lost, [freshA(), b, s], driven: driven)
         XCTAssertEqual([Double(once.losing), once.losingSlowdown ?? -1], [1, 1.25])
-        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, lost, [freshA(), b], driven: driven).losing, 1)
-        var unconfirmed = lost
-        unconfirmed.code = .probeUnconfirmed
-        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, unconfirmed, [freshA(), b, s], driven: driven).losing, 1)
+        // Nothing compared like for like tells nothing, whatever the code says.
+        for code in [RerouteCode.savingTooSmall, .probeUnconfirmed, .noTrafficData, .noEta, .routeUnconfirmed, .currentBest] {
+            var d = lost
+            d.code = code
+            d.probeCompared = false
+            XCTAssertEqual(Probe.rememberCheckProbes(once, 1, d, [freshA(), b, s], driven: driven).losing, 1, code.rawValue)
+        }
         XCTAssertEqual(Probe.rememberCheckProbes(once, 0, lost, [freshA(), b, s], driven: driven).losing, 1)
-        XCTAssertNil(Probe.rememberCheckProbes(.initial, 1, lost, [freshA(), b, s]).losingSlowdown)
+        // The slowdown ahead not known: not a loss.
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, lost, [freshA(), b, s]).losing, 1)
+        let untyped = DriveWorld.candidate(.A, here, 1500) { $0.typicalDurationSec = nil }!
+        XCTAssertEqual(Probe.rememberCheckProbes(once, 1, lost, [untyped, b, s], driven: driven).losing, 1)
         XCTAssertEqual(Probe.rememberCheckProbes(once, 1, confirming(s.id, s), [b, s]).losing, 0)
     }
 

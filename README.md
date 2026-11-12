@@ -1063,10 +1063,13 @@ lead distance, the cooldown, no return. No threshold changed.
   check that is cancelled before it answers (End, off the route, "Keep my route")
   count too, and 60 and 20 are exact.
 - **Back-off (#183).** After `losingChecks` (3) losses in a row the checks stop probing. A
-  loss is a check whose probe came back with a side street that was compared like for like
-  (with the path check) and did not hold up (it is not being confirmed). A probe that found
-  no road, failed or timed out, or one whose like-for-like time was missing, tells nothing
-  and is not counted (unknown is not a loss). They start again when the traffic ahead
+  loss is a check whose probe came back with a side street that the reroute engine compared
+  like for like (with the path check; the engine says so, `RerouteDecision.probeCompared`)
+  and that did not hold up (it is not being confirmed). A probe that found no road, failed
+  or timed out, one with no like-for-like time, or one the engine never got to compare (no
+  ETA, no traffic data, the route not found) tells nothing and is not counted. Nor is a loss
+  whose slowdown ahead is not known (no typical time), since nothing could then end the
+  back-off: unknown is not a loss. They start again when the traffic ahead
   changes: the route's slowdown (its fresh time over its typical one, as the check found it)
   is `rearmSlowdownChange` (0.1, as from 1.6 to 1.7 times the usual time) higher or lower
   than at the last loss. A share, not seconds: the same slow traffic is fewer seconds late

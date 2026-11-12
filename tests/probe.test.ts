@@ -559,7 +559,8 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
     })
 
     it('counts a loss only for a side street that came back, was compared like for like and did not hold up (#183)', () => {
-      const lost = { action: 'stay' as const, code: 'saving-too-small' as const, considered: null, nextState: INITIAL_REROUTE_STATE }
+      // The engine compared a probed route like for like (probeCompared), and it was not faster by enough.
+      const lost = { action: 'stay' as const, code: 'saving-too-small' as const, considered: null, nextState: INITIAL_REROUTE_STATE, probeCompared: true }
       // The route being driven, 1.25 times its typical time (1500 s for 1200) as the check found it.
       const driven = { route, alongM: 1000 }
       const once = rememberCheckProbes(INITIAL_CHECK_PROBES, 1, lost, [freshA(), b, s], 0, driven)
@@ -568,19 +569,26 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
       const twice = rememberCheckProbes(once, 1, lost, [slower, b, s], 0, driven)
       expect(twice.losing).toBe(2)
       expect(twice.losingSlowdown).toBeCloseTo(1700 / 1200, 9)
-      // No probed route among the answers (no road there, a failed or timed-out probe): it tells nothing.
-      expect(rememberCheckProbes(twice, 1, lost, [freshA(), b], 0, driven)).toMatchObject({ losing: 2, losingSlowdown: twice.losingSlowdown })
-      // A side street with no like-for-like time (its path check failed) tells nothing either.
-      expect(rememberCheckProbes(twice, 1, { ...lost, code: 'probe-unconfirmed' }, [freshA(), b, s], 0, driven)).toMatchObject({ losing: 2 })
+      const unchanged = { losing: 2, losingSlowdown: twice.losingSlowdown }
+      // Nothing compared like for like tells nothing: no probed route came back (no road there, a
+      // failed or timed-out probe), no like-for-like time, or the engine stopped before comparing
+      // (no traffic data, no ETA, the route not found). Whatever the code says.
+      for (const code of ['saving-too-small', 'probe-unconfirmed', 'no-traffic-data', 'no-eta', 'route-unconfirmed', 'current-best'] as const) {
+        expect(rememberCheckProbes(twice, 1, { ...lost, code, probeCompared: false }, [freshA(), b, s], 0, driven), code).toMatchObject(unchanged)
+        expect(rememberCheckProbes(twice, 1, { ...lost, code, probeCompared: undefined }, [freshA(), b, s], 0, driven), code).toMatchObject(unchanged)
+      }
       // A check that did not probe, or failed, changes nothing.
-      expect(rememberCheckProbes(twice, 0, lost, [freshA(), b, s], 0, driven)).toMatchObject({ losing: 2 })
-      expect(rememberCheckProbes(twice, 1, lost, null, 0, driven)).toMatchObject({ losing: 2 })
+      expect(rememberCheckProbes(twice, 0, lost, [freshA(), b, s], 0, driven)).toMatchObject(unchanged)
+      expect(rememberCheckProbes(twice, 1, lost, null, 0, driven)).toMatchObject(unchanged)
       // A probed route being confirmed, or a switch, starts the count again.
       expect(rememberCheckProbes(twice, 1, confirming(s.id), [b, s])).toMatchObject({ losing: 0, losingSlowdown: null })
       expect(rememberCheckProbes(twice, 0, { ...lost, action: 'switch' }, [b, s])).toMatchObject({ losing: 0, losingSlowdown: null })
-      // The delay not known (no route given, or not found): kept as unknown, never 0.
-      expect(rememberCheckProbes(INITIAL_CHECK_PROBES, 1, lost, [freshA(), b, s])).toMatchObject({ losing: 1, losingSlowdown: null })
-      expect(rememberCheckProbes(INITIAL_CHECK_PROBES, 1, lost, [b, s], 0, driven)).toMatchObject({ losing: 1, losingSlowdown: null })
+      // The slowdown ahead not known (no route given, not found, or no typical time): not a loss,
+      // since nothing could then end the back-off.
+      expect(rememberCheckProbes(twice, 1, lost, [freshA(), b, s])).toMatchObject(unchanged)
+      expect(rememberCheckProbes(twice, 1, lost, [b, s], 0, driven)).toMatchObject(unchanged)
+      const untyped = candidate('A', here, 1500, { typicalDurationSec: null })!
+      expect(rememberCheckProbes(twice, 1, lost, [untyped, b, s], 0, driven)).toMatchObject(unchanged)
     })
   })
 
@@ -593,9 +601,11 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
       expect(probeBackoffHolds(memory(3, 1.6), 1.71)).toBe(false)
       expect(probeBackoffHolds(memory(3, 1.6), 1.49)).toBe(false)
       expect(probeBackoffHolds(memory(3, 1.6), 1.51)).toBe(true)
-      // Not known: it holds (a probe costs a request; unknown is not a change).
-      expect(probeBackoffHolds(memory(3, null), 3)).toBe(true)
+      // Not known now: it holds (a probe costs a request; unknown is not a change).
       expect(probeBackoffHolds(memory(3, 1.6), null)).toBe(true)
+      // A hold with no slowdown of its own never holds: nothing could ever end it.
+      expect(probeBackoffHolds(memory(3, null), 3)).toBe(false)
+      expect(probeBackoffHolds(memory(3, null), null)).toBe(false)
       expect(probeBackoffHolds(memory(5, 1.6), 1.6, { losingChecks: 6 })).toBe(false)
     })
   })

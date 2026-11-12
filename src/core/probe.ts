@@ -611,13 +611,16 @@ function slowdownOf(route: Pick<RouteCandidate, 'durationSec' | 'typicalDuration
 
 /**
  * True while the back-off holds: `losingChecks` losses in a row, and the slowdown ahead now
- * within rearmSlowdownChange of what it was at the last of them. A slowdown that is not known
- * re-arms nothing: the back-off holds (a probe costs a request; unknown is not "changed").
+ * within rearmSlowdownChange of what it was at the last of them. A slowdown not known now
+ * re-arms nothing: the back-off holds (a probe costs a request; unknown is not "changed"). A
+ * hold with no slowdown of its own (a memory from elsewhere: rememberCheckProbes never stores
+ * one) does not hold: nothing could ever end it.
  */
 export function probeBackoffHolds(memory: CheckProbeMemory, slowdownNow: number | null, budget: Partial<DriveProbeBudget> = {}): boolean {
   const { losingChecks, rearmSlowdownChange } = resolveDriveProbeBudget(budget)
   if (!(whole(memory.losing, 0) >= losingChecks)) return false
-  if (slowdownNow === null || memory.losingSlowdown === null) return true
+  if (memory.losingSlowdown === null || !Number.isFinite(memory.losingSlowdown)) return false
+  if (slowdownNow === null) return true
   return Math.abs(slowdownNow - memory.losingSlowdown) < rearmSlowdownChange
 }
 
@@ -746,7 +749,7 @@ export function mergeCheckProbes(
 export function rememberCheckProbes(
   memory: CheckProbeMemory,
   asked: number,
-  decision: Pick<RerouteDecision, 'action' | 'code' | 'considered' | 'nextState'>,
+  decision: Pick<RerouteDecision, 'action' | 'code' | 'considered' | 'nextState' | 'probeCompared'>,
   routes: readonly RouteCandidate[] | null,
   /** How many of `asked` are counted in memory.used already (counted as they were sent). */
   alreadyCounted = 0,
@@ -771,12 +774,15 @@ export function rememberCheckProbes(
   const keep = route?.source === 'probe' && route.via !== undefined && isValidLngLat(route.via) ? route.via : null
   // The back-off (#183): a switch, or a probed route that holds up, starts the count again.
   if (decision.action === 'switch' || keep !== null) return { ...counted, keep, losing: 0, losingSlowdown: null }
-  // A loss is a side street that came back and was compared like for like, and did not hold up.
-  // A probe that found no road, failed or timed out (no probed route among the answers), or one
-  // whose like-for-like time was missing (probe-unconfirmed), tells nothing: it is not counted.
-  const lost = made > 0 && decision.code !== 'probe-unconfirmed' && routes.some((r) => r.source === 'probe')
-  if (!lost) return { ...counted, keep }
+  // A loss is a side street that came back, was compared like for like (the engine says so:
+  // probeCompared) and did not hold up. A probe that found no road, failed or timed out, or one
+  // the engine could not compare (no like-for-like time, no ETA, no traffic data, the route not
+  // found), tells nothing: it is not counted. Nor is a loss whose slowdown ahead is not known,
+  // since nothing could then tell when the traffic has changed (unknown is not a loss).
+  if (!(made > 0 && decision.probeCompared === true)) return { ...counted, keep }
   const known = [...routes.filter((r) => r.source !== 'probe'), ...(driven?.baseline ?? [])].filter(usable)
   const base = driven === null ? null : findCurrentRoute(driven.route, driven.alongM, known, driven.rerouteOptions)
-  return { ...counted, keep, losing: whole(memory.losing, 0) + 1, losingSlowdown: slowdownOf(base) }
+  const slowdown = slowdownOf(base)
+  if (slowdown === null) return { ...counted, keep }
+  return { ...counted, keep, losing: whole(memory.losing, 0) + 1, losingSlowdown: slowdown }
 }

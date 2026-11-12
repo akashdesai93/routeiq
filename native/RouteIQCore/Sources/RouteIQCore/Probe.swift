@@ -515,7 +515,9 @@ public enum Probe {
     public static func probeBackoffHolds(_ memory: CheckProbeMemory, slowdownNow: Double?, budget: DriveProbeBudget = .default) -> Bool {
         let b = budget.resolved()
         if !(Double(max(0, memory.losing)) >= b.losingChecks) { return false }
-        guard let slowdownNow, let was = memory.losingSlowdown else { return true }
+        // A hold with no slowdown of its own never holds: nothing could ever end it.
+        guard let was = memory.losingSlowdown, was.isFinite else { return false }
+        guard let slowdownNow else { return true }
         return abs(slowdownNow - was) < b.rearmSlowdownChange
     }
 
@@ -618,16 +620,13 @@ public enum Probe {
             return counted
         }
         // A loss is a side street that came back and was compared like for like, and did not hold up.
-        let lost = made > 0 && decision.code != .probeUnconfirmed && routes.contains { $0.source == .probe }
-        if !lost { return counted }
+        // Only a probed route the engine compared like for like (probeCompared), with a known slowdown ahead.
+        guard made > 0, decision.probeCompared, let driven else { return counted }
+        let known = (routes.filter { $0.source != .probe } + (driven.baseline ?? [])).filter(usable)
+        let index = Reroute.findCurrentRouteIndex(driven.route, positionAlongM: driven.alongM, candidates: known, options: driven.rerouteOptions)
+        guard let slowdown = slowdownOf(index.map { known[$0] }) else { return counted }
         counted.losing = max(0, memory.losing) + 1
-        if let driven {
-            let known = (routes.filter { $0.source != .probe } + (driven.baseline ?? [])).filter(usable)
-            let index = Reroute.findCurrentRouteIndex(driven.route, positionAlongM: driven.alongM, candidates: known, options: driven.rerouteOptions)
-            counted.losingSlowdown = slowdownOf(index.map { known[$0] })
-        } else {
-            counted.losingSlowdown = nil
-        }
+        counted.losingSlowdown = slowdown
         return counted
     }
 }

@@ -1848,6 +1848,19 @@ final class RerouteSideStreetTests: XCTestCase {
         XCTAssertEqual(r.memory.losingSlowdown, 2000.0 / 1700.0)
     }
 
+    // it('says whether a side street was compared like for like, for the back-off (#183)')
+    func testSideStreetsFoundByProbes_saysWhetherASideStreetWasComparedLikeForLike() throws {
+        let off = DriveProbeBudget(losingChecks: 1e9)
+        let compared = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1940, budget: off))
+        XCTAssertEqual(compared.records.map(\.decision.probeCompared), compared.records.map(\.found))
+        let unlike = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1500, unlike: true, budget: off))
+        XCTAssertTrue(unlike.records.contains(where: \.found))
+        XCTAssertFalse(unlike.records.contains(where: \.decision.probeCompared))
+        let failed = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1940, pathCheckFailsAt: [0], budget: off))
+        XCTAssertTrue(failed.records[0].found)
+        XCTAssertFalse(failed.records[0].decision.probeCompared)
+    }
+
     // it('probes that failed or found no road are not losses: a side street found later still switches (#183)')
     func testSideStreetsFoundByProbes_probesThatFailedAreNotLosses() throws {
         let r = probedDrive(ProbedDrive(polls: 8, etaA: 2000, etaS: 1820, probeFailsAt: [0, 2]))
