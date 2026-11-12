@@ -1,6 +1,6 @@
 // The Info.plist entries the shell needs on top of Capacitor's template.
 // Kept separate from generate-ios.mjs so it can be tested without a Mac.
-import plist from 'plist';
+import { build, parse } from 'plist';
 
 /** location: GPS continues while locked. audio: spoken guidance plays while locked. */
 export const REQUIRED_BACKGROUND_MODES = ['location', 'audio'];
@@ -11,7 +11,7 @@ const LOCATION_REASON =
 
 /** @param {string} xml Info.plist text. @returns {string} patched text. */
 export function patchInfoPlist(xml) {
-  const info = plist.parse(xml);
+  const info = parse(xml);
 
   const modes = new Set(info.UIBackgroundModes ?? []);
   for (const mode of REQUIRED_BACKGROUND_MODES) modes.add(mode);
@@ -24,12 +24,12 @@ export function patchInfoPlist(xml) {
   // The only network calls are plain HTTPS; this skips an export-compliance prompt.
   info.ITSAppUsesNonExemptEncryption = false;
 
-  return plist.build(info);
+  return build(info);
 }
 
 /** Throws with a readable message if the generated project is not what the shell needs. */
 export function checkInfoPlist(xml) {
-  const info = plist.parse(xml);
+  const info = parse(xml);
   const problems = [];
   for (const mode of REQUIRED_BACKGROUND_MODES) {
     if (!(info.UIBackgroundModes ?? []).includes(mode)) problems.push(`UIBackgroundModes lacks "${mode}"`);
