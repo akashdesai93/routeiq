@@ -17,6 +17,29 @@ const clip = (s, n) => {
 }
 const byAt = (a, b) => String(a.at).localeCompare(String(b.at))
 
+// A session in one of these states that has gone silent with no work of its own has ended.
+const LIVE_STATES = ['working', 'waiting', 'blocked', 'idle']
+const CHECKS = { success: 'green', failure: 'red', pending: 'pending', missing: 'pending' }
+
+/** Where an open PR is: blocked (on the owner), building (unfinished), phone, fixing (red or conflicting) or review. */
+export function prStage({ labels, draft, needsPhone: phone, required, conflicting }) {
+  if (labels.includes('needs-human')) return 'blocked'
+  if (draft || labels.includes('do-not-merge')) return 'building'
+  if (phone && !labels.includes('phone-verified')) return 'phone'
+  if (required === 'failure' || conflicting) return 'fixing'
+  return 'review'
+}
+
+/** The dashboard's group of a session: done, phone, blocked, review or working, from its state and its open PRs. */
+export function sessionGroup(s, openPrs) {
+  if (s.ended) return 'done'
+  const stages = openPrs.filter(Boolean).map((p) => p.stage)
+  if (s.role === 'phone lab' || stages.includes('phone')) return 'phone'
+  if (s.status === 'blocked' || stages.includes('blocked')) return 'blocked'
+  if (stages.length && stages.every((x) => x === 'review')) return 'review'
+  return 'working'
+}
+
 export function needsPhone(pr) {
   return pr.labels.includes('needs-phone') || PHONE_MARKER.test(pr.body || '')
 }
@@ -54,7 +77,10 @@ export function derive(raw, opts = {}) {
   // --- sessions, from status and dispatch comments; the newest status wins.
   const statuses = comments.map(parseStatus).filter(Boolean)
   const dispatches = comments.map(parseDispatch).filter(Boolean)
-  const heartbeats = raw.board_comments.map(parseHeartbeat).filter(Boolean).filter((h) => new Date(h.at).getTime() <= nowMs)
+  // A heartbeat counts from its edit; a tick line ahead of the present (a skewed clock) counts as now.
+  const heartbeats = raw.board_comments.map(parseHeartbeat).filter(Boolean)
+    .filter((h) => new Date(h.edited_at).getTime() <= nowMs)
+    .map((h) => (new Date(h.at).getTime() > nowMs ? { ...h, at: now } : h))
   const sessions = new Map()
   const firstSeen = new Map()
   for (const s of statuses) {
@@ -77,6 +103,7 @@ export function derive(raw, opts = {}) {
     asks: s.asks,
     next: s.next,
     formatted: s.formatted,
+    link: s.link,
     first_seen: firstSeen.get(s.name),
     last_seen: s.at,
     silent_h: round1(hoursBetween(s.at, now)),
@@ -87,7 +114,7 @@ export function derive(raw, opts = {}) {
     sessionList.push({
       id: d.name, name: d.name, kind: 'session', surface: d.surface, where: null, branch: null, role: d.role,
       working_on: d.issues.map((n) => `#${n}`).join(', ') || null, issue: d.issues[0] ?? null, prs: [],
-      status: 'dispatched', blocked: null, asks: null, next: null, formatted: true,
+      status: 'dispatched', blocked: null, asks: null, next: null, formatted: true, link: null,
       first_seen: d.at, last_seen: d.at, silent_h: round1(hoursBetween(d.at, now)), url: null,
     })
   }
@@ -133,6 +160,9 @@ export function derive(raw, opts = {}) {
       verdict: verdict && { verdict: verdict.verdict, sha: verdict.sha, at: verdict.at, current: p.head_sha.startsWith(verdict.sha) },
       phone_result: phone && { result: phone.result, sha: phone.sha, text: phone.text, at: phone.at, current: p.head_sha.startsWith(phone.sha) },
       orphaned: (required === 'failure' || conflicting) && idle >= o.prIdleHours,
+      checks: CHECKS[required],
+      stage: prStage({ labels: p.labels, draft: p.draft, needsPhone: needsPhone(p), required, conflicting }),
+      opened_at: p.created_at,
       url: p.html_url,
       build: p.build || null,
       body: p.body,
@@ -161,6 +191,7 @@ export function derive(raw, opts = {}) {
       needs_human: i.labels.includes('needs-human'),
       decision: decisionComment ? { ...parseDecision(decisionComment.body), at: decisionComment.created_at, url: decisionComment.html_url } : null,
       closed_at: i.closed_at,
+      updated_at: i.updated_at || null,
       url: i.html_url,
     }
   }).sort((a, b) => a.number - b.number)
@@ -222,11 +253,21 @@ export function derive(raw, opts = {}) {
 
   const orphaned = prs.filter((p) => p.orphaned).map((p) => ({ pr: p.number, title: p.title, reason: p.conflicting ? 'conflicting' : 'red', idle_h: p.idle_h, author: p.author, author_state: p.author_state }))
   // Silent counts only with work in flight: an open PR of its own, or an open issue it works on.
+  // in_flight (the board's Sessions table) also counts an open issue the session only names;
+  // the work that keeps a session alive is an open PR of its own or an issue it has claimed.
   const openPrs = new Set(prs.map((p) => p.number))
   const openIssues = new Set(issues.filter((i) => i.state === 'open').map((i) => i.number))
-  for (const s of sessionList) s.in_flight = s.prs.some((n) => openPrs.has(n)) || prs.some((p) => p.author === s.name) || (s.issue != null && openIssues.has(s.issue))
+  const prByNumber = new Map(prs.map((p) => [p.number, p]))
+  for (const s of sessionList) {
+    s.in_flight = s.prs.some((n) => openPrs.has(n)) || prs.some((p) => p.author === s.name) || (s.issue != null && openIssues.has(s.issue))
+    s.open_prs = [...new Set([...s.prs.filter((n) => openPrs.has(n)), ...prs.filter((p) => p.author === s.name).map((p) => p.number)])].sort((a, b) => a - b)
+    s.claimed = issues.filter((i) => i.state === 'open' && i.claimed_by === s.name).map((i) => i.number)
+    s.has_work = s.open_prs.length > 0 || s.claimed.length > 0
+    s.ended = s.status === 'stopped' || (LIVE_STATES.includes(s.status) && !s.has_work && hoursBetween(s.last_seen, now) >= o.sessionSilentHours)
+    s.group = sessionGroup(s, s.open_prs.map((n) => prByNumber.get(n)))
+  }
   const silent = sessionList
-    .filter((s) => ['working', 'waiting', 'blocked'].includes(s.status) && s.in_flight && s.silent_h >= o.sessionSilentHours)
+    .filter((s) => ['working', 'waiting', 'blocked'].includes(s.status) && !s.ended && s.silent_h >= o.sessionSilentHours)
     .map((s) => ({ name: s.name, role: s.role, status: s.status, last_seen: s.last_seen, silent_h: s.silent_h, working_on: clip(s.working_on, 80) }))
   const dispatchedSilent = sessionList.filter((s) => s.status === 'dispatched' && s.silent_h >= o.dispatchSilentHours).map((s) => ({ name: s.name, dispatched_at: s.first_seen, silent_h: s.silent_h }))
 
@@ -290,10 +331,17 @@ export function derive(raw, opts = {}) {
     alerts,
   }
 
-  return { generated_at: now, repo: raw.repo, sessions: sessionList, prs: prs.map(({ body: _body, ...p }) => p), issues, events, decisions, health, phoneQueue }
+  const merged = raw.merged.filter((m) => new Date(m.merged_at).getTime() <= nowMs)
+    .map((m) => ({ number: m.number, title: m.title, branch: m.head_ref, merged_at: m.merged_at, url: m.html_url }))
+    .sort((a, b) => b.number - a.number)
+
+  return { generated_at: now, repo: raw.repo, sessions: sessionList, prs: prs.map(({ body: _body, ...p }) => p), merged, issues, events, decisions, health, phoneQueue }
 }
 
-/** Adds local-only facts (the fleet roster and events) in the same shapes, without duplicates. */
+/**
+ * Adds local-only facts (the fleet roster and events) in the same shapes, without duplicates,
+ * and `health`: the dashboard health fields only the PC knows (phone_build, phone_state, notes).
+ */
 export function mergeLocal(state, local) {
   const sessions = new Map(state.sessions.map((s) => [s.id, s]))
   for (const s of local.sessions || []) {
@@ -303,5 +351,6 @@ export function mergeLocal(state, local) {
   const key = (e) => `${e.at}|${e.who}|${e.kind}`
   const events = new Map(state.events.map((e) => [key(e), e]))
   for (const e of local.events || []) if (!events.has(key(e))) events.set(key(e), e)
-  return { ...state, sessions: [...sessions.values()].sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))), events: [...events.values()].sort(byAt) }
+  const localHealth = local.health && typeof local.health === 'object' ? { local_health: local.health } : {}
+  return { ...state, ...localHealth, sessions: [...sessions.values()].sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))), events: [...events.values()].sort(byAt) }
 }
