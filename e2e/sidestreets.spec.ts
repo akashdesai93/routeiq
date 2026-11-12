@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, INDIAN_LAND, test, UPTOWN } from './harness.ts'
-import { JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
+import { everyRoadSlow, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
 
 // Side-street probing on the plan screen (PLAN step 11b). Mapbox offers three
 // routes at most; the made-up network here also has Parallel Street (S), which
@@ -426,5 +426,44 @@ test('when I pick a slower route on purpose, it drives that route', async ({ app
   expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
   // The turns spoken are the picked route's own.
   expect(spoken.some((line) => line.includes(turnOnto))).toBe(true)
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
+test('when the side streets keep losing, they never use up the checks before I arrive', async ({ app, page }) => {
+  // Every road is slow from the drive's first check to the end, so every check is on a route
+  // well over its typical time and may probe, and every probe finds Parallel Street slower than
+  // staying (the desk drive of #183: 18 probes, all 4 to 6 minutes slower). A tight budget of 30
+  // requests: a check with a probe and its path check costs 3, so probes alone would spend it in
+  // about ten checks, and the last part of the drive would have no checks at all.
+  app.outside.sideStreet = true
+  app.outside.traffic = everyRoadSlow()
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await page.locator('details.drive-settings > summary').click()
+  await page.getByLabel('Directions requests per drive (at most)').fill('30')
+  const before = app.directionsRequests
+  const probesBefore = app.probes.length
+  // The drive's requests so far: its checks and path checks, and its probes.
+  const requests = () => app.directionsRequests - before + app.probes.length - probesBefore
+
+  // How many requests the drive had made, minute by minute.
+  const used: { atSec: number; requests: number }[] = []
+  const lookAtSec = Array.from({ length: 40 }, (_, i) => ({ atSec: 60 * (i + 1), look: async () => void used.push({ atSec: 60 * (i + 1), requests: requests() }) }))
+  const log = await app.drive({ road: 'A', lookAtSec, snapAtSec: [300, 900] })
+  await app.snap('arrived on Main Corridor: checked all the way, never out of requests')
+
+  expect(log.arrived).toBe(true)
+  // Probes did go out, and every one lost: no switch.
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  expect(driveProbes.length).toBeGreaterThanOrEqual(1)
+  expect(log.banners).toEqual([])
+  // The budget was never used up, and the checks went on into the last two minutes of the drive.
+  expect(log.statusLines.filter((l) => l.text.startsWith('Request budget used up'))).toEqual([])
+  const total = requests()
+  expect(total).toBeLessThanOrEqual(30)
+  const twoMinutesBefore = used.filter((u) => u.atSec <= log.seconds - 120).at(-1)!
+  expect(total).toBeGreaterThan(twoMinutesBefore.requests)
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })

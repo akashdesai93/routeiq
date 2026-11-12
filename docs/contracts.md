@@ -108,8 +108,8 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 6 | by definition |
-| Swift port (`native/RouteIQCore`) | 6, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment (#33, #84) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
+| Web app (`src/`) | 7 | by definition |
+| Swift port (`native/RouteIQCore`) | 7, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment (#33, #84) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
@@ -139,3 +139,7 @@ the declarations that changed.
   `turnInM`, and its `text` is now the spoken line; `LiveState` gains `offer` (a faster route
   being confirmed) and `kept` (the calm banner after "Keep my route") and `declinedTurns`; `LiveOptions` gains `heldTurnMatchM`. The `keep-previous`
   event now also turns down a route that is still being confirmed.
+- **7** (Nov 12, 2026, #183): `DriveProbeBudget.arrivalReserve`: before a probe, the drive keeps
+  back one request per poll interval until the expected arrival (times this factor) for the
+  plain checks, so probes can no longer spend the budget and leave the end of a drive without
+  checks. Ported to Swift (`Probe.plainCheckReserve`, `Live.remainingDriveSec`).

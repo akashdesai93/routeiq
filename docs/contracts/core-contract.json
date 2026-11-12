@@ -1,6 +1,6 @@
 {
-  "version": 6,
-  "hash": "d94f8991775aada140c52bbc2c950effc74ed8892e178fb6ca508a9ae5cc6dfd",
+  "version": 7,
+  "hash": "8a70d7669ad3c9264cfba400b13c358967fb2292054ae6f49665d0528b8b12cc",
   "history": [
     {
       "version": 1,
@@ -25,6 +25,10 @@
     {
       "version": 6,
       "hash": "d94f8991775aada140c52bbc2c950effc74ed8892e178fb6ca508a9ae5cc6dfd"
+    },
+    {
+      "version": 7,
+      "hash": "8a70d7669ad3c9264cfba400b13c358967fb2292054ae6f49665d0528b8b12cc"
     }
   ],
   "declarations": {
@@ -33,7 +37,7 @@
     "DistanceSpanM": "type DistanceSpanM = readonly [ startM : number , endM : number ]",
     "DriveLog": "interface DriveLog { readonly version : typeof DRIVE_LOG_VERSION readonly drives : readonly DriveRecord [ ] }",
     "DriveOutcome": "type DriveOutcome = 'arrived' | 'ended' | 'unfinished'",
-    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number }",
+    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number readonly arrivalReserve : number }",
     "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome }",
     "GuidanceAnnouncement": "interface GuidanceAnnouncement { readonly atDistanceM : number readonly text : string }",
     "GuidanceCursor": "interface GuidanceCursor { readonly next : number }",

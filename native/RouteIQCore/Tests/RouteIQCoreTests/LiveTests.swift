@@ -1435,7 +1435,8 @@ final class LiveTests: XCTestCase {
     func testSideStreetProbes_probesShareTheRequestBudgetNeverTheRequestThePathCheckNeeds() throws {
         // 4 requests: the first route, then checks. The 2nd request may probe (room for it and a path check);
         // the 3rd may not (the 4th is the path check's); the 4th has no room for either.
-        let s = driving(LiveOptions(maxRequests: 4))
+        // (Nothing kept back for the checks until the arrival here: the next test is about that.)
+        let s = driving(LiveOptions(maxRequests: 4, probes: DriveProbeBudget(arrivalReserve: 0)))
         cruise(s, 60)
         cruise(s, 120)
         cruise(s, 180)
@@ -1443,6 +1444,26 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(requests.map(\.purpose), [.plan, .poll, .poll, .poll])
         XCTAssertEqual(requests.map(\.baseline), [false, true, true, false])
         XCTAssertEqual(requests.map(\.probes.allowed), [0, 1, 0, 0])
+    }
+
+    // it('probes never take the requests the plain checks until the arrival need (#183)')
+    func testSideStreetProbes_probesNeverTakeTheRequestsThePlainChecksUntilTheArrivalNeed() throws {
+        let first = candidate(.A, at(0, 0), 1300)!
+        let reserve = (1300 * ((first.distanceM - 900) / first.distanceM) * 1.5 / 60).rounded(.up)
+        XCTAssertGreaterThan(reserve, 20)
+        let tight = driving(LiveOptions(maxRequests: 3 + reserve), first)
+        cruise(tight, 60)
+        XCTAssertEqual(tight.requests().map(\.effect.probes.allowed), [0, 0])
+        let room = driving(LiveOptions(maxRequests: 4 + reserve), first)
+        cruise(room, 60)
+        XCTAssertEqual(room.requests().map(\.effect.probes.allowed), [0, 1])
+        // A slower answer (more time left) keeps more back: the check after it may not probe.
+        cruise(room, 120) { xM in routesAt(xM, [.A: 1700]) }
+        cruise(room, 180) { xM in routesAt(xM, [.A: 1700]) }
+        XCTAssertEqual(room.requests().map(\.effect.probes.allowed).last, 0)
+        XCTAssertEqual(room.requests().count, 4)
+        // The time left is what the view shows too.
+        XCTAssertEqual(Live.remainingDriveSec(room.state), Live.liveView(room.state, room.nowMs()).remainingSec)
     }
 
     // it('a side street found by the probes is confirmed through the same via, switched to by the usual rules, and announced as such')

@@ -811,7 +811,8 @@ public enum Live {
                 requestsUsed: Double(state.requestsUsed) + 1,
                 probesUsed: Double(state.probes.used),
                 maxRequests: opts.maxRequests,
-                budget: opts.probes
+                budget: opts.probes,
+                reserve: Probe.plainCheckReserve(remainingSec: remainingDriveSec(state), pollIntervalSec: opts.pollIntervalSec, budget: opts.probes)
             )
             : 0
         let effect = LiveRouteRequest(
@@ -1273,15 +1274,18 @@ public enum Live {
         }
     }
 
+    /// The expected time to the destination from where the car is now, in seconds; nil when not known.
+    public static func remainingDriveSec(_ state: LiveState) -> Double? {
+        guard let remainingM = state.tracking?.remainingM, let eta = state.eta else { return nil }
+        return eta.remainingM > 0 ? eta.durationSec * JS.min(1, remainingM / eta.remainingM) : 0
+    }
+
     public static func liveView(_ state: LiveState, _ nowMs: Double, options: LiveOptions = .default) -> LiveView {
         let opts = options.resolved()
         let tracking = state.tracking
         let route = state.route
         let remainingM = tracking?.remainingM
-        var remainingSec: Double?
-        if let remainingM, let eta = state.eta {
-            remainingSec = eta.remainingM > 0 ? eta.durationSec * JS.min(1, remainingM / eta.remainingM) : 0
-        }
+        let remainingSec = remainingDriveSec(state)
         let gate = livePollGate(state, nowMs, options: opts)
         let offRoute = tracking?.offRoute ?? false
 

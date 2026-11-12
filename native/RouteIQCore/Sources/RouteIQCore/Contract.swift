@@ -6,5 +6,5 @@ import Foundation
 /// (`declarations`) with the Swift types, port what changed, then raise this
 /// number to match. See the README for which parts of the contract are ported.
 public enum Contract {
-    public static let coreContractVersion = 6
+    public static let coreContractVersion = 7
 }

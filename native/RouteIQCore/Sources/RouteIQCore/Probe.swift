@@ -116,12 +116,16 @@ public struct DriveProbeBudget: Hashable, Sendable {
     public var minDelaySec: Double
     /// How long a check's probes (and their path check) may take in all, in seconds.
     public var timeoutSec: Double
+    /// Before a probe, one request per poll interval until the expected arrival, times this
+    /// factor, is kept back for the plain checks, so the drive never goes blind (#183).
+    public var arrivalReserve: Double
 
-    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8) {
+    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8, arrivalReserve: Double = 1.5) {
         self.requestsPerCheck = requestsPerCheck
         self.requestsPerDrive = requestsPerDrive
         self.minDelaySec = minDelaySec
         self.timeoutSec = timeoutSec
+        self.arrivalReserve = arrivalReserve
     }
 
     public static let `default` = DriveProbeBudget()
@@ -134,7 +138,8 @@ public struct DriveProbeBudget: Hashable, Sendable {
             requestsPerCheck: requestsPerCheck,
             requestsPerDrive: requestsPerDrive,
             minDelaySec: n(minDelaySec, d.minDelaySec),
-            timeoutSec: n(timeoutSec, d.timeoutSec)
+            timeoutSec: n(timeoutSec, d.timeoutSec),
+            arrivalReserve: n(arrivalReserve, d.arrivalReserve)
         )
     }
 }
@@ -460,15 +465,27 @@ public enum Probe {
     /// The TypeScript `whole`: a count rounded down, never below 0; not finite is 0.
     static func whole(_ v: Double) -> Double { v.isFinite ? JS.max(0, v.rounded(.down)) : 0 }
 
+    /// The requests to keep back for the plain checks still due: one per poll
+    /// interval of the time left, times arrivalReserve, rounded up. Nil when the
+    /// time left is not known: an unknown reserve is never zero (#183).
+    public static func plainCheckReserve(remainingSec: Double?, pollIntervalSec: Double, budget: DriveProbeBudget = .default) -> Double? {
+        guard let remainingSec, remainingSec.isFinite, pollIntervalSec.isFinite, pollIntervalSec > 0 else { return nil }
+        let factor = budget.resolved().arrivalReserve
+        return (JS.max(0, remainingSec) * factor / pollIntervalSec).rounded(.up)
+    }
+
     /// How many probe requests the check being sent may make. `requestsUsed`
     /// counts the drive's requests so far, this check included; `probesUsed`
     /// the probes among them. One request is always left over for the check's
-    /// own path check. Zero once the per-drive cap or the budget is reached.
-    public static func checkProbeAllowance(requestsUsed: Double, probesUsed: Double, maxRequests: Double, budget: DriveProbeBudget = .default) -> Int {
+    /// own path check, and `reserve` (plainCheckReserve) for the plain checks
+    /// until the arrival; nil allows no probe. Zero once the per-drive cap or
+    /// the budget is reached.
+    public static func checkProbeAllowance(requestsUsed: Double, probesUsed: Double, maxRequests: Double, budget: DriveProbeBudget = .default, reserve: Double?) -> Int {
         let perCheck = whole(budget.requestsPerCheck)
         let perDrive = whole(budget.requestsPerDrive)
-        if ![requestsUsed, probesUsed, maxRequests].allSatisfy(\.isFinite) { return 0 }
-        let room = maxRequests.rounded(.down) - requestsUsed - 1
+        guard let reserve else { return 0 }
+        if ![requestsUsed, probesUsed, maxRequests, reserve].allSatisfy(\.isFinite) { return 0 }
+        let room = maxRequests.rounded(.down) - requestsUsed - 1 - JS.max(0, reserve.rounded(.up))
         let allowed = JS.max(0, JS.min(JS.min(perCheck, perDrive - probesUsed), room))
         return allowed >= Double(Int.max) ? Int.max : Int(allowed)
     }

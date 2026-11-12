@@ -3,6 +3,7 @@ import { distanceM, isValidLngLat, lineFrom } from './geo.ts'
 import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import {
   checkProbeAllowance,
+  plainCheckReserve,
   INITIAL_CHECK_PROBES,
   rememberCheckProbes,
   resolveDriveProbeBudget,
@@ -583,7 +584,12 @@ function request(state: LiveState, purpose: RequestPurpose, nowMs: number, opts:
         probes: {
           allowed:
             purpose === 'poll'
-              ? checkProbeAllowance({ requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used }, opts.maxRequests, opts.probes)
+              ? checkProbeAllowance(
+                  { requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used },
+                  opts.maxRequests,
+                  opts.probes,
+                  plainCheckReserve(remainingDriveSec(state), opts.pollIntervalSec, opts.probes),
+                )
               : 0,
           memory: state.probes,
           budget: resolveDriveProbeBudget(opts.probes),
@@ -1181,12 +1187,23 @@ function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null 
 
 export const WAKE_LOCK_WARNING = 'This browser cannot keep the screen awake. Keep the screen on yourself.'
 
+/**
+ * The expected time to the destination from where the car is now, in seconds:
+ * the travel time last heard for the route being driven, for the share of it
+ * still ahead. Null when it is not known (no route or position yet).
+ */
+export function remainingDriveSec(state: Pick<LiveState, 'tracking' | 'eta'>): number | null {
+  const remainingM = state.tracking?.remainingM ?? null
+  const eta = state.eta
+  if (remainingM === null || eta === null) return null
+  return eta.remainingM > 0 ? eta.durationSec * Math.min(1, remainingM / eta.remainingM) : 0
+}
+
 export function liveView(state: LiveState, nowMs: number, options: Partial<LiveOptions> = {}): LiveView {
   const opts = resolve(options)
-  const { tracking, route, eta } = state
+  const { tracking, route } = state
   const remainingM = tracking?.remainingM ?? null
-  const remainingSec =
-    remainingM === null || eta === null ? null : eta.remainingM > 0 ? eta.durationSec * Math.min(1, remainingM / eta.remainingM) : 0
+  const remainingSec = remainingDriveSec(state)
   const gate = livePollGate(state, nowMs, opts)
   const offRoute = tracking?.offRoute ?? false
 

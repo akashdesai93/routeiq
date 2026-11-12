@@ -75,3 +75,12 @@ export const JAM_ONLY_THE_EAST_LOOP_MISSES: Traffic = (route, at, n) => {
   const onJammedStretch = Math.abs(at.side - 300) < 50 && at.f > 0.42 && at.f < 0.56
   return FREE_FLOW(route, at, n) * (n >= 3 && onJammedStretch ? 5 : 1)
 }
+
+/**
+ * Every road, side streets included, 1.6 times its usual pace from request `fromRequest` on, all
+ * the way to the end: the route being driven is well over its typical time at every check (so the
+ * checks keep probing), and nothing is faster than staying, Parallel Street least of all.
+ */
+export function everyRoadSlow(factor = 1.6, fromRequest = 2): Traffic {
+  return (route, at, n) => FREE_FLOW(route, at, n) * (n >= fromRequest ? factor : 1)
+}
