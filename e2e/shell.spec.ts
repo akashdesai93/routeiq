@@ -175,6 +175,9 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
   // The route request for the new route was a real one, through the plugin.
   expect(calls.filter((c) => c === 'httpGet').length).toBeGreaterThanOrEqual(2)
 
+  // A test drive is made up: it is not kept in the private drive log (#107).
+  expect(await page.evaluate(() => localStorage.getItem('routeiq.drives.v1'))).toBeNull()
+
   // The app is closed and opened again: the drive's diagnostics are still there, as "Last drive", and can be shared.
   await page.getByRole('button', { name: 'Done' }).click()
   await page.clock.fastForward(5000)
