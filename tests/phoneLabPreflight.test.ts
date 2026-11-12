@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildProblem, isQuietHour, labWindowFrom, preflight, quietHoursProblem, waitAllowance } from '../scripts/phone/lab/preflight.mjs'
+import { buildProblem, isQuietHour, labWindowFrom, preflight, quietHoursProblem, readLabWindow, SILENT_SCENARIOS, waitAllowance } from '../scripts/phone/lab/preflight.mjs'
+import { labStartProblem } from '../scripts/phone/lab/queue.mjs'
+import { SCENARIOS } from '../scripts/phone/lab/run.mjs'
 
 // The phone lab's hard rules (docs/phone-lab.md, "Preflight and hard rules"). Each one is a
 // thing that happened on the first night with the owner's own phone.
@@ -15,6 +17,11 @@ describe('quiet hours: the phone spoke aloud at night', () => {
     expect(quietHoursProblem(21, 'background-soak', false)).toBeNull()
     expect(quietHoursProblem(2, 'starts-and-plans', false)).toBeNull()
     expect(quietHoursProblem(2, 'locked-wrong-turn', true)).toBeNull()
+  })
+  it('keeps a scenario nobody listed as silent quiet at night (a new drive scenario added to run.mjs)', () => {
+    expect(quietHoursProblem(23, 'some-new-drive', false)).toMatch(/quiet hours/)
+    // Every scenario run.mjs has, except the silent ones, is held at night.
+    for (const name of Object.keys(SCENARIOS)) expect(quietHoursProblem(23, name, false) === null, name).toBe(SILENT_SCENARIOS.includes(name))
   })
   it('handles a window that does not cross midnight', () => {
     expect(isQuietHour(13, { quietFromHour: 12, quietToHour: 14 })).toBe(true)
@@ -62,6 +69,11 @@ describe('build freshness: the lab tested stale builds', () => {
     expect(buildProblem('566555f0000', 'b539360aaaa')).toMatch(/566555f.*b539360/)
     expect(buildProblem('b539360', 'b539360aaaa')).toBeNull()
   })
+  it('refuses a prefix too short to name one commit', () => {
+    expect(buildProblem('b', 'b539360aaaa')).toMatch(/at least 7/)
+    expect(buildProblem('b539360aaaa', 'b53936')).toMatch(/at least 7/)
+    expect(buildProblem('not-a-sha', 'b539360aaaa')).toMatch(/at least 7/)
+  })
 })
 
 describe('no hardware buttons: pressing the side button locked the phone with its passcode', () => {
@@ -71,5 +83,26 @@ describe('no hardware buttons: pressing the side button locked the phone with it
       const code = readFileSync(`${dir}/${f}`, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|#|\*)/.test(l)).join('\n')
       expect(code, f).not.toMatch(/hid['",\s]+button|button['",\s]+lock|universal-hid-service/i)
     }
+  })
+})
+
+describe('the queue checks the window itself: a lab agent that skips the preflight is still stopped', () => {
+  const now = new Date('2026-11-12T04:00:00Z')
+  const board = (comments: { body: string; created_at: string }[]) => () => comments
+  it('refuses to install with no window on #17', () => {
+    expect(labStartProblem(board([{ created_at: '2026-11-12T01:00:00Z', body: 'status: x' }]), 'o/r', now)).toMatch(/No lab window/)
+  })
+  it('refuses when the window ended while it waited for an unlock', () => {
+    expect(labStartProblem(board([{ created_at: '2026-11-12T01:00:00Z', body: 'lab-window: until 03:30 UTC' }]), 'o/r', now)).toMatch(/ended/)
+  })
+  it('starts inside an open window', () => {
+    expect(labStartProblem(board([{ created_at: '2026-11-12T01:00:00Z', body: 'lab-window: until 06:30 UTC' }]), 'o/r', now)).toBeNull()
+  })
+  it('refuses when #17 cannot be read: no answer is not a yes', () => {
+    const down = () => {
+      throw new Error('gh: HTTP 502')
+    }
+    expect(labStartProblem(down, 'o/r', now)).toMatch(/Could not read the lab window/)
+    expect(readLabWindow(down, 'o/r', now.toISOString())).toEqual({ error: expect.stringMatching(/HTTP 502/) })
   })
 })

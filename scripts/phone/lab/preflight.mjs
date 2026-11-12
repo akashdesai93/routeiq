@@ -16,8 +16,14 @@ export const DEFAULT_LAB_RULES = Object.freeze({
   quietToHour: 7,
 })
 
-/** The scenarios that start a drive, and so speak at the phone's media volume. */
-export const SPEAKING_SCENARIOS = Object.freeze(['locked-wrong-turn', 'background-soak', 'drive-screen'])
+/**
+ * The scenarios that never start a drive, and so never speak. Every other scenario counts as
+ * speaking, a new one included: forgetting to list a new drive here keeps it quiet at night
+ * instead of letting it speak.
+ */
+export const SILENT_SCENARIOS = Object.freeze(['starts-and-plans'])
+/** A build or head commit is named by at least this many hex characters (a short sha). */
+export const MIN_SHA_LENGTH = 7
 
 export function isQuietHour(hour, rules = DEFAULT_LAB_RULES) {
   return rules.quietFromHour > rules.quietToHour ? hour >= rules.quietFromHour || hour < rules.quietToHour : hour >= rules.quietFromHour && hour < rules.quietToHour
@@ -25,7 +31,7 @@ export function isQuietHour(hour, rules = DEFAULT_LAB_RULES) {
 
 /** A reason not to run this scenario now, or null. `hour` is the PC's local hour. */
 export function quietHoursProblem(hour, scenario, voiceOk, rules = DEFAULT_LAB_RULES) {
-  if (!SPEAKING_SCENARIOS.includes(scenario) || voiceOk || !isQuietHour(hour, rules)) return null
+  if (SILENT_SCENARIOS.includes(scenario) || voiceOk || !isQuietHour(hour, rules)) return null
   return `${scenario} speaks, and it is quiet hours (${rules.quietFromHour}:00 to ${rules.quietToHour}:00). Run it in the day, or pass --voice-ok when the owner has said the phone may speak (volume down, nobody asleep near it).`
 }
 
@@ -41,6 +47,8 @@ export function buildProblem(buildSha, headSha) {
   if (!buildSha || !headSha) return null
   const a = buildSha.toLowerCase()
   const b = headSha.toLowerCase()
+  const shortSha = new RegExp(`^[0-9a-f]{${MIN_SHA_LENGTH},40}$`)
+  if (!shortSha.test(a) || !shortSha.test(b)) return `Give --build-sha and --head-sha as commits of at least ${MIN_SHA_LENGTH} hex characters (got ${a} and ${b}): a shorter prefix matches almost any commit.`
   return a.startsWith(b) || b.startsWith(a) ? null : `The build is of ${a.slice(0, 7)}, but the PR is now at ${b.slice(0, 7)}: test a build of the current head.`
 }
 
@@ -74,6 +82,21 @@ export function labWindowFrom(comments) {
   return found
 }
 
+/**
+ * The lab window from #17, read with `gh` (a function from an API path to parsed JSON), as
+ * { window } or { error }. A failed read refuses: no answer is not a yes.
+ */
+export function readLabWindow(gh, repo, now) {
+  const since = new Date(new Date(now).getTime() - 24 * 3600e3).toISOString()
+  try {
+    return { window: labWindowFrom(gh(`repos/${repo}/issues/17/comments?since=${since}&per_page=100`)) }
+  } catch (e) {
+    return { error: `Could not read the lab window on #17 (${String(e.message || e).split('\n')[0]}): not starting.` }
+  }
+}
+
+export const ghJson = (apiPath) => JSON.parse(execFileSync('gh', ['api', apiPath], { encoding: 'utf8', windowsHide: true }))
+
 export function preflight({ now, hour, scenario, voiceOk, window, buildSha, headSha }) {
   const problems = [
     windowProblem(window, now),
@@ -90,9 +113,12 @@ function main(argv) {
   }
   const repo = process.env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'
   const now = new Date()
-  const since = new Date(now.getTime() - 24 * 3600e3).toISOString()
-  const comments = JSON.parse(execFileSync('gh', ['api', `repos/${repo}/issues/17/comments?since=${since}&per_page=100`], { encoding: 'utf8' }))
-  const result = preflight({ now: now.toISOString(), hour: now.getHours(), scenario: arg('--scenario'), voiceOk: argv.includes('--voice-ok'), window: labWindowFrom(comments), buildSha: arg('--build-sha'), headSha: arg('--head-sha') })
+  const read = readLabWindow(ghJson, repo, now.toISOString())
+  if ('error' in read) {
+    console.log(`preflight: ${read.error}`)
+    return 1
+  }
+  const result = preflight({ now: now.toISOString(), hour: now.getHours(), scenario: arg('--scenario'), voiceOk: argv.includes('--voice-ok'), window: read.window, buildSha: arg('--build-sha'), headSha: arg('--head-sha') })
   if (result.ok) console.log('preflight: the lab may run now')
   else for (const p of result.problems) console.log(`preflight: ${p}`)
   console.log('Also check by eye: the phone is on the cable and unlocked, Sideloadly is open with no window of its own, nothing asks for a password or trust. Any prompt: stop and report; never answer it.')

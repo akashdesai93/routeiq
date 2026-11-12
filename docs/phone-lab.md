@@ -26,9 +26,13 @@ it could, met a password prompt nobody could answer, and tested stale builds. So
 
 1. **Only inside a window the owner opened.** The orchestrator posts
    `lab-window: until HH:MM UTC` on #17 (add `· voice ok` if the phone may speak) when the
-   owner says so. No window, no run.
-2. **Quiet hours, 22:00 to 07:00 on the PC's clock:** `run.mjs` refuses a scenario that starts
-   a drive (they speak) unless `--voice-ok` is given, which needs the owner's `voice ok`.
+   owner says so. No window, no run: `queue.mjs` reads #17 itself right before its first
+   install (after any wait for an unlock) and installs nothing without an open window, or when
+   it cannot read #17. The window is in UTC; `--until` and quiet hours are on the PC's clock.
+2. **Quiet hours, 22:00 to 07:00 on the PC's clock:** `run.mjs` refuses every scenario that is
+   not listed as silent (`SILENT_SCENARIOS` in `preflight.mjs`: only `starts-and-plans`; a new
+   scenario counts as speaking until it is listed) unless `--voice-ok` is given, which needs the
+   owner's `voice ok`.
 3. **Never start on an unlock by itself.** `queue.mjs --wait-unlocked` needs `--until HH:MM`,
    the end of the owner's window; an unlock after that may be the owner taking the phone with
    them.
@@ -38,7 +42,7 @@ it could, met a password prompt nobody could answer, and tested stale builds. So
    starts a lab drive only at the simulated start).
 6. **Only the PR's current code:** test a build whose commit is the PR's head
    (`phone-queue.json` from `node scripts/orch/state.mjs --out tmp/orch` has both); the
-   preflight refuses another one (`--build-sha`, `--head-sha`).
+   preflight refuses another one (`--build-sha`, `--head-sha`, each at least 7 hex characters).
 7. **A prompt for a password, a code or trust, on the PC or the phone: stop.** Post
    `state: blocked` and what it asked. Never type into it and never retry in a loop.
 8. **The lab agent does not wake itself to poll.** The queue script waits without a model; the
