@@ -1078,8 +1078,10 @@ destination stops and shows a short summary (trip time, the switches and why).
 with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
 route the plan's probes found (`source: 'probe'`). When the first good fix is on that
 route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
-request of its own, and the plan's answer counts as the first one: the first check goes
-out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+request of its own, and the plan's answer counts as the first one, as old as it is
+(#71): "checked N s ago" counts from when the plan's answer came, not from the Start
+tap, and the first check goes out a poll interval (60 s) after the plan, at once when
+the plan is older than that. A check alone never switches (confirmation needs two). A first fix that is not on it (the trip was planned
 from somewhere else) plans a route from there, as before. From then on the engine judges
 the picked route like any other. Mapbox does not offer a side street by itself, so a
 check from the car usually lacks it; the existing path check (`baselineProbe`, one more
@@ -1147,6 +1149,9 @@ plugin `RouteIQNative` is present, `src/device/native`):
   are discarded. The drive view shows a SIMULATED GPS badge and the diagnostics say so.
   Route requests are real and count against the request budget. The browser's
   development replay is separate and unchanged.
+- **Phone lab** (shell only, off unless started over USB with `-routeiqLab`): the PC runs
+  a drive on the real phone with nobody touching it, and checks what the app did while
+  it was in the background or the phone asleep. [docs/phone-lab.md](docs/phone-lab.md).
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
@@ -1215,6 +1220,30 @@ kept in reserve for that. If the car is back on the route line by the time that 
 comes, the answer is taken like any check (minimum saving, confirmation, cooldown, lead),
 not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
+
+**A request that never answers** (#29). Only one route request is out at a time, so a
+connection that hangs (a dead zone) would hold back every check after it. A request not
+answered within 30 seconds (`requestTimeoutSec`, counted from when it was sent and
+covering everything one check asks) is given up: it is cancelled, and taken as a failed
+answer. A check then changes nothing but the engine's failed-poll counter, the quiet
+line says "Staying: could not check for faster routes (The route request timed out.)",
+and the next check goes out at the usual minute; an answer that turns up later is
+ignored. A search for a new route off the route is asked again after `replanGapSec`. A
+first route that never comes ends the start with "Could not find a route from here. The
+route request timed out.", as a failed one does. The limit is generous on purpose: a
+browser keeps a request going for minutes, while the iPhone shell's own limit is 20 s a
+request, and a check can be two or three requests one after another. In a replay the
+limit is stretched by the replay speed, like the request gap.
+
+**The drive's clock** (#30, `src/device/clock.ts`). Tracking only believes a fix that is
+newer than the last one, so every fix is stamped on arrival with one session clock, the
+same one the drive itself runs on (the browser's GPS, the iPhone shell's GPS and the
+session all share it). It follows the wall clock forward, so time with the phone asleep
+counts, but a step back of the wall clock (NTP or the carrier correcting it, or the time
+set by hand) is absorbed: the clock carries on from where it was. Before, a step back of
+30 s left every fix for 30 s "out of order" and the car stood still on the map, with no
+turn prompts. `performance.now()` was not used because it does not advance while an
+Apple device sleeps (w3c/hr-time#115). The arrival time is still shown on the wall clock.
 
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
@@ -1330,6 +1359,17 @@ on the phone, and a text that looked as if it held a position, a token or an add
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own
 position is discarded while one runs and reaches neither the drive nor Mapbox.
+
+**The phone lab** ([docs/phone-lab.md](docs/phone-lab.md)) is off unless the shell app is
+started over USB, from a computer the phone trusts, with the launch argument `-routeiqLab`;
+opened by hand, the app never has it. With it, a test hook presses the app's own buttons,
+and every few seconds one file in the app's temporary folder is replaced with a report for
+that computer to pull: the drive diagnostics and which screen is up, as counts, times and
+fixed words. No position, address, road name or token is written to it, and the lab makes
+no network request of its own. A lab drive over USB starts only where the computer put the
+simulated position: the hook asks the phone for its position once, compares it in memory,
+and on any other position does not start a drive and says only "not at the simulated
+start". In lab mode the web view can be inspected from that computer.
 
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for

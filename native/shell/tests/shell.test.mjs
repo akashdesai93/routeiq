@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import plist from 'plist';
+import { build, parse } from 'plist';
 import { checkInfoPlist, patchInfoPlist } from '../scripts/info-plist.mjs';
 import { findTokens, injectBridge, usesRootPaths } from '../scripts/web-checks.mjs';
 
-const TEMPLATE = plist.build({
+const TEMPLATE = build({
   CFBundleDisplayName: 'RouteIQ',
   UILaunchStoryboardName: 'LaunchScreen',
 });
 
 test('patch adds both background modes and both location usage strings', () => {
-  const info = plist.parse(patchInfoPlist(TEMPLATE));
+  const info = parse(patchInfoPlist(TEMPLATE));
   assert.deepEqual(info.UIBackgroundModes, ['location', 'audio']);
   assert.ok(info.NSLocationWhenInUseUsageDescription.length > 20);
   assert.ok(info.NSLocationAlwaysAndWhenInUseUsageDescription.length > 20);
@@ -19,11 +19,11 @@ test('patch adds both background modes and both location usage strings', () => {
 });
 
 test('patch is idempotent and keeps modes that were already there', () => {
-  const withMode = plist.build({ UIBackgroundModes: ['fetch', 'audio'] });
+  const withMode = build({ UIBackgroundModes: ['fetch', 'audio'] });
   const once = patchInfoPlist(withMode);
   const twice = patchInfoPlist(once);
   assert.equal(once, twice);
-  assert.deepEqual(plist.parse(twice).UIBackgroundModes, ['fetch', 'audio', 'location']);
+  assert.deepEqual(parse(twice).UIBackgroundModes, ['fetch', 'audio', 'location']);
 });
 
 test('check rejects an unpatched plist and accepts a patched one', () => {
@@ -75,14 +75,16 @@ test('the Swift files follow the rule the Capacitor CLI relies on', () => {
   assert.equal(plugin.match(/@objc\(([A-Za-z]+)\)/)?.[1], 'RouteIQNativePlugin');
   assert.equal(/@objc\(/.test(engine), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8')), false);
+  assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQLab.swift', dir), 'utf8')), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQSimulation.swift', dir), 'utf8')), false);
 });
 
 test('positions and request addresses are never logged or stored by the native code', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
   const names = readdirSync(dir).filter((name) => name.endsWith('.swift'));
-  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
-  for (const name of names) {
+  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQLab.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
+  // RouteIQLab.swift writes the phone lab's report file; the tests below hold it to its launch argument.
+  for (const name of names.filter((n) => n !== 'RouteIQLab.swift')) {
     const swift = readFileSync(new URL(name, dir), 'utf8');
     for (const banned of ['print(', 'NSLog(', 'os_log', 'Logger(', 'FileManager', 'write(to', 'debugPrint', 'dump(']) {
       assert.equal(swift.includes(banned), false, `${name} uses ${banned}`);
@@ -111,6 +113,63 @@ test('native route requests go to Mapbox only, are not redirected, and say nothi
   // Both methods are registered with Capacitor.
   assert.match(plugin, /CAPPluginMethod\(name: "httpGet"/);
   assert.match(plugin, /CAPPluginMethod\(name: "httpCancel"/);
+});
+
+// The phone lab (docs/phone-lab.md). These read the Swift source, as the tests above do: there
+// is no Mac here to run it. What the lab does on a phone is shown by scripts/phone/lab.
+const swiftSource = (name) => readFileSync(new URL(`../shell-native/ios/Sources/RouteIQNativePlugin/${name}`, import.meta.url), 'utf8');
+
+/** The body of `static func name(...)` or `func name(...)`, up to the closing brace at its indent. */
+function swiftFunction(source, name) {
+  const start = source.search(new RegExp(`^( *)(?:@objc |private |static )*func ${name}[(]`, 'm'));
+  assert.notEqual(start, -1, `func ${name} not found`);
+  const indent = source.slice(start).match(/^ */)[0];
+  const end = source.indexOf('\n' + indent + '}\n', start);
+  assert.notEqual(end, -1, `end of func ${name} not found`);
+  return source.slice(start, end);
+}
+
+test('the lab is off without its launch argument: every lab entry point checks it before doing anything', () => {
+  const lab = swiftSource('RouteIQLab.swift');
+  const plugin = swiftSource('RouteIQNativePlugin.swift');
+  // The scenario comes from the launch arguments only (not from stored settings, which outlive a launch).
+  const scenario = swiftFunction(lab, 'scenario');
+  assert.match(scenario, /arguments\.firstIndex\(of: argument\)/);
+  assert.match(scenario, /return nil/);
+  assert.equal(lab.includes('UserDefaults'), false);
+  // Writing the report and loading a pushed web app both start with "is the lab on?".
+  for (const name of ['writeReport', 'webDirectory']) {
+    const body = swiftFunction(lab, name);
+    const guard = body.indexOf('guard scenario(arguments: arguments) != nil');
+    assert.notEqual(guard, -1, `${name} does not check the launch argument`);
+    assert.ok(guard < body.indexOf('FileManager'), `${name} touches files before checking the launch argument`);
+  }
+  // In the plugin: the inspectable web view and the pushed web app sit behind the same check.
+  const setUp = swiftFunction(plugin, 'setUpLab');
+  const check = setUp.indexOf('guard RouteIQLab.scenario() != nil else { return }');
+  assert.notEqual(check, -1);
+  assert.ok(check < setUp.indexOf('isInspectable'));
+  assert.ok(check < setUp.indexOf('setServerBasePath'));
+  assert.equal(plugin.split('isInspectable').length, 2, 'isInspectable is set in one place only');
+  assert.equal(plugin.split('setServerBasePath').length, 2, 'the web folder is swapped in one place only');
+  // The report goes through writeReport and nowhere else.
+  assert.match(swiftFunction(plugin, 'labReport'), /if RouteIQLab\.writeReport\(text\)/);
+  assert.equal(plugin.includes('FileManager'), false);
+});
+
+test('the lab writes one file in the temporary folder and makes no network request', () => {
+  const lab = swiftSource('RouteIQLab.swift');
+  assert.equal([...lab.matchAll(/FileManager\.default\.(\w+)/g)].every((m) => ['temporaryDirectory', 'fileExists'].includes(m[1])), true);
+  assert.equal([...lab.matchAll(/\.write\(to: (\w+)/g)].map((m) => m[1]).join(), 'file');
+  for (const banned of ['URLSession', 'http://', 'https://', 'print(', 'NSLog(', 'os_log', 'Logger(']) {
+    assert.equal(lab.includes(banned), false, `RouteIQLab.swift uses ${banned}`);
+  }
+});
+
+test('the web view is not inspectable by configuration: only the lab turns it on', () => {
+  const config = JSON.parse(readFileSync(new URL('../capacitor.config.json', import.meta.url), 'utf8'));
+  assert.equal(config.ios?.webContentsDebuggingEnabled, undefined);
+  assert.equal(config.server, undefined);
 });
 
 test('a test drive replaces the GPS positions, marks its own, and ends with the drive', () => {
