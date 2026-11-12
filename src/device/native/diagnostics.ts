@@ -10,6 +10,8 @@
  * mistake (tests/shellHttp.test.ts checks the output by pattern).
  */
 
+import { DEFAULT_REROUTE_OPTIONS } from '../../core/reroute.ts'
+
 /** How many events are kept; older ones are dropped and counted. */
 export const DIAGNOSTICS_EVENT_LIMIT = 200
 /** A wait this long between two ticks while the GPS is on is logged as an event, in milliseconds. */
@@ -25,6 +27,44 @@ const APP_STATES: readonly DiagnosticsAppState[] = ['active', 'inactive', 'backg
 const OUTCOMES: readonly RequestOutcome[] = ['answered', 'network', 'timeout', 'cancelled', 'not-allowed']
 /** The test drive's presets (src/drive/testDrive.ts), as the log may name them. */
 const SIMULATED_KINDS: readonly string[] = ['follow', 'wrong-turn', 'turn-around']
+
+/**
+ * What a drive check concluded (RerouteCode in src/core/reroute.ts, plus the live drive's
+ * 'kept-previous'), in the words the log uses. A code not listed is kept as 'other'.
+ */
+export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
+  'current-best': 'yours was the fastest',
+  'no-alternative': 'no other route came back',
+  'saving-too-small': `another was faster, by less than ${Math.round(DEFAULT_REROUTE_OPTIONS.minSavingSec / 60)} min`,
+  'saving-share-too-small': 'another was faster, by too small a share of the trip',
+  confirming: 'a faster one, waiting for the next check to confirm it',
+  cooldown: 'a faster one, held back by the cooldown after a switch',
+  'faster-route': 'switched to a faster one',
+  'too-late': 'a faster one, but its turn was too close',
+  'recently-abandoned': 'a faster one you had just left',
+  'driver-declined': 'a faster one you had declined',
+  'probe-unconfirmed': 'a side street might be faster, not confirmed',
+  'route-unconfirmed': 'your route was not among the answers',
+  'route-lost': 'your route was no longer offered',
+  'off-route': 'off the route',
+  'no-eta': 'no time for your route',
+  'no-traffic-data': 'no traffic data',
+  'no-routes': 'no routes',
+  'poll-failed': 'the check failed',
+  'kept-previous': 'kept the previous answer',
+})
+
+/**
+ * How many seconds the fastest route of a check's answer beats the time of the
+ * route being driven, or 0 when none does, or null when either is unknown. A
+ * summary for the log only: the decision itself is the reroute engine's.
+ */
+export function fasterBySec(etaSec: number | null | undefined, candidateSecs: readonly number[] | null | undefined): number | null {
+  if (typeof etaSec !== 'number' || !Number.isFinite(etaSec) || candidateSecs === null || candidateSecs === undefined) return null
+  const usable = candidateSecs.filter((d) => Number.isFinite(d) && d > 0)
+  if (usable.length === 0) return null
+  return Math.max(0, Math.round(etaSec - Math.min(...usable)))
+}
 
 export interface DriveDiagnostics {
   /** When this log began, milliseconds since 1970. */
@@ -46,6 +86,12 @@ export interface DriveDiagnostics {
   requestSent(kind?: 'routes' | 'path' | 'probe'): number
   /** A route request ended. `status`: the HTTP status. `nativeMs`: how long the native side says it took. */
   requestEnded(n: number, outcome: RequestOutcome, status?: number, nativeMs?: number): void
+  /**
+   * A drive check was decided. `code`: its outcome, a word from CHECK_OUTCOMES. `routes`: how many
+   * routes its answer had. `fasterBySec`: how much the fastest of them beat the route driven
+   * (fasterBySec), null when unknown. The log tallies the outcomes and notes when one changes.
+   */
+  checked(code: unknown, routes: number, fasterBySec: number | null): void
   speechStarted(): void
   /** `finished` false: the line was cut off or failed. */
   speechEnded(finished: boolean): void
@@ -88,6 +134,7 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   const tagOf = new Map<number, string>()
   const speech = { started: 0, finished: 0, cutOff: 0 }
   let simulatedDrives = 0
+  const checks = { count: 0, tally: new Map<string, number>(), last: null as string | null, mostFasterSec: null as number | null }
 
   const log = (what: string) => {
     events.push({ atMs: now(), what: `${what} [${state}]` })
@@ -155,6 +202,18 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         log(`request ${whole(n)}${tag} ${kind} after ${ms} ms`)
       }
     },
+    checked(code, routes, faster) {
+      const known = typeof code === 'string' && Object.hasOwn(CHECK_OUTCOMES, code) ? code : 'other'
+      checks.count++
+      checks.tally.set(known, (checks.tally.get(known) ?? 0) + 1)
+      const by = faster === null ? null : whole(faster)
+      if (by !== null && (checks.mostFasterSec === null || by > checks.mostFasterSec)) checks.mostFasterSec = by
+      // Once a minute for a whole drive would push everything else out of the events: only a change is noted.
+      if (known !== checks.last) {
+        checks.last = known
+        log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${Math.min(whole(routes), 9)} routes${by !== null && by > 0 ? `, fastest beat yours by ${by} s` : ''})`)
+      }
+    },
     speechStarted() {
       speech.started++
     },
@@ -181,6 +240,15 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         `requests: ${requests.sent} sent (${requests.away} while not active), ${requests.answered} answered, ${requests.failed} failed, ${requests.cancelled} cancelled, ${sentAt.size} waiting`,
         `request time: average ${average} ms, longest ${requests.longestMs} ms`,
         `of those: ${requests.probes} side-street probes (no road or no route is a normal answer for one), ${requests.paths} path checks`,
+        ...(checks.count === 0
+          ? []
+          : [
+              `checks: ${checks.count}: ${[...checks.tally.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([code, n]) => `${CHECK_OUTCOMES[code] ?? 'other'} ${n}`)
+                .join(', ')}`,
+              `most any route beat yours by: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
+            ]),
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
         ...(simulatedDrives > 0
           ? [`SIMULATED GPS: ${simulatedDrives} test ${simulatedDrives === 1 ? 'drive' : 'drives'} (positions made up, requests and speech real)`]

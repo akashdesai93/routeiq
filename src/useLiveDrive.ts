@@ -13,6 +13,7 @@ import {
 } from './core/index.ts'
 import { sessionClock, sessionNow } from './device/clock.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
+import { fasterBySec } from './device/native/diagnostics.ts'
 import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
 import { pageVisibility } from './device/visibility.ts'
@@ -151,6 +152,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const now = replaySource === null ? sessionNow : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
+    // Each decided check once, for the drive diagnostics: what it saw, never where.
+    let seenCheckAtMs: number | null = null
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
@@ -175,6 +178,11 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         // The state first: whatever the callbacks below do, the screen shows the drive.
         setState(next)
         setNowMs(now())
+        const decided = next.lastDecision
+        if (native !== null && decided !== null && decided.atMs !== seenCheckAtMs) {
+          seenCheckAtMs = decided.atMs
+          native.checked(decided.code, next.candidates?.length ?? 0, fasterBySec(next.eta?.durationSec, next.candidates?.map((c) => c.durationSec)))
+        }
         const spent = next.switches.length > seenSwitches && whatIfInPlay.current
         seenSwitches = next.switches.length
         if (spent) {
