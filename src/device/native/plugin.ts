@@ -21,6 +21,15 @@ export interface NativeFix {
   readonly course?: number
   /** When the phone took the fix, milliseconds since 1970. */
   readonly timestamp?: number
+  /** True on a position made up by startSimulatedRoute (the "Test drive"); never set on one from the GPS. */
+  readonly simulated?: boolean
+}
+
+/** One step of a simulated route's script (see src/drive/testDrive.ts). */
+export interface NativeSimulatedStep {
+  readonly atM: number
+  readonly speedMps?: number
+  readonly stopSec?: number
 }
 
 export interface NativeLocationError {
@@ -53,6 +62,20 @@ export interface RouteIQNativePlugin {
   httpGet(options: { id: string; url: string; timeoutMs: number }): Promise<{ status?: number; body?: string; ms?: number }>
   /** Stops the request with this id, if it is still out. */
   httpCancel(options: { id: string }): Promise<unknown>
+  /**
+   * The "Test drive": from now on 'fix' events are made up by a native timer,
+   * about one a second, driving along `points` ([lng, lat] pairs) at `speedMps`
+   * and following `script`; each carries `simulated: true`. At the end of the
+   * points the car stands there. While this is on, positions from the GPS are
+   * discarded (the GPS itself stays on when startLocation was called, which is
+   * what keeps the app running with the phone locked). Calling it again
+   * replaces the route. Rejects with code 'invalid' when no point is usable.
+   */
+  startSimulatedRoute?(options: { points: number[][]; speedMps: number; script: NativeSimulatedStep[] }): Promise<unknown>
+  /** Ends the simulation; positions come from the GPS again. stopLocation ends it too. */
+  stopSimulatedRoute?(): Promise<unknown>
+  /** Opens the iOS share sheet with the text. Resolves when the sheet is closed. */
+  share?(options: { text: string }): Promise<{ completed?: boolean }>
   /**
    * 'fix': a position. 'locationError': the GPS failed or was refused.
    * 'tick': about once a second while the location stream is on, from a

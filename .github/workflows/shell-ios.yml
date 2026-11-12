@@ -111,8 +111,8 @@ jobs:
           # class name at run time, so a build can succeed without it.
           echo "RouteIQEngine.swift mentioned in build log: $(grep -c 'RouteIQEngine.swift' build/xcodebuild.log) times"
           missing=0
-          # (the last two: the native route requests, RouteIQHttp.swift and the plugin's httpGet)
-          for needle in RouteIQNativePlugin routeiq.askedAlwaysLocation https://api.mapbox.com/ httpGet; do
+          # (then the native route requests, RouteIQHttp.swift and the plugin's httpGet, and the test drive)
+          for needle in RouteIQNativePlugin routeiq.askedAlwaysLocation https://api.mapbox.com/ httpGet startSimulatedRoute; do
             hits=$(LC_ALL=C grep -a -c "$needle" "$APP/App" || true)
             echo "binary lines containing $needle: $hits"
             if [ "$hits" -eq 0 ]; then missing=1; fi

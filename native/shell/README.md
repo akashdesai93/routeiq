@@ -19,7 +19,8 @@ This folder has its own `package.json`. It adds no dependency to the web app.
 
 Plugin methods: `startLocation`, `stopLocation`, `getCurrentPosition`, `speak({ text })` (resolves
 when the line ends), `cancelSpeech`, `keepAwake({ on })`, `httpGet({ id, url, timeoutMs })`,
-`httpCancel({ id })`. Events: `fix` (`lng`, `lat`, `accuracy`, and `speed`, `course`, `timestamp`
+`httpCancel({ id })`, `startSimulatedRoute({ points, speedMps, script })`,
+`stopSimulatedRoute()`, `share({ text })`. Events: `fix` (`lng`, `lat`, `accuracy`, and `speed`, `course`, `timestamp`
 when known), `locationError` (`kind`), `tick` (once a second while the location stream is on),
 `appState` (`state`: `active`, `inactive` or `background`).
 
@@ -52,6 +53,29 @@ spoken lines started and finished, and when the app went to the background and c
 in memory only, and holds counts, times of day and whole milliseconds: no position, no address, no
 token (`../../tests/shellHttp.test.ts` checks that by pattern). A long wait between ticks while in
 the background means iOS did not run the web code.
+
+The log's text is also written to the app's storage when a drive ends and every 30 s during one
+(`../../src/device/native/lastDrive.ts`), and the panel shows it as "Last drive" after the app was
+closed. **Share** calls the plugin's `share`, which presents a `UIActivityViewController` with the
+text. During a drive the panel opens from **More**, then **Drive diagnostics**, in the drive view.
+
+### Test drive (simulated positions)
+
+**Test drive (simulated GPS)** under Start drive makes the drive follow a made-up car instead of
+the GPS, for trying a wrong turn and the voice at home with the phone locked. The web side writes
+the script from the selected route (`../../src/drive/testDrive.ts`: follow the route, a wrong turn,
+a U-turn; 1x or 3x speed) and sends it with `startSimulatedRoute`; `RouteIQSimulation.swift` moves
+the car, and `RouteIQEngine` emits its position as a `fix` event with `simulated: true` from a
+one-second timer on the main run loop. The web side sends a new script whenever the session takes
+a new route (`../../src/device/native/simulated.ts`).
+
+- **The real GPS stays on** (`startLocation` is called as on a real drive): that is what keeps the
+  app, and the timer, running while locked. Its positions are discarded in Swift while a simulation
+  is set, and again on the web side, which takes only fixes marked `simulated`. A real drive in
+  turn ignores fixes marked `simulated`.
+- **It ends with the drive.** `stopSimulatedRoute` ends it, and so does `stopLocation`.
+- **Requests are real.** Route requests go to Mapbox as on a real drive and count against the
+  request budget. The drive view shows a SIMULATED GPS badge; the diagnostics log the test drive.
 
 ### Ticks while locked
 

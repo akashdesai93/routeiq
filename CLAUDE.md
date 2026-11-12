@@ -103,6 +103,24 @@ typecheck, lint and unit tests; run `npm.cmd run e2e` as well. The report is
 
 Before a commit with logic changes, run the `route-logic-reviewer` agent to check for invariant breaks.
 
+## Tests must prove behaviour (owner rule)
+
+No "green for the sake of green". A test exists to catch a real failure a driver would notice.
+
+- **It must fail without the code.** Before you push, break or revert the logic it covers
+  and watch the test go red. Say in the PR which mutation you tried for each new test.
+- **Assert outcomes, not wiring.** Check what the user sees, hears or is charged for: the
+  route chosen, the switch made or refused, the spoken line, the request count. Don't
+  assert that a mock was called, that a component rendered "something", or a snapshot
+  nobody reads.
+- **Never weaken a test to make it pass.** No loosening an assertion, widening a tolerance,
+  adding a retry, or adding `skip`/`only`/`todo` to get green. If a test is wrong, say why
+  in the PR and replace it with one that checks the same behaviour.
+- **A flaky test is a bug.** Find the race and fix it. Don't rerun until green.
+- **Coverage counts are not a goal.** Ten tests that pin real rules beat fifty that restate
+  the implementation.
+- **Reviewers check this.** A PR whose tests wouldn't catch its own bug gets CHANGES.
+
 ## Task list and the autonomous loop
 
 GitHub issues on `akashdesai93/routeiq` are the task list. The labels are `ready`,

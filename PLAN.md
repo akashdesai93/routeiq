@@ -152,6 +152,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    determinism, and 40 seeded random drives in which switches are never closer
    together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
    request budget, the what-if delay and a whole simulated drive offline.
+   Follow-ups (#74, #68): the match looks for the fresh route's start near the car
+   first (`matchStartSearchM`), so a cloverleaf no longer loses the current route; "no
+   route" answers older than `routeLostWindowSec` (15 min) no longer count toward a
+   closure switch; and the e2e world has road closures, with the scenario "when a block
+   ahead is closed, it reroutes around it". Open for later: whether the side-street
+   probes of #23 shorten the wait for a closure between via points (#68, item 3).
 8. **Done: go anywhere.** The web version of the phone app's Plan screen
    (`src/PlanPanel.tsx`). Search for either end of the trip through the Mapbox Search
    Box API (`/suggest` + `/retrieve` on a session token; chosen over Geocoding v6,
@@ -196,6 +202,15 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    keeps them when opened from Safari); leg-by-leg Waze (navigate to each pin in turn);
    the native app should use the `comgooglemaps://` and `waze://` schemes when installed.
 10. **Contracts frozen.** Version the `src/core` types so Swift or a service can match them.
+    Done (Nov 12, 2026, #7): `CORE_CONTRACT_VERSION` (1) in `src/core/contract.ts`; the
+    contracts and how to change one in `docs/contracts.md`; a type snapshot of every contract
+    declaration and what it refers to, with a hash and a version history, in
+    `docs/contracts/core-contract.json`; JSON Schemas for the signal tile, the bundle index, the
+    stored place book and the native plugin payloads in `docs/contracts/schemas`.
+    `tests/contracts.test.ts` fails on a change of shape without a bump, and checks the shipped
+    tiles, index and place book against the schemas and the schemas against the types. Open for
+    later: the Swift port matches no version yet (#33); a schema for `RouteCandidate` itself if a
+    service ever reads it as JSON.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
     faster cut-through that is not among them is never considered. Widen the search:
     - **Via probing (first).** A pure `src/core/probe.ts` picks candidate via points,

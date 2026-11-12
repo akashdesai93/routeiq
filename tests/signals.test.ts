@@ -22,6 +22,7 @@ import {
   type SignalPoint,
 } from '../src/core/index.ts'
 import { signalFeatures } from '../src/map/signalFeatures.ts'
+import { lngDegreesFor, nearestAlongM, nearLine } from '../src/core/geo.ts'
 
 // Test geometry is laid out in meters around a point in Charlotte, then turned
 // into coordinates, so distances in the tests read as what they are.
@@ -80,6 +81,32 @@ describe('geo helpers for signal matching', () => {
     expect(pointToSegment([13, 4], [0, 0], [10, 0])).toEqual({ distanceM: 5, t: 1 })
     // A zero-length segment is just its point.
     expect(pointToSegment([3, 4], [0, 0], [0, 0])).toEqual({ distanceM: 5, t: 0 })
+  })
+
+  it('nearLine is true only within the tolerance of some segment, edge included', () => {
+    const line = [[0, 0], [100, 0], [100, 100]] as const
+    expect(nearLine([50, 10], line, 10)).toBe(true)
+    expect(nearLine([50, 10.5], line, 10)).toBe(false)
+    expect(nearLine([110, 50], line, 10)).toBe(true) // beside the second segment
+    expect(nearLine([0, 0], [[0, 0]], 10)).toBe(false) // a single point has no segment
+  })
+
+  it('nearestAlongM gives the meters along the line of the closest point, the first pass on a tie', () => {
+    const line = [at(0, 0), at(400, 0), at(400, 300)]
+    expect(nearestAlongM(line, at(150, 20))).toBeCloseTo(150, 0)
+    expect(nearestAlongM(line, at(450, 100))).toBeCloseTo(500, 0)
+    expect(nearestAlongM(line, at(-50, 0))).toBeCloseTo(0, 6)
+    // Out and back: both passes are as close, the first one counts.
+    expect(nearestAlongM([at(0, 0), at(400, 0), at(0, 0)], at(100, 5))).toBeCloseTo(100, 0)
+    expect(nearestAlongM([at(0, 0)], at(100, 5))).toBe(0)
+  })
+
+  it('lngDegreesFor widens a span by latitude and stays finite at the pole', () => {
+    expect(lngDegreesFor(1, 0)).toBeCloseTo(1, 12)
+    expect(lngDegreesFor(1, 60)).toBeCloseTo(2, 9)
+    expect(lngDegreesFor(1, -60)).toBeCloseTo(2, 9)
+    expect(lngDegreesFor(1, 90)).toBeCloseTo(100, 9)
+    expect(lngDegreesFor(1, -90)).toBeCloseTo(100, 9)
   })
 })
 

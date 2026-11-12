@@ -18,7 +18,6 @@ export interface SearchRunnerOptions {
   search: (query: string, signal: AbortSignal) => Promise<SuggestResult>
   /** Called with every change of state. */
   onState: (state: SearchState) => void
-  delayMs?: number
   /** The timer, swapped out in tests for one that is fired by hand. */
   setTimer?: (run: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
@@ -33,7 +32,7 @@ export interface SearchRunner {
 
 /**
  * The typing-to-request logic of a search field, free of React and of the
- * real clock: wait until typing has paused for `delayMs`, search only text
+ * real clock: wait until typing has paused for SEARCH_DEBOUNCE_MS, search only text
  * worth searching (core's searchQuery: three characters or more), and let
  * each new keystroke abort the request before it, so an old answer can never
  * replace a newer one. Typing that only changes spacing does not search
@@ -43,7 +42,6 @@ export function createSearchRunner(options: SearchRunnerOptions): SearchRunner {
   const {
     search,
     onState,
-    delayMs = SEARCH_DEBOUNCE_MS,
     setTimer = (run, ms) => setTimeout(run, ms),
     clearTimer = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   } = options
@@ -83,7 +81,7 @@ export function createSearchRunner(options: SearchRunnerOptions): SearchRunner {
         return
       }
       onState({ status: 'waiting', query })
-      timer = setTimer(() => run(query), delayMs)
+      timer = setTimer(() => run(query), SEARCH_DEBOUNCE_MS)
     },
     cancel() {
       drop()

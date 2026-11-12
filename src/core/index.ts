@@ -1,4 +1,5 @@
 // Public surface of the framework-free core. UI code imports from here only.
+export { CORE_CONTRACT_VERSION } from './contract.ts'
 export type {
   BBox,
   CongestionLevel,
@@ -27,6 +28,7 @@ export {
   isValidLngLat,
   lineFrom,
   localProjector,
+  nearestAlongM,
   pointAtDistance,
   pointToSegment,
   type PointOnLine,
