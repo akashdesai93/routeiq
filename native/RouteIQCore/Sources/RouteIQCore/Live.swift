@@ -63,6 +63,10 @@ public struct LiveOptions: Hashable, Sendable {
     public var replanGapSec: Double
     /// Below this speed the device's heading is not sent with a request, in meters per second: standing still it points anywhere.
     public var minHeadingSpeedMps: Double
+    /// A route request (the first route, a check with everything it asks, a search for a new
+    /// route) not answered within this long is given up, in seconds: cancelled and counted as a
+    /// failed answer, so a hung connection cannot hold back the checks after it.
+    public var requestTimeoutSec: Double
     public var tracking: TrackingOptions
     public var reroute: RerouteOptions
     /// Side-street probes during the checks (Probe.swift, DriveProbeBudget); they share maxRequests.
@@ -80,6 +84,7 @@ public struct LiveOptions: Hashable, Sendable {
         pausedNoteSec: Double = 15,
         replanGapSec: Double = 30,
         minHeadingSpeedMps: Double = 2,
+        requestTimeoutSec: Double = 30,
         tracking: TrackingOptions = .default,
         reroute: RerouteOptions = .default,
         probes: DriveProbeBudget = .default
@@ -95,6 +100,7 @@ public struct LiveOptions: Hashable, Sendable {
         self.pausedNoteSec = pausedNoteSec
         self.replanGapSec = replanGapSec
         self.minHeadingSpeedMps = minHeadingSpeedMps
+        self.requestTimeoutSec = requestTimeoutSec
         self.tracking = tracking
         self.reroute = reroute
         self.probes = probes
@@ -121,6 +127,8 @@ public struct LiveOptions: Hashable, Sendable {
             pausedNoteSec: n(pausedNoteSec, d.pausedNoteSec),
             replanGapSec: JS.max(minRequestGapSec, n(replanGapSec, d.replanGapSec)),
             minHeadingSpeedMps: n(minHeadingSpeedMps, d.minHeadingSpeedMps),
+            // 0 would give up on every request before it could be answered.
+            requestTimeoutSec: requestTimeoutSec > 0 ? n(requestTimeoutSec, d.requestTimeoutSec) : d.requestTimeoutSec,
             tracking: tracking,
             reroute: reroute,
             probes: probes
@@ -282,6 +290,10 @@ public struct LiveState: Hashable, Sendable {
     /// on its line; otherwise it asks for a route from where the car is. Kept
     /// until then only.
     public var picked: RouteCandidate?
+    /// When the plan screen's answer with the picked route's travel times came, on the
+    /// session's clock. A drive that starts on the pick counts that as its last check (#71).
+    /// Nil: not known, the start counts instead.
+    public var pickedAtMs: Double?
     /// Why the drive failed. Nil otherwise.
     public var message: String?
     /// A passing note about the position (no fix yet, poor accuracy). Nil when there is none.
@@ -333,6 +345,7 @@ public struct LiveState: Hashable, Sendable {
         destination: nil,
         startedAtMs: nil,
         picked: nil,
+        pickedAtMs: nil,
         message: nil,
         gpsNote: nil,
         lastFix: nil,
@@ -369,7 +382,9 @@ public struct LiveState: Hashable, Sendable {
 public enum LiveEvent: Hashable, Sendable {
     /// The Start tap. `route`: the route picked on the plan screen, to be driven
     /// (see LiveState.picked). Nil: the drive asks for its own.
-    case start(nowMs: Double, destination: LngLat, route: RouteCandidate? = nil)
+    /// `routeFetchedAtMs`: when the answer with that route's travel times came, on the same
+    /// clock as `nowMs` (see LiveState.pickedAtMs). Nil: unknown.
+    case start(nowMs: Double, destination: LngLat, route: RouteCandidate? = nil, routeFetchedAtMs: Double? = nil)
     case fix(nowMs: Double, fix: PositionFix)
     case positionError(nowMs: Double, kind: PositionErrorKind)
     /// The answer to a `.requestRoutes` effect. `routes` nil: the request failed (`message` says how).
@@ -740,16 +755,18 @@ public enum Live {
         return maybePoll(LiveStep(state: next, effects: effects), nowMs, opts)
     }
 
-    /// The drive begins on `route`, from `fix`.
-    static func begin(_ state: LiveState, _ route: RouteCandidate, _ candidates: [RouteCandidate], _ fix: PositionFix, _ nowMs: Double, _ opts: LiveOptions) -> LiveStep {
+    /// The drive begins on `route`, from `fix`. `checkedAtMs`: when its travel times
+    /// came, the drive's last check (the plan's answer for a picked route).
+    static func begin(_ state: LiveState, _ route: RouteCandidate, _ candidates: [RouteCandidate], _ fix: PositionFix, _ nowMs: Double, _ opts: LiveOptions, checkedAtMs: Double? = nil) -> LiveStep {
         var started = state
         started.status = .driving
         started.picked = nil
+        started.pickedAtMs = nil
         started.route = route
         started.tracking = nil
         started.request = nil
         started.candidates = candidates
-        started.lastCheckedAtMs = nowMs
+        started.lastCheckedAtMs = checkedAtMs ?? nowMs
         started.eta = LiveState.Eta(durationSec: route.durationSec, remainingM: route.distanceM)
         started.guidance = Guidance.armGuidance(route.guidance, 0, speakDue: true)
         started.lastDecision = nil
@@ -767,7 +784,10 @@ public enum Live {
         var located = state
         located.lastFix = fix
         located.gpsNote = nil
-        return begin(located, picked, [picked], fix, nowMs, opts)
+        // The plan's answer is the last check, as old as it is (#71): "checked N s ago" tells the
+        // truth from the start, and a plan older than the poll interval is checked at once.
+        let checkedAtMs = state.pickedAtMs.map { JS.min($0, nowMs) } ?? nowMs
+        return begin(located, picked, [picked], fix, nowMs, opts, checkedAtMs: checkedAtMs)
     }
 
     /// The first route has come back.
@@ -777,6 +797,26 @@ public enum Live {
             return fail(state, "Could not find a route from here. \(message ?? "Try again in a moment.")")
         }
         return begin(state, best, routes, fix, nowMs, opts)
+    }
+
+    /// What a request given up on (requestTimeoutSec) is answered with: the same as a failed answer.
+    public static let requestTimedOut = "The route request timed out."
+
+    /// The request that is out has had requestTimeoutSec: it is cancelled, and its answer is
+    /// taken to be a failure (no routes), exactly as if it had failed.
+    static func timedOut(_ state: LiveState, _ nowMs: Double, _ opts: LiveOptions) -> LiveStep {
+        guard let request = state.request else { return LiveStep(state: state, effects: []) }
+        // planned's failure already cancels the request (the stop effects).
+        if request.purpose == .plan { return planned(state, nil, requestTimedOut, nowMs, opts) }
+        if state.status != .driving || state.route == nil || state.tracking == nil {
+            var next = state
+            next.request = nil
+            return LiveStep(state: next, effects: [.cancelRequest])
+        }
+        // Its probes the shell reported sending are made and counted already; nothing more came of them.
+        let probesSent = request.probesSent ?? 0
+        let step = checked(state, nil, requestTimedOut, nil, probesSent, probesSent, nowMs, opts)
+        return LiveStep(state: step.state, effects: [.cancelRequest] + step.effects)
     }
 
     /// A check, or a search for a new route, has come back.
@@ -876,13 +916,14 @@ public enum Live {
         let active = state.status == .locating || state.status == .planning || state.status == .driving
         let unchanged = LiveStep(state: state, effects: [])
         switch event {
-        case let .start(nowMs, destination, route):
+        case let .start(nowMs, destination, route, routeFetchedAtMs):
             if active { return unchanged }
             var next = LiveState.idle
             next.status = .locating
             next.destination = destination
             next.startedAtMs = nowMs
             next.picked = drivable(route) ? route : nil
+            next.pickedAtMs = drivable(route) ? routeFetchedAtMs.flatMap { $0.isFinite ? $0 : nil } : nil
             next.muted = state.muted
             return LiveStep(state: next, effects: [
                 .setMuted(muted: state.muted),
@@ -1032,6 +1073,9 @@ public enum Live {
                 next.undo = nil
             }
             if let note = next.pausedNote, nowMs >= note.untilMs { next.pausedNote = nil }
+            if let request = next.request, nowMs - request.sentAtMs >= opts.requestTimeoutSec * 1000 {
+                return maybePoll(timedOut(next, nowMs, opts), nowMs, opts)
+            }
             return maybePoll(LiveStep(state: next, effects: []), nowMs, opts)
         }
     }

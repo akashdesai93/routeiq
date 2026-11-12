@@ -154,6 +154,7 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(d.stationaryPauseSec, 120)
         XCTAssertEqual(d.maxRequests, 60)
         XCTAssertEqual(d.switchBannerSec, 8)
+        XCTAssertEqual(d.requestTimeoutSec, 30)
     }
 
     // it('Start watches the position, holds the screen awake and speaks at once (the tap primes the voice)')
@@ -266,6 +267,68 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(requests.map(\.atSec), [60])
         XCTAssertEqual(requests.map(\.effect.purpose), [.poll])
         XCTAssertEqual(requests.map(\.effect.baseline), [true])
+    }
+
+    // it('the answer of the plan is the last check: "checked N s ago" counts from when the answer of the plan came (#71)')
+    func testThePickedRoute_theAnswerOfThePlanIsTheLastCheckCheckedNSAgoCountsFromWhenTheAnswerOfThePlanCame() throws {
+        let s = Session()
+        // The trip was planned 40 s before the Start tap.
+        s.send(.start(nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 40_000))
+        s.fix(0)
+        XCTAssertEqual(s.state.status, .driving)
+        XCTAssertEqual(s.view().checkedAgoSec, 40)
+        s.setTime(5)
+        XCTAssertEqual(s.view().checkedAgoSec, 45)
+        // The first check comes a poll interval after the plan, not after the Start tap.
+        cruiseOnB(s, 19) { xM in (self.offered(xM), .notAsked) }
+        XCTAssertEqual(s.requests().count, 0)
+        cruiseOnB(s, 20) { xM in (self.offered(xM), .notAsked) }
+        XCTAssertEqual(s.requests().map(\.atSec), [20])
+        XCTAssertEqual(s.requests().map(\.effect.purpose), [.poll])
+        XCTAssertEqual(s.view().checkedAgoSec, 0)
+    }
+
+    // it('a plan older than the poll interval is checked at once, and a check alone never switches')
+    func testThePickedRoute_aPlanOlderThanThePollIntervalIsCheckedAtOnceAndACheckAloneNeverSwitches() throws {
+        let s = Session()
+        s.send(.start(nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 600_000))
+        s.fix(0)
+        let view = s.view()
+        XCTAssertEqual(view.checkedAgoSec, 600)
+        XCTAssertTrue(view.checking)
+        // Asked from the first fix on the route.
+        XCTAssertEqual(s.requests().map(\.atSec), [0])
+        XCTAssertEqual(s.requests().map(\.effect.purpose), [.poll])
+        s.setTime(1)
+        s.fix(15)
+        // Even a much faster route is only a first sighting: confirmation needs the next check too.
+        s.answer(offered(15, 800), nil, .answered([candidate(.B, at(15, 0), 1250, { $0.source = .probe })!]))
+        XCTAssertEqual(s.state.switches, [])
+        XCTAssertEqual(s.state.lastDecision?.action, .stay)
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.confirming))
+    }
+
+    // it('without the time of the plan, or with one from the future, the Start tap counts as the last check, as before')
+    func testThePickedRoute_withoutTheTimeOfThePlanOrWithOneFromTheFutureTheStartTapCountsAsTheLastCheck() throws {
+        // Swift nil stands for both the TS undefined and null.
+        let times: [Double?] = [nil, .nan, 1e15]
+        for routeFetchedAtMs in times {
+            let label = String(describing: routeFetchedAtMs)
+            let s = Session()
+            s.send(.start(nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: routeFetchedAtMs))
+            s.fix(0)
+            XCTAssertEqual(s.view().checkedAgoSec, 0, label)
+            // And the checks keep their minute: a time from the future must not hold them back.
+            cruiseOnB(s, 60) { xM in (self.offered(xM), .notAsked) }
+            XCTAssertEqual(s.requests().map(\.atSec), [60], label)
+        }
+        // A drive that asks for its own route (the fix was not on the pick) counts its own answer.
+        let s = Session()
+        s.send(.start(nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 40_000))
+        s.fix(2000, 600)
+        s.setTime(3)
+        s.answer([candidate(.A, at(0, 0), 1300)!])
+        XCTAssertEqual(s.view().checkedAgoSec, 0)
     }
 
     // it('a slower route picked on purpose is driven too, not the fastest')
@@ -437,13 +500,15 @@ final class LiveTests: XCTestCase {
 
     // it('waits for the answer of one check before sending another')
     func testPollCadence_waitsForTheAnswerOfOneCheckBeforeSendingAnother() throws {
-        let s = driving()
+        // A long request time limit, so the checks of seconds 120 and 180 fall due while it is out
+        // (past the limit: see "a request that never answers").
+        let s = driving(LiveOptions(requestTimeoutSec: 300))
         for t in stride(from: 1.0, through: 200, by: 1) {
             s.setTime(t)
             s.fix(15 * t)
             s.tick()
         }
-        // The check of second 60 was never answered: no other was sent.
+        // The check of second 60 was not answered: no other was sent.
         XCTAssertEqual(s.requests().map(\.atSec), [0, 60])
         XCTAssertEqual(Live.livePollGate(s.state, s.nowMs()), .inFlight)
         XCTAssertTrue(s.view().checking)
@@ -508,6 +573,182 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(view.statusLine, "Request budget used up (3): driving on without checking for faster routes.")
         XCTAssertEqual(view.requestsUsed, 3)
         XCTAssertEqual(view.maxRequests, 3)
+    }
+
+    // MARK: - describe('a request that never answers (#29)')
+
+    /// Drives at 15 m/s from now to `untilSec` with a fix and a tick every second, answering nothing.
+    private func silent(_ s: Session, _ untilSec: Double) {
+        for t in stride(from: s.nowSec + 1, through: untilSec, by: 1) {
+            s.setTime(t)
+            s.fix(15 * t)
+            s.tick()
+        }
+    }
+
+    // it('a check that never answers is given up after requestTimeoutSec, and the checks after it still go out')
+    func testARequestThatNeverAnswers_aCheckThatNeverAnswersIsGivenUpAfterRequestTimeoutSecAndTheChecksAfterItStillGoOut() throws {
+        let s = driving()
+        cruise(s, 59)
+        s.setTime(60)
+        s.fix(900)
+        s.tick()
+        XCTAssertEqual(s.state.request?.purpose, .poll) // the fetch now hangs
+        let hung = try XCTUnwrap(s.state.request).id
+        let before = s.requests().count
+        // The repro from #29: 15 minutes of driving with that check never answered.
+        for t in stride(from: 61.0, through: 960, by: 1) {
+            s.setTime(t)
+            s.fix(15 * t)
+            s.tick()
+            if let request = s.state.request, request.id != hung { s.answer(routesAt(15 * t, [.A: 1300])) }
+        }
+        XCTAssertGreaterThan(s.requests().count - before, 0)
+        // Cancelled once, 30 s after it was sent, and the next check came at the usual minute.
+        XCTAssertEqual(s.of("cancel-request").map(\.atSec), [90])
+        XCTAssertEqual(Array(s.requests().map(\.atSec).prefix(4)), [0, 60, 120, 180])
+    }
+
+    // it('it counts as a failed check: the engine counts it, says why, and nothing else changes')
+    func testARequestThatNeverAnswers_itCountsAsAFailedCheckTheEngineCountsItSaysWhyAndNothingElseChanges() throws {
+        let s = driving()
+        cruise(s, 59)
+        s.setTime(60)
+        s.fix(900)
+        s.tick()
+        let before = s.state
+        let hung = try XCTUnwrap(s.state.request).id
+        silent(s, 89)
+        XCTAssertNotNil(s.state.request)
+        XCTAssertTrue(s.view().checking)
+        s.setTime(90)
+        let effects = s.tick()
+        XCTAssertEqual(effects, [.cancelRequest])
+        XCTAssertNil(s.state.request)
+        var engine = before.engine
+        engine.failedPolls = 1
+        XCTAssertEqual(s.state.engine, engine)
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.pollFailed))
+        XCTAssertEqual(s.state.lastDecision?.reason, "Staying: could not check for faster routes (\(Live.requestTimedOut))")
+        let view = s.view()
+        XCTAssertFalse(view.checking)
+        XCTAssertEqual(view.statusLine, "Staying: could not check for faster routes (\(Live.requestTimedOut))")
+        // toBe (the same route object) is value equality here.
+        XCTAssertEqual(s.state.route, before.route)
+        XCTAssertEqual(s.state.lastCheckedAtMs, before.lastCheckedAtMs)
+        XCTAssertEqual(s.state.requestsUsed, before.requestsUsed)
+        XCTAssertEqual(s.spoken(), [])
+        // Its answer, if it ever comes, is ignored: the request it belonged to is gone.
+        let followed = s.of("follow-route").count
+        s.send(.routes(nowMs: s.nowMs(), requestId: hung, routes: routesAt(1350, [.A: 1300, .B: 600])))
+        // toBe (the same route object) is value equality here.
+        XCTAssertEqual(s.state.route, before.route)
+        XCTAssertEqual(s.of("follow-route").count, followed)
+        // Every check hangs: each is a failed poll in a row, and the drive carries on.
+        silent(s, 300)
+        XCTAssertEqual(s.state.engine.failedPolls, 4)
+        XCTAssertEqual(s.of("cancel-request").map(\.atSec), [90, 150, 210, 270])
+    }
+
+    // it('a timed-out check counts the probes it sent once, and keeps the side street being confirmed')
+    func testARequestThatNeverAnswers_aTimedOutCheckCountsTheProbesItSentOnceAndKeepsTheSideStreetBeingConfirmed() throws {
+        let s = driving()
+        cruise(s, 59)
+        s.setTime(60)
+        s.fix(900)
+        s.tick()
+        let id = try XCTUnwrap(s.state.request).id
+        let before = (requests: s.state.requestsUsed, probes: s.state.probes.used)
+        // The shell sent the check's path check and one side-street probe, then nothing came back.
+        s.send(.requestSent(requestId: id, probe: false))
+        s.send(.requestSent(requestId: id, probe: true))
+        let keep = at(5000, -400)
+        var sent = s.state
+        sent.probes.keep = keep
+        XCTAssertEqual(sent.requestsUsed, before.requests + 2)
+        XCTAssertEqual(sent.probes.used, before.probes + 1)
+        let step = Live.liveStep(sent, .tick(nowMs: s.nowMs() + 30_000))
+        XCTAssertEqual(try item(step.effects, 0), .cancelRequest)
+        // Counted as they went out, and not again now.
+        XCTAssertEqual(step.state.requestsUsed, before.requests + 2)
+        XCTAssertEqual(step.state.probes.used, before.probes + 1)
+        // One more check made probes: the next one asks through the next via point.
+        XCTAssertEqual(step.state.probes.round, sent.probes.round + 1)
+        // A failed check keeps the via being confirmed, as the engine keeps its confirmation.
+        XCTAssertEqual(step.state.probes.keep, keep)
+    }
+
+    // it('an answer just before the limit is used as usual')
+    func testARequestThatNeverAnswers_anAnswerJustBeforeTheLimitIsUsedAsUsual() throws {
+        let s = driving()
+        cruise(s, 59)
+        s.setTime(60)
+        s.fix(900)
+        s.tick()
+        silent(s, 89)
+        s.answer(routesAt(1335, [.A: 1300]))
+        XCTAssertNotEqual(try XCTUnwrap(s.state.lastDecision).code, .reroute(.pollFailed))
+        XCTAssertEqual(s.state.lastCheckedAtMs, s.nowMs())
+        XCTAssertEqual(s.state.engine.failedPolls, 0)
+        XCTAssertEqual(s.of("cancel-request").count, 0)
+    }
+
+    // it('a first route that never comes ends the start with a message, as a failed one does')
+    func testARequestThatNeverAnswers_aFirstRouteThatNeverComesEndsTheStartWithAMessageAsAFailedOneDoes() throws {
+        let s = Session()
+        s.start()
+        s.fix(0)
+        XCTAssertEqual(s.state.status, .planning)
+        s.setTime(29)
+        s.tick()
+        XCTAssertEqual(s.state.status, .planning)
+        s.setTime(30)
+        s.tick()
+        XCTAssertEqual(s.state.status, .failed)
+        XCTAssertEqual(s.state.message, "Could not find a route from here. \(Live.requestTimedOut)")
+        XCTAssertEqual(s.of("cancel-request").count, 1)
+    }
+
+    // it('a search for a new route that hangs is given up, and another is asked for')
+    func testARequestThatNeverAnswers_aSearchForANewRouteThatHangsIsGivenUpAndAnotherIsAskedFor() throws {
+        let s = driving()
+        cruise(s, 20)
+        // Off to the side, square to the road: the car leaves the route.
+        for t in stride(from: 21.0, through: 40, by: 1) {
+            s.setTime(t)
+            s.fix(300, 40 * (t - 20))
+            s.tick()
+        }
+        let replans = { s.requests().filter { $0.effect.purpose == .replan } }
+        XCTAssertEqual(replans().count, 1)
+        let sentAt = try item(replans(), 0).atSec
+        for t in stride(from: 41.0, through: sentAt + 60, by: 1) {
+            s.setTime(t)
+            s.fix(300, 40 * (t - 20))
+            s.tick()
+        }
+        XCTAssertTrue(s.of("cancel-request").map(\.atSec).contains(sentAt + 30))
+        XCTAssertGreaterThan(replans().count, 1)
+    }
+
+    // it('the limit is a setting: a bad value falls back to the default, never to 0')
+    func testARequestThatNeverAnswers_theLimitIsASettingABadValueFallsBackToTheDefaultNeverTo0() throws {
+        for requestTimeoutSec in [0, -5, Double.nan] {
+            let s = driving(LiveOptions(requestTimeoutSec: requestTimeoutSec))
+            cruise(s, 59)
+            s.setTime(60)
+            s.fix(900)
+            s.tick()
+            silent(s, 89)
+            XCTAssertNotNil(s.state.request, "\(requestTimeoutSec)")
+        }
+        let s = driving(LiveOptions(requestTimeoutSec: 5))
+        cruise(s, 59)
+        s.setTime(60)
+        s.fix(900)
+        s.tick()
+        silent(s, 65)
+        XCTAssertEqual(s.of("cancel-request").map(\.atSec), [65])
     }
 
     // MARK: - describe('checks that change nothing')
