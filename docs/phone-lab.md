@@ -101,7 +101,7 @@ place names; it is for the person at the console and is never written to the rep
 | `starts-and-plans` | Starts the app, waits for the plan screen, takes a screenshot. No simulated position. | 30 s |
 | `locked-wrong-turn` | Stands 4.4 km into the Uptown → SouthPark drive, starts the app in lab mode (it starts the drive), sends it to the background, replays the `wrong-turn` track for 170 s (the turn comes about 70 s in), waits 15 s, brings the app back. | 5 min |
 | `background-soak` | The same with the track that stays on the route, from its start, for `--minutes` (default 10). One CPU, memory and battery sample a minute. | 12 min |
-| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots 3, 9, 18 and 30 s into the drive. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 45 s |
+| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots 3, 9, 18 and 30 s into the drive. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 45 s |
 
 Options: `--lock --owner-unlocks-after` (put the phone to sleep while away; the car is then the
 in-app test drive; the screen stays off afterwards, so nothing visual can be checked after it),

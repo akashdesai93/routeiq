@@ -37,7 +37,7 @@ export const USAGE = [
   '  --minutes <n>    background-soak: minutes in the background (default 10)',
   '  --from-m <n>     skip this much of the preset drive (default 4400 for locked-wrong-turn, 0 for the soak)',
   '  --speed <m/s>    driving speed of the replay (default 13)',
-  '  --fix <name>     drive-screen: resize | reflow | layer | nomap | scroll (src/lab/probe.ts)',
+  '  --fix <name>     drive-screen: resize | reflow | layer | nomap | red | scroll (src/lab/probe.ts)',
   '  --push-web       build the web app (native/shell) and copy it into the app first; the app then runs that build',
   '  --web            run the web build that was pushed earlier instead of the one in the app',
   '  --out <dir>      where reports go (default phone-lab/)',

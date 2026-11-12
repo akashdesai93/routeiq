@@ -82,6 +82,13 @@ export const LAYOUT_FIXES: Readonly<Record<string, (doc: Document, win: Window) 
     map.style.display = 'none'
     return 'hid .map'
   },
+  /** Is the app's own background what is on the glass? If the screen turns red, nothing is drawn over it. */
+  red: (doc) => {
+    const app = doc.querySelector<HTMLElement>('.app')
+    if (app === null) return 'no .app'
+    app.style.background = 'red'
+    return 'background: red on .app'
+  },
   /** Back to the top of the page, in case the plan screen was left scrolled. */
   scroll: (_doc, win) => {
     win.scrollTo(0, 0)
