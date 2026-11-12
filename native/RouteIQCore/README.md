@@ -37,7 +37,9 @@ same JSON fixtures straight from `tests/fixtures`.
 The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/contract.ts`, and
 [docs/contracts.md](../../docs/contracts.md)). `Contract.coreContractVersion` is the version this
 port was brought up to: **6**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
-and fails when the web app's version moves on, so a bump is never missed here. Version 2 differed
+and fails when the web app's version moves on, so a bump is never missed here. Since #169 the web
+side does not bump per pull request: what is not ported yet is listed one file per pull request in
+`docs/contracts/changes/`, and the pull request that ports it bumps both versions and deletes those files. Version 2 differed
 from version 1 only in the iPhone shell's plugin, which this package does not contain; version 3
 adds the reroute changes of #74 and #68 (`matchStartSearchM`, `routeLostWindowSec`, `lostAtSec`); version 4
 changed only live-drive shapes (`LiveOptions.requestTimeoutSec`, `LiveState.pickedAtMs`, the Start
