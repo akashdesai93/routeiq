@@ -38,6 +38,7 @@ npm run lint                   # oxlint
 npx vitest run                 # all unit tests
 npm run build                  # typecheck + vite build
 npm run e2e                    # end-to-end scenarios (headless Chromium, offline)
+npm run design:shots           # every screen at iPhone sizes into design-shots/ (skills: ux-review, design-tokens)
 npx playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm run e2e:build)
 (cd native/RouteIQCore && swift build --build-tests && swift test)   # native sessions only
 node --test native/scripts/pack-signal-bundle.test.mjs              # native: signal bundle packer
