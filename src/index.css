@@ -149,7 +149,8 @@ button.link:hover { background: none; color: #ffffff; }
   summary::before { content: '▸'; }
   details[open] > summary::before { content: '▾'; }
   button.link { display: inline-flex; align-items: center; padding: 0 4px; }
-  .hint a, .handoff a { display: inline-block; padding: 14px 0; }
+  /* Height from min-height, not padding round the text: font metrics differ between machines (43 px in CI). */
+  .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
   .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
@@ -211,3 +212,5 @@ button.link:hover { background: none; color: #ffffff; }
 .other-eta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .other-eta input { width: 9em; }
 .other-eta .field-status { flex-basis: 100%; }
+/* "Other app's ETA" before Start drive (#118): a field a thumb can hit, 16 px so iOS does not zoom on focus. */
+.other-eta input { min-height: 44px; padding: 8px 12px; font: inherit; font-size: 16px; border: 1.5px solid var(--hair2); border-radius: 12px; background: var(--raised); color: inherit; }

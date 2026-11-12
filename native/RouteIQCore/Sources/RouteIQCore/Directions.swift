@@ -1,6 +1,8 @@
 import Foundation
 
-/// Mapbox Directions API v5 JSON (geometries=geojson, steps=true) to
+/// Mapbox Directions API v5 JSON (geometries=geojson, steps=true, for turn
+/// guidance banner_instructions=true and voice_instructions=true, and for
+/// per-segment traffic annotations=congestion,duration with overview=full) to
 /// RouteCandidates, ported from src/providers/mapbox/adapter.ts.
 ///
 /// The Mapbox Navigation SDK for iOS wraps this same response (its routes
@@ -186,6 +188,118 @@ public enum Directions {
         return spans
     }
 
+    /// The JavaScript `text`: a string with something in it, trimmed (JavaScript white space). Nil otherwise.
+    static func text(_ v: JSONValue?) -> String? {
+        guard let s = v?.stringValue else { return nil }
+        let trimmed = JS.trim(s)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The first usable banner of a step: the one shown from farthest away.
+    static func firstBanner(_ step: [String: JSONValue]) -> [String: JSONValue]? {
+        guard let banners = step["bannerInstructions"]?.arrayValue else { return nil }
+        for banner in banners {
+            if let b = banner.objectValue, let primary = b["primary"]?.objectValue, text(primary["text"]) != nil { return b }
+        }
+        return nil
+    }
+
+    /// A step's voice instructions as announcements for the maneuver at its
+    /// END: `distanceAlongGeometry` meters before `endM`, and never before the
+    /// step begins. The plain `announcement` text; `ssmlAnnouncement` is ignored.
+    static func voiceAnnouncements(_ step: [String: JSONValue], _ startM: Double, _ endM: Double) -> [GuidanceAnnouncement] {
+        guard let voices = step["voiceInstructions"]?.arrayValue else { return [] }
+        var out: [GuidanceAnnouncement] = []
+        for item in voices {
+            guard let voice = item.objectValue else { continue }
+            guard let said = text(voice["announcement"]), let before = nonNegative(voice["distanceAlongGeometry"]) else { continue }
+            out.append(GuidanceAnnouncement(atDistanceM: JS.max(startM, endM - before), text: said))
+        }
+        return out.jsSorted { JS.compare($0.atDistanceM, $1.atDistanceM) }
+    }
+
+    /// Turn-by-turn guidance: one entry per step maneuver, in driving order.
+    /// Mapbox hangs what is shown and said on the way to a maneuver on the
+    /// step BEFORE it, so each maneuver takes its banner and announcements
+    /// from the step that leads to it. Where either is missing, the entry is
+    /// built from the maneuver itself and marked `synthesized`. A step
+    /// without a usable maneuver location is skipped, as in toManeuvers.
+    static func toGuidance(_ legs: JSONValue?) -> [GuidanceStep] {
+        var guidance: [GuidanceStep] = []
+        guard let legs = legs?.arrayValue else { return guidance }
+        var atDistanceM = 0.0
+        var approach: (step: [String: JSONValue], startM: Double)?
+        for leg in legs {
+            guard let steps = leg.objectValue?["steps"]?.arrayValue else { continue }
+            for item in steps {
+                guard let step = item.objectValue else { continue }
+                let maneuver = step["maneuver"]?.objectValue
+                if let maneuver, let location = toLngLat(maneuver["location"]) {
+                    let banner = approach.flatMap { firstBanner($0.step) }
+                    let primary = banner?["primary"]?.objectValue
+                    let secondary = banner?["secondary"]?.objectValue.flatMap { text($0["text"]) }
+                    let instruction = text(maneuver["instruction"])
+                    let voiced = approach.map { voiceAnnouncements($0.step, $0.startM, atDistanceM) } ?? []
+                    let type = text(primary?["type"]) ?? text(maneuver["type"]) ?? "unknown"
+                    let isDepart = approach == nil
+                    let modifier = primary != nil && text(primary?["type"]) != nil ? text(primary?["modifier"]) : text(maneuver["modifier"])
+                    let announcements: [GuidanceAnnouncement]
+                    if !voiced.isEmpty || isDepart || instruction == nil {
+                        announcements = voiced
+                    } else {
+                        announcements = Guidance.synthesizeAnnouncements(instruction!, approach!.startM, atDistanceM)
+                    }
+                    guidance.append(GuidanceStep(
+                        atDistanceM: atDistanceM,
+                        location: location,
+                        type: type,
+                        modifier: modifier,
+                        primaryText: text(primary?["text"]) ?? text(step["name"]) ?? instruction ?? type,
+                        secondaryText: secondary,
+                        announcements: announcements,
+                        synthesized: !isDepart && (primary == nil || voiced.isEmpty)
+                    ))
+                }
+                approach = (step, atDistanceM)
+                atDistanceM += nonNegative(step["distance"]) ?? 0
+            }
+        }
+        return guidance
+    }
+
+    /// One annotation list (`legs[].annotation.<key>`) for the whole route:
+    /// the legs' lists one after another. Nil when any leg lacks the list, an
+    /// entry is unusable, or the total is not exactly `segments` long.
+    static func annotationList<T>(_ legs: JSONValue?, _ key: String, _ segments: Int, _ entry: (JSONValue) -> T?) -> [T]? {
+        guard let legs = legs?.arrayValue, !legs.isEmpty else { return nil }
+        var out: [T] = []
+        for leg in legs {
+            guard let annotation = leg.objectValue?["annotation"]?.objectValue else { return nil }
+            guard let list = annotation[key]?.arrayValue else { return nil }
+            for raw in list {
+                guard let value = entry(raw) else { return nil }
+                out.append(value)
+            }
+        }
+        return out.count == segments ? out : nil
+    }
+
+    /// Per-segment congestion and travel time (see RouteCandidate.segmentTraffic).
+    /// A congestion entry Mapbox does not document reads as `unknown`; a
+    /// duration entry that is not a number of 0 or more makes the whole
+    /// duration list nil. Nil when neither list is usable.
+    static func toSegmentTraffic(_ legs: JSONValue?, _ segments: Int) -> SegmentTraffic? {
+        if segments < 1 { return nil }
+        let congestion: [CongestionLevel]? = annotationList(legs, "congestion", segments) { v in
+            // Only the exact words: a JavaScript Set of strings compares code units.
+            guard let s = v.stringValue else { return .unknown }
+            return CongestionLevel.allCases.first { JS.Key($0.rawValue) == JS.Key(s) } ?? .unknown
+        }
+        let durationSec: [Double]? = annotationList(legs, "duration", segments) { nonNegative($0) }
+        if congestion == nil && durationSec == nil { return nil }
+        return SegmentTraffic(congestion: congestion, durationSec: durationSec)
+    }
+
     /// Nil when the route lacks what the app cannot do without: a line, a time, a length.
     static func toCandidate(_ raw: JSONValue) -> RouteCandidate? {
         guard let route = raw.objectValue else { return nil }
@@ -207,7 +321,10 @@ public enum Directions {
             intersections: toIntersections(legs),
             // A dropped point shifts every geometry_index after it, so the spans would be misplaced.
             limitedAccessSpansM: geometry.count == coordinates.count ? toLimitedAccessSpans(legs, geometry) : nil,
-            maneuvers: toManeuvers(legs)
+            maneuvers: toManeuvers(legs),
+            guidance: toGuidance(legs),
+            // Annotations line up with the line Mapbox sent: with a point dropped they would be misplaced.
+            segmentTraffic: geometry.count == coordinates.count ? toSegmentTraffic(legs, geometry.count - 1) : nil
         )
     }
 
