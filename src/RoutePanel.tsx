@@ -126,26 +126,25 @@ function HandoffLinks({
  * from core (routeDelta); lights it cannot compare say so, never 0.
  */
 function DeltaRow({ delta, against }: { delta: RouteDelta; against: number }) {
+  const cells = [
+    ['time', delta.time],
+    ['lights', delta.lights],
+    ['distance', delta.distance],
+  ] as const
   return (
     <div className="route-delta" role="group" aria-label={`Route 1 against Route ${against}`}>
-      <span className="route-delta-cell" data-delta="time">
-        {delta.time.figure}
-        <span className="unit"> {delta.time.unit}</span>
-      </span>
-      <span className="route-delta-cell" data-delta="lights">
-        {delta.lights === null ? (
-          <span className="route-delta-words">Lights: can't compare</span>
-        ) : (
-          <>
-            {delta.lights.figure}
-            <span className="unit"> {delta.lights.unit}</span>
-          </>
-        )}
-      </span>
-      <span className="route-delta-cell" data-delta="distance">
-        {delta.distance.figure}
-        <span className="unit"> {delta.distance.unit}</span>
-      </span>
+      {cells.map(([key, cell]) => (
+        <span key={key} className="route-delta-cell" data-delta={key}>
+          {cell === null ? (
+            <span className="route-delta-words">Lights: can't compare</span>
+          ) : (
+            <>
+              {cell.figure}
+              <span className="unit"> {cell.unit}</span>
+            </>
+          )}
+        </span>
+      ))}
     </div>
   )
 }
@@ -224,7 +223,6 @@ export function RoutePanel({
                 <span className="route-distance">{formatDistance(route.distanceM)}</span>{' '}
                 <span
                   className="route-signals"
-                  data-coverage={counting ? 'counting' : route.signalCoverage}
                   title={counting ? undefined : signalHoverText(route)}
                 >
                   {counting
