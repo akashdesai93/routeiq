@@ -2,10 +2,12 @@
 // index from 1. Every scenario runs in exactly one shard.
 //
 // Why not Playwright's own `--shard`: it splits the list into contiguous blocks, and the long
-// scenarios (the drives, about 30-50 s each on a CI runner) sit next to each other in
-// drive.spec.ts and at the end of sidestreets.spec.ts, so one shard would get most of them.
-// Here the scenarios are dealt out in turn, like cards (the 1st to shard 1, the 2nd to shard 2,
-// ...), which spreads the neighbours out.
+// scenarios sit next to each other (in drive.spec.ts, and at the end of sidestreets.spec.ts),
+// so one shard would get most of them. The scenarios are CPU-bound, and a long one is one that
+// drives a trip (`app.drive(`, 20-45 s on a CI runner, against 1-5 s for the others). So each
+// scenario gets a weight (DRIVE_WEIGHT for a drive, 1 otherwise) and the heaviest are dealt
+// first, each to the shard with the least weight so far (ties: the lower shard). The deal
+// depends only on the scenario list and the spec files, so every shard computes the same one.
 //
 // The shard checks itself before it runs: the scenarios Playwright selects for its locations
 // must be exactly the ones it was dealt. A location that matched another scenario too, or
@@ -14,7 +16,11 @@
 // Run with `npm run e2e:build` first. Locally `npm run e2e` still runs everything at once.
 
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
+
+/** A scenario that drives a trip costs about this many short ones (measured on CI: 20-45 s against 1-5 s). */
+const DRIVE_WEIGHT = 10
 
 const [indexArg, totalArg, ...rest] = process.argv.slice(2)
 const index = Number(indexArg)
@@ -46,7 +52,7 @@ function list(args) {
   const walk = (suite) => {
     for (const spec of suite.specs ?? []) {
       const file = relative(process.cwd(), resolve(report.config.rootDir, spec.file)).replaceAll('\\', '/')
-      for (const t of spec.tests) out.push({ location: `${file}:${spec.line}`, id: `${file}:${spec.line} › ${t.projectName} › ${spec.title}` })
+      for (const t of spec.tests) out.push({ location: `${file}:${spec.line}`, id: `${file}:${spec.line} › ${t.projectName ? `${t.projectName} › ` : ""}${spec.title}` })
     }
     for (const child of suite.suites ?? []) walk(child)
   }
@@ -61,7 +67,37 @@ if (all.length === 0) {
 }
 // One location can hold several scenarios (a test in a loop): they stay together.
 const locations = [...new Set(all.map((t) => t.location))]
-const mine = locations.filter((_, i) => i % total === index - 1)
+
+/** Weight of each location: does the test body (from its line to the next test in the file) drive a trip? */
+function weights() {
+  const byFile = new Map()
+  for (const loc of locations) {
+    const [file, line] = loc.split(':')
+    byFile.set(file, [...(byFile.get(file) ?? []), Number(line)])
+  }
+  const out = new Map()
+  for (const [file, lines] of byFile) {
+    const source = readFileSync(file, 'utf8').split('\n')
+    const sorted = [...lines].sort((a, b) => a - b)
+    sorted.forEach((line, i) => {
+      const body = source.slice(line - 1, i + 1 < sorted.length ? sorted[i + 1] - 1 : source.length).join('\n')
+      out.set(`${file}:${line}`, /\.drive\(/.test(body) ? DRIVE_WEIGHT : 1)
+    })
+  }
+  return out
+}
+
+const weight = weights()
+const load = Array.from({ length: total }, () => 0)
+const dealt = Array.from({ length: total }, () => [])
+const heaviestFirst = locations.map((loc, i) => ({ loc, i, w: weight.get(loc) })).sort((a, b) => b.w - a.w || a.i - b.i)
+for (const { loc, w } of heaviestFirst) {
+  const to = load.indexOf(Math.min(...load))
+  load[to] += w
+  dealt[to].push(loc)
+}
+const mine = dealt[index - 1]
+console.log(`weights per shard: ${load.join(', ')} (a drive counts ${DRIVE_WEIGHT})`)
 if (mine.length === 0) {
   console.error(`shard ${index} of ${total} got no scenarios: there are only ${locations.length} locations. Use fewer shards.`)
   process.exit(1)

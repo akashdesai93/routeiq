@@ -10,7 +10,7 @@ name: E2E
 # The scenarios are CPU-bound (Mapbox GL drawn in software, plus the video of every
 # scenario), so they are spread over several runners: each shard runs its share
 # (e2e/shard.mjs deals every scenario to exactly one shard and checks that it did) with
-# two browsers on the runner's four cores. Each shard uploads a blob report; the report
+# two browsers on the runner's four cores. Shards are dealt by weight (a drive counts ten short scenarios). Each shard uploads a blob report; the report
 # job (e2e-report.yml) merges them into the one `e2e-report`. In gate.yml that merge
 # runs after the shards but is not part of `required`, so it adds no waiting time.
 #
@@ -34,7 +34,7 @@ jobs:
       # Any failed shard still fails this workflow, and with it `required`.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
