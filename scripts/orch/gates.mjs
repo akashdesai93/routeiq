@@ -19,7 +19,8 @@ import { fileURLToPath } from 'node:url'
 export const HOLD_LABELS = ['do-not-merge', 'needs-human']
 export const PHONE_LABEL = 'needs-phone'
 export const PHONE_VERIFIED = 'phone-verified'
-export const PHONE_MARKER = /PHONE CHECK NEEDED/i
+// At the start of a line, as PRs write it; a PR that only quotes it (like this one's docs) is not held.
+export const PHONE_MARKER = /^[ \t>]*(?:\*\*|#+[ \t]*)?PHONE CHECK NEEDED\b/im
 /** GitHub's compare API lists at most this many files. */
 export const COMPARE_FILE_LIMIT = 300
 
