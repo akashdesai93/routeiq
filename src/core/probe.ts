@@ -248,7 +248,7 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`
  * Up to `options.maxPoints` via points off the fastest candidate's slowest
  * surface-street stretches, best first. Empty for no usable candidate, a trip
  * under `minTripM`, or a route with no surface stretch of `minStretchM` away
- * from its ends (freeway-only trips).
+ * from its ends (freeway-only trips, unless `freewayJams` finds a freeway jam).
  *
  * Stretches with at least `minCongestedM` of congestion (segments at one of
  * `congestedLevels`, runs within `congestionGapM` joined) come first, the most
@@ -424,7 +424,7 @@ export const DEFAULT_PROBE_BUDGET: ProbeBudget = {
 /**
  * The via points to probe for one plan: selectViaPoints, cut to the budget.
  * Empty when the budget is off, there is no usable route, or the trip has
- * nothing to probe (shorter than minTripM, or freeway-only: no surface-street
+ * nothing to probe (shorter than minTripM, or freeway-only with no freeway jam probed: no surface-street
  * stretch of minStretchM away from its ends). Pure: the same routes give the
  * same points in the same order.
  */
@@ -687,7 +687,7 @@ export const INITIAL_CHECK_PROBES: CheckProbeMemory = { used: 0, round: 0, keep:
  *   the path check's request, or what the plain checks until the arrival need).
  * - 'route-not-found': the route being driven was not among the answers, so nothing is compared.
  * - 'not-held-up': no jam reported ahead, and under minDelaySec over its typical time.
- * - 'nothing-to-probe': no surface-street stretch left to probe beside (freeway only, or under minTripM left).
+ * - 'nothing-to-probe': no surface-street stretch left to probe beside (freeway only with no freeway jam to probe beside, or under minTripM left).
  * - 'backing-off': the last losingChecks probes all lost and the traffic ahead has not changed since.
  */
 export type ProbeSkip = 'budget' | 'route-not-found' | 'not-held-up' | 'nothing-to-probe' | 'backing-off'
@@ -756,7 +756,7 @@ export interface CheckProbeInput {
  * Empty when the route being driven is not held up (no jam reported on it
  * ahead, and under minDelaySec over its typical time), when nothing may be
  * asked, the current route was not found, or there is
- * nothing to probe (under minTripM left, or freeway only). Pure: the same
+ * nothing to probe (under minTripM left, or freeway only with no freeway jam to probe beside). Pure: the same
  * input gives the same points in the same order.
  */
 export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFAULT_PROBE_OPTIONS): LngLat[] {

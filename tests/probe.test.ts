@@ -726,6 +726,12 @@ describe('probes beside a freeway jam (ProbeOptions.freewayJams, #183 items 3 an
   it('on: a jam must be at least 1000 m long', () => {
     expect(freewayPoints(selectViaPoints([freewayA([[8000, 8750]])], { ...ON, maxPoints: 10 }))).toEqual([])
     expect(freewayPoints(selectViaPoints([freewayA([[8000, 9000]])], { ...ON, maxPoints: 10 }))).toHaveLength(2)
+    // The boundary itself: a jam exactly minFreewayJamM long counts, one a centimetre shorter does not.
+    const exact = freewayA([[8000, 9000]])
+    const along = alongRouteM(exact.geometry)
+    const jamM = along.find((m) => m >= 8999)! - along.find((m) => m >= 7999)!
+    expect(freewayPoints(selectViaPoints([exact], { ...ON, maxPoints: 10, minFreewayJamM: jamM }))).toHaveLength(2)
+    expect(freewayPoints(selectViaPoints([exact], { ...ON, maxPoints: 10, minFreewayJamM: jamM + 0.01 }))).toEqual([])
     // Runs up to congestionGapM apart are one jam: two of 500 m, 250 m apart, are one of 1250 m only with a gap allowed of over 250 m.
     const twoRuns = freewayA([[8000, 8500], [8750, 9250]])
     expect(freewayPoints(selectViaPoints([twoRuns], { ...ON, maxPoints: 10 }))).toEqual([])
@@ -741,6 +747,20 @@ describe('probes beside a freeway jam (ProbeOptions.freewayJams, #183 items 3 an
     const short = { ...ON, maxPoints: 10, minFreewayJamM: 500 }
     expect(freewayPoints(selectViaPoints([freewayA([[19_250, 20_000]], spans)], short))).toEqual([])
     expect(freewayPoints(selectViaPoints([freewayA([[18_750, 20_000]], spans)], short)).map((p) => p.side).sort()).toEqual(['left', 'right'])
+  })
+
+  it('on: freeway spans that touch are one freeway, so a jam across them is one jam', () => {
+    // 500 m of the jam in one span, 750 m in the next: neither part is 1000 m on its own.
+    const jammed = freewayA([[8500, 9750]], [[6000, 9000], [9000, 14_000]])
+    const points = freewayPoints(selectViaPoints([jammed], { ...ON, maxPoints: 10 }))
+    expect(points).toHaveLength(2)
+    expect(points[0]!.atDistanceM).toBeCloseTo(9125, 0)
+  })
+
+  it('on: of the two sides of a jam, the one with more room from the other routes goes first', () => {
+    // B 1 km north: the left (north) point is 500 m from it, the right one 1.8 km.
+    const points = freewayPoints(selectViaPoints([freewayA(), world('B', 1300)], { ...ON, maxPoints: 10 }))
+    expect(points.map((p) => p.side)).toEqual(['right', 'left'])
   })
 
   it('on: the longest jam first, both its sides before the next one', () => {
