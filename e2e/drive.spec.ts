@@ -179,9 +179,11 @@ test('right after Start, "checked" says how old the plan is, not 0 s', async ({ 
   // And the machine running this is slow at the wrong moment: the clock flake of #71 stays covered.
   app.slowMomentAtStartMs = 1500
   await app.drive({ maxSec: 6 })
+  // The status line, with "checked N s ago", is behind More on the driving screen (#106).
+  await page.getByRole('button', { name: 'More' }).click()
   await app.snap('just after Start: checked about 45 s ago')
 
-  const text = (await page.getByText(/checked \d+ s ago/).textContent()) ?? ''
+  const text = (await page.getByLabel('Live drive').getByText(/checked \d+ s ago/).textContent()) ?? ''
   const seconds = Number(/checked (\d+) s ago/.exec(text)?.[1])
   expect(seconds).toBeGreaterThanOrEqual(45)
   expect(seconds).toBeLessThan(60)
