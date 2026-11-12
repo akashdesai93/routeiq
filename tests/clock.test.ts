@@ -119,16 +119,14 @@ async function driveThroughAStepBack(clock: (wall: () => number) => () => number
 }
 
 describe('a wall clock that steps back during a drive (#30)', () => {
-  it('the car follows the fixes, on the session clock', async () => {
+  it('the car follows the fixes on the session clock, where on the wall clock itself it stands still', async () => {
     const state = await driveThroughAStepBack((wall) => steadyClock(wall).now)
     expect(state.tracking!.alongRouteM).toBeGreaterThan(1700)
     expect(state.tracking!.alongRouteM).toBeCloseTo(1800, -1)
     expect(state.tracking!.ignoredFixes).toBe(0)
-  })
-
-  it('on the wall clock itself, the car would stand still for as long as the step (the bug)', async () => {
-    const state = await driveThroughAStepBack((wall) => wall)
-    expect(state.tracking!.alongRouteM).toBeLessThan(1550)
-    expect(state.tracking!.ignoredFixes).toBeGreaterThanOrEqual(19)
+    // The control: the same drive stamped with the wall clock is the #30 bug, so the step is real.
+    const frozen = await driveThroughAStepBack((wall) => wall)
+    expect(frozen.tracking!.alongRouteM).toBeLessThan(1550)
+    expect(frozen.tracking!.ignoredFixes).toBeGreaterThanOrEqual(19)
   })
 })

@@ -34,7 +34,7 @@ export interface LiveDriveConfig {
   readonly destination: LngLat
   /** The route picked on the plan screen: Start drive drives it (a side-street route too). Read at Start only. */
   readonly route: RouteCandidate | null
-  /** When that route's travel times were asked for, on the session clock (device/clock.ts). Read at Start only. */
+  /** When Mapbox's answer with that route's travel times came, on the session clock (device/clock.ts). Read at Start only. */
   readonly routeFetchedAtMs?: number | null
   /** The reroute thresholds, shared with the simulated drive's settings box. */
   readonly rerouteOptions: RerouteOptions

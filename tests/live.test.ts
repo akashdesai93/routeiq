@@ -225,10 +225,10 @@ describe('the route picked on the plan screen (#66)', () => {
     expect(s.requests().map((r) => [r.atSec, r.effect.purpose, r.effect.baseline])).toEqual([[60, 'poll', true]])
   })
 
-  it('the answer of the plan is the last check: "checked N s ago" counts from when the plan was asked for (#71)', () => {
+  it('the answer of the plan is the last check: "checked N s ago" counts from when the answer of the plan came (#71)', () => {
     const s = session()
     // The trip was planned 40 s before the Start tap.
-    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 40_000 })
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 40_000 })
     s.fix(0)
     expect(s.state.status).toBe('driving')
     expect(s.view().checkedAgoSec).toBe(40)
@@ -244,7 +244,7 @@ describe('the route picked on the plan screen (#66)', () => {
 
   it('a plan older than the poll interval is checked at once, and a check alone never switches', () => {
     const s = session()
-    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 600_000 })
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 600_000 })
     s.fix(0)
     expect(s.view()).toMatchObject({ checkedAgoSec: 600, checking: true })
     // Asked from the first fix on the route.
@@ -258,18 +258,18 @@ describe('the route picked on the plan screen (#66)', () => {
   })
 
   it('without the time of the plan, or with one from the future, the Start tap counts as the last check, as before', () => {
-    for (const routeAskedAtMs of [undefined, null, Number.NaN, 1e15]) {
+    for (const routeFetchedAtMs of [undefined, null, Number.NaN, 1e15]) {
       const s = session()
-      s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs })
+      s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs })
       s.fix(0)
-      expect(s.view().checkedAgoSec, String(routeAskedAtMs)).toBe(0)
+      expect(s.view().checkedAgoSec, String(routeFetchedAtMs)).toBe(0)
       // And the checks keep their minute: a time from the future must not hold them back.
       cruiseOnB(s, 60, (xM) => ({ routes: offered(xM) }))
-      expect(s.requests().map((r) => r.atSec), String(routeAskedAtMs)).toEqual([60])
+      expect(s.requests().map((r) => r.atSec), String(routeFetchedAtMs)).toEqual([60])
     }
     // A drive that asks for its own route (the fix was not on the pick) counts its own answer.
     const s = session()
-    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 40_000 })
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeFetchedAtMs: s.nowMs() - 40_000 })
     s.fix(2000, 600)
     s.setTime(3)
     s.answer([candidate('A', at(0, 0), 1300)!])
@@ -428,9 +428,10 @@ describe('poll cadence', () => {
   })
 
   it('waits for the answer of one check before sending another', () => {
-    const s = driving()
-    // Up to the request time limit (requestTimeoutSec; past it, see "a request that never answers").
-    for (let t = 1; t <= 89; t++) {
+    // A long request time limit, so the checks of seconds 120 and 180 fall due while it is out
+    // (past the limit: see "a request that never answers").
+    const s = driving({ requestTimeoutSec: 300 })
+    for (let t = 1; t <= 200; t++) {
       s.setTime(t)
       s.fix(15 * t)
       s.tick()
@@ -564,6 +565,32 @@ describe('a request that never answers (#29)', () => {
     silent(s, 300)
     expect(s.state.engine.failedPolls).toBe(4)
     expect(s.of('cancel-request').map((e) => e.atSec)).toEqual([90, 150, 210, 270])
+  })
+
+  it('a timed-out check counts the probes it sent once, and keeps the side street being confirmed', () => {
+    const s = driving()
+    cruise(s, 59)
+    s.setTime(60)
+    s.fix(900)
+    s.tick()
+    const id = s.state.request!.id
+    const before = { requests: s.state.requestsUsed, probes: s.state.probes.used }
+    // The shell sent the check's path check and one side-street probe, then nothing came back.
+    s.send({ type: 'request-sent', requestId: id, probe: false })
+    s.send({ type: 'request-sent', requestId: id, probe: true })
+    const keep = at(5000, -400)
+    const sent = { ...s.state, probes: { ...s.state.probes, keep } }
+    expect(sent.requestsUsed).toBe(before.requests + 2)
+    expect(sent.probes.used).toBe(before.probes + 1)
+    const step = liveStep(sent, { type: 'tick', nowMs: s.nowMs() + 30_000 })
+    expect(step.effects[0]).toEqual({ type: 'cancel-request' })
+    // Counted as they went out, and not again now.
+    expect(step.state.requestsUsed).toBe(before.requests + 2)
+    expect(step.state.probes.used).toBe(before.probes + 1)
+    // One more check made probes: the next one asks through the next via point.
+    expect(step.state.probes.round).toBe(sent.probes.round + 1)
+    // A failed check keeps the via being confirmed, as the engine keeps its confirmation.
+    expect(step.state.probes.keep).toEqual(keep)
   })
 
   it('an answer just before the limit is used as usual', () => {

@@ -81,9 +81,9 @@ export interface LiveRunner {
   /**
    * The Start tap. Call it from inside the tap handler: the first words have to be spoken there.
    * `route`: the route picked on the plan screen, to be driven (see LiveState.picked);
-   * `routeAskedAtMs`: when its travel times were asked for, on `now`'s clock.
+   * `routeFetchedAtMs`: when the answer with its travel times came, on `now`'s clock.
    */
-  start(destination: LngLat, route?: RouteCandidate | null, routeAskedAtMs?: number | null): void
+  start(destination: LngLat, route?: RouteCandidate | null, routeFetchedAtMs?: number | null): void
   end(): void
   keepPrevious(): void
   setMuted(muted: boolean): void
@@ -221,7 +221,7 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
   }
 
   return {
-    start: (destination, route = null, routeAskedAtMs = null) => dispatch({ type: 'start', nowMs: deps.now(), destination, route, routeAskedAtMs }),
+    start: (destination, route = null, routeFetchedAtMs = null) => dispatch({ type: 'start', nowMs: deps.now(), destination, route, routeFetchedAtMs }),
     end: () => dispatch({ type: 'end' }),
     keepPrevious: () => dispatch({ type: 'keep-previous', nowMs: deps.now() }),
     setMuted: (muted) => dispatch({ type: 'mute', muted }),

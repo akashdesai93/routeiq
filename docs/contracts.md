@@ -107,12 +107,16 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 1 | by definition |
+| Web app (`src/`) | 2 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 1 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80) |
+| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`, unchanged since 1) | the plugin interface was added with the shell (#78, #80) |
 
 ## Changes
 
 - **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
   `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
   `probe-unconfirmed`).
+- **2** (Nov 12, 2026): the live drive's robustness fixes (#29, #30, #71).
+  `LiveOptions.requestTimeoutSec` (a request not answered in time is a failed answer),
+  `LiveState.pickedAtMs` and the Start event's `routeFetchedAtMs` (a drive started on the
+  plan's route counts the plan's answer as its last check). No field removed or renamed.

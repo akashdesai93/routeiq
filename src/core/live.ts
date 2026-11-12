@@ -164,8 +164,8 @@ export interface LiveState {
    */
   readonly picked: RouteCandidate | null
   /**
-   * When the picked route's travel times were asked for (the plan screen's
-   * answer), on the session's clock. A drive that starts on the pick counts
+   * When the plan screen's answer with the picked route's travel times came,
+   * on the session's clock. A drive that starts on the pick counts
    * that as its last check (#71). Null: not known, the start counts instead.
    */
   readonly pickedAtMs: number | null
@@ -275,15 +275,15 @@ export type LiveEvent =
   /**
    * The Start tap. `route`: the route picked on the plan screen, to be driven
    * (see LiveState.picked). Left out or null: the drive asks for its own.
-   * `routeAskedAtMs`: when that route's travel times were asked for, on the
-   * same clock as `nowMs` (see LiveState.pickedAtMs). Left out: unknown.
+   * `routeFetchedAtMs`: when the answer with that route's travel times came, on
+   * the same clock as `nowMs` (see LiveState.pickedAtMs). Left out: unknown.
    */
   | {
       readonly type: 'start'
       readonly nowMs: number
       readonly destination: LngLat
       readonly route?: RouteCandidate | null
-      readonly routeAskedAtMs?: number | null
+      readonly routeFetchedAtMs?: number | null
     }
   | { readonly type: 'fix'; readonly nowMs: number; readonly fix: PositionFix }
   | { readonly type: 'position-error'; readonly nowMs: number; readonly kind: PositionErrorKind }
@@ -605,7 +605,7 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
 
 /**
  * The drive begins on `route`, from `fix`. `checkedAtMs`: when its travel times
- * were asked for, the drive's last check (the plan's answer for a picked route).
+ * came, the drive's last check (the plan's answer for a picked route).
  */
 function begin(
   state: LiveState,
@@ -816,7 +816,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           destination: event.destination,
           startedAtMs: event.nowMs,
           picked: drivable(event.route) ? event.route : null,
-          pickedAtMs: drivable(event.route) && event.routeAskedAtMs != null && Number.isFinite(event.routeAskedAtMs) ? event.routeAskedAtMs : null,
+          pickedAtMs: drivable(event.route) && event.routeFetchedAtMs != null && Number.isFinite(event.routeFetchedAtMs) ? event.routeFetchedAtMs : null,
           muted: state.muted,
         },
         effects: [
