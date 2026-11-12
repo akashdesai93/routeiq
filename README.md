@@ -203,9 +203,11 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
 
 The shapes the Swift port and the iPhone shell depend on (routes, signal tiles and index, the
 place book, the reroute options and state, the live events and effects, the native plugin) are
-versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 1. What is in it,
+versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 6. What is in it,
 the JSON Schemas, and how to change a contract are in [docs/contracts.md](docs/contracts.md).
-`tests/contracts.test.ts` fails on a change of shape without a version bump.
+`tests/contracts.test.ts` fails on a change of shape until the snapshot is regenerated and a file in
+`docs/contracts/changes/` describes it for the Swift port. The version is bumped once per Swift
+port, not in every pull request (#169).
 
 ## Layout
 
@@ -1178,6 +1180,37 @@ rechecks the routes at once; it cannot do more than that. Driving with a locked 
 needs the native app (PLAN.md). It also needs HTTPS (or localhost) to be given a
 position at all.
 
+**Add to Home Screen and the offline shell (#9).** In Safari (Share, then Add to Home
+Screen) or Chrome (Install), RouteIQ becomes a full-screen app with its own name and icon
+(`public/manifest.webmanifest`; the icons are rendered from `public/icons/icon.svg` by
+`node scripts/design/app-icons.mjs`: the approved look, a white route on black glass
+ending in amber, plus a maskable 512 for Android and the 180 px `apple-touch-icon`).
+After one visit with a connection, a service worker (`public/sw.js`, registered by
+`src/device/offline.ts`) keeps the app's own files: the page, its scripts and styles, the
+bundled fonts, the icons and the signal tiles it has used. With no signal the app then
+opens and says "No connection. RouteIQ opens without one, but finding routes and traffic
+needs it." Its rules (`requestPolicy`, tested in `tests/offline.test.ts`):
+
+- **Never touched:** any request to another site (Mapbox Directions, Search, the map
+  style and tiles, events; Overpass), any address with a query string (so nothing with
+  `access_token`), anything but GET, and `sw.js` itself. The browser sends those as if
+  there were no service worker, so Mapbox's answers are never stored by it.
+- **The page:** the network first; the stored page only when that fails.
+- **Hashed build files** (`assets/`): stored and then served from the store (a new
+  release has new names).
+- **Other files of the site** (icons, manifest, signal tiles): the network first, the
+  stored copy when offline.
+- **Not in the iPhone shell** (it ships its files inside the app and loads exactly what it
+  did before) and not on the dev server.
+
+**What it does not do:** a Home Screen web app is the same web page, with the same limit
+as above: iPhone stops its GPS, checks and voice when the phone locks or another app is in
+front. The note under Start drive says so in a browser. Routes and traffic are live, so
+nothing can be planned offline.
+Open for later: the hashed files of older releases stay stored until the cache name in
+`sw.js` changes (nothing prunes them yet), and a release is picked up on the next
+visit with a connection, not mid-visit.
+
 **The iPhone shell app (`native/shell`).** The same web app inside an installable
 Capacitor shell, so a drive continues with the phone locked or another app in front.
 Install steps and the pre-drive check: [docs/phone-install.md](docs/phone-install.md).
@@ -1210,8 +1243,13 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **Drive diagnostics** (top bar, and behind More in the drive view; shell only): a log
   with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
   ticks received and the longest wait between them, route requests with their times,
-  spoken lines started and finished, and when the app went to the background. Counts and
-  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  spoken lines started and finished, when the app went to the background, and what each
+  drive check concluded: a tally of the outcomes in words ("yours was the fastest",
+  "another was faster, by less than the minimum saving", "waiting for the next check to
+  confirm it" ...) and the best saving another route offered, in whole seconds, from the
+  reroute engine's own like-for-like comparison of the alternative it weighed (0 when yours
+  was the fastest, unknown when it could not compare). Counts
+  and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
@@ -1468,6 +1506,14 @@ GitHub Pages serves static files only: it receives no trip data, and the app sen
 nothing to GitHub. Like any web server it sees the visitor's IP address when the page
 and its files (the bundled signal tiles among them) are loaded.
 
+**The offline shell** (#9, see Live drive) stores the app's own files in the browser's
+cache on the device: the page, scripts, styles, fonts, icons and the signal tiles used.
+It adds no network call and stores no Mapbox answer, no address with a query string (so
+no `access_token`) and nothing about a trip or a position. The browser builds have the
+public `pk.` token built into the app's script, so that script, kept for offline use,
+holds it as the browser's own cache already does; the iPhone shell registers no service
+worker.
+
 **Your location.** Outside a live drive (next paragraph) the device's location is read
 only when you press "Use my location": once, never on page load and never in the
 background. It becomes the origin
@@ -1506,8 +1552,9 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
-position, no address, no token. The last drive's text is also kept in the app's storage
+and timings (fixes, ticks, route requests, spoken lines, app in front or not, what each
+check concluded from a fixed list of words, and seconds saved): no position, no address,
+no road name, no token. The last drive's text is also kept in the app's storage
 on the phone, and a text that looked as if it held a position, a token or an address is
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own

@@ -318,6 +318,8 @@ describe('the route picked on the plan screen (#66)', () => {
     expect(s.state.switches).toEqual([])
     expect(s.spoken()).toEqual([])
     expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'route-unconfirmed' })
+    // Routes came back, but the side street's own time did not: what they save is unknown, never guessed (#175).
+    expect(s.state.lastDecision).toMatchObject({ routes: 2, savingSec: null })
     expect(s.state.engine.lostPolls).toBe(0)
     expect(s.view().offRoute).toBe(false)
   })
@@ -552,7 +554,7 @@ describe('a request that never answers (#29)', () => {
     expect(effects).toEqual([{ type: 'cancel-request' }])
     expect(s.state.request).toBeNull()
     expect(s.state.engine).toEqual({ ...before.engine, failedPolls: 1 })
-    expect(s.state.lastDecision).toMatchObject({ code: 'poll-failed', reason: `Staying: could not check for faster routes (${REQUEST_TIMED_OUT})` })
+    expect(s.state.lastDecision).toMatchObject({ code: 'poll-failed', reason: `Staying: could not check for faster routes (${REQUEST_TIMED_OUT})`, routes: null, savingSec: null })
     expect(s.view()).toMatchObject({ checking: false, statusLine: `Staying: could not check for faster routes (${REQUEST_TIMED_OUT})` })
     expect(s.state.route).toBe(before.route)
     expect(s.state.lastCheckedAtMs).toBe(before.lastCheckedAtMs)
@@ -678,6 +680,8 @@ describe('checks that change nothing', () => {
     expect(s.state.route).toBe(before.route)
     expect(s.state.engine).toEqual({ ...before.engine, failedPolls: 1 })
     expect(s.state.lastDecision).toMatchObject({ code: 'poll-failed', reason: 'Staying: could not check for faster routes (Could not reach Mapbox.)' })
+    // No answer, so nothing was seen: no route count and no saving, though the last answer's routes are still kept (#175).
+    expect(s.state.lastDecision).toMatchObject({ routes: null, savingSec: null })
     // The last good check is still the last one answered.
     expect(s.state.lastCheckedAtMs).toBe(before.lastCheckedAtMs)
     expect(s.state.candidates).toBe(before.candidates)
@@ -689,11 +693,19 @@ describe('checks that change nothing', () => {
     expect(s.spoken()).toEqual([])
   })
 
+  it('a check where the route driven is the fastest says so with a known saving of 0, for the diagnostics (#175)', () => {
+    const s = driving()
+    cruise(s, 130, (xM) => routesAt(xM, { A: 1300, B: 1420 }))
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'current-best', routes: 2, savingSec: 0 })
+  })
+
   it('staying is never spoken', () => {
     const s = driving()
     // A faster route that saves too little, at every check.
     cruise(s, 320, (xM) => routesAt(xM, { A: 1300, B: 1260 }))
     expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'saving-too-small' })
+    // The check's own count and like-for-like saving, for the drive diagnostics (#175).
+    expect(s.state.lastDecision).toMatchObject({ routes: 2, savingSec: 40 })
     expect(s.state.switches).toEqual([])
     expect(s.spoken()).toEqual([])
     expect(s.view().statusLine).toBe('Staying: faster route saves only 40 seconds')
@@ -812,7 +824,7 @@ describe('switching by itself', () => {
     expect(effects.map((e) => e.type)).toEqual(['follow-route', 'speak'])
     expect(s.spoken().at(-1)).toBe(SPOKEN.keptPrevious)
     expect(s.state).toMatchObject({ switchBanner: null, undo: null, switches: [], declinedSwitches: 1 })
-    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous' })
+    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous', routes: null, savingSec: null })
     // As if the switch had not been made: no cooldown, but B is declined for noReturnSec (600 s).
     expect(s.state.engine.lastSwitchAtSec).toBeNull()
     expect(s.state.engine.declined).toHaveLength(1)
@@ -1530,6 +1542,8 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.view().moment).toMatchObject({ stage: 'pending' })
     s.send({ type: 'keep-previous', nowMs: s.nowMs() })
     expect(s.view().moment).toMatchObject({ stage: 'kept' })
+    // No check ran for this decision: no route count and no saving, never 0 (#175).
+    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous', routes: null, savingSec: null })
     // C turns up at the next check: a different route, not the one turned down.
     cruise(s, 20, (xM) => routesAt(xM, { A: 1300, C: 1000 }))
     expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })

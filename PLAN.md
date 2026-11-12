@@ -183,7 +183,8 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    restriction has to list that host; no live position yet (the origin is one fix,
    there is no blue dot and no following); a dragged pin shows coordinates, not an
    address; the soft keyboard covers part of the suggestion list on a small screen
-   (not tried on a real iPhone); no "add to home screen" manifest or offline shell;
+   (not tried on a real iPhone); the "add to home screen" manifest and offline shell
+   are done (#9; a Home Screen web app still stops when the iPhone locks);
    Search Box results are for temporary use by Mapbox's terms, so storing saved
    places from them needs settling (README, Planning a trip). For the native app:
    places belong in app storage (a protected file or the keychain), location comes
@@ -217,7 +218,9 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     `docs/contracts/core-contract.json`; JSON Schemas for the signal tile, the bundle index, the
     stored place book and the native plugin payloads in `docs/contracts/schemas`.
     `tests/contracts.test.ts` fails on a change of shape without a bump, and checks the shipped
-    tiles, index and place book against the schemas and the schemas against the types. Open for
+    tiles, index and place book against the schemas and the schemas against the types. Since
+    #169 a shape change is described in `docs/contracts/changes/<branch>.md` instead of bumping
+    the version in every pull request; the version is bumped once per Swift port. Open for
     later: the Swift port matches no version yet (#33); a schema for `RouteCandidate` itself if a
     service ever reads it as JSON.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
