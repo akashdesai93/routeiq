@@ -9,6 +9,7 @@ import {
   type DriveProbeBudget,
   type LngLat,
   type RerouteOptions,
+  type ProbeOptions,
   type ProbeSkip,
   type RouteCandidate,
   type RouteSignal,
@@ -89,6 +90,8 @@ export interface FreshRoutesRequest {
     readonly minDelaySec?: number
     /** The drive's probe budget, for the delay gate and the back-off; minDelaySec, when given, wins. */
     readonly budget?: Partial<DriveProbeBudget>
+    /** Where the probes may aim (core ProbeOptions; freewayJams is the drive setting). Left out: DEFAULT_PROBE_OPTIONS. */
+    readonly options?: ProbeOptions
   } | null
   /** Called just before each request after the first; `probe` true for a side-street probe. */
   readonly onRequest?: (probe: boolean) => void
@@ -163,7 +166,7 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
       allowed: probes.allowed,
       rerouteOptions: probes.rerouteOptions,
       budget: { ...probes.budget, ...(probes.minDelaySec === undefined ? {} : { minDelaySec: probes.minDelaySec }) },
-    })
+    }, probes.options)
     const vias = plan.points
     probeSkipped = plan.skipped
     if (vias.length > 0) {
@@ -190,7 +193,7 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
               via,
               destination,
               token,
-              viaRadiusM: DEFAULT_PROBE_OPTIONS.viaRadiusM,
+              viaRadiusM: (probes.options ?? DEFAULT_PROBE_OPTIONS).viaRadiusM,
               originHeadingDeg: headingDeg ?? undefined,
               signal: limit.signal,
               ...(fetchImpl === undefined ? {} : { fetchImpl }),

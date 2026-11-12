@@ -1,4 +1,4 @@
-import { checkProbeAllowance, findCurrentRoute, plainCheckReserve, type RerouteOptions, type RouteCandidate } from '../core/index.ts'
+import { checkProbeAllowance, DEFAULT_PROBE_OPTIONS, findCurrentRoute, plainCheckReserve, type ProbeOptions, type RerouteOptions, type RouteCandidate } from '../core/index.ts'
 
 /**
  * The pure parts of the simulated drive (PLAN step 6): the simulated clock,
@@ -17,9 +17,19 @@ export interface DriveSettings {
   readonly pollIntervalSec: number
   /** The most Directions requests one simulated drive may make. After that it drives on without polling. */
   readonly maxRequests: number
+  /**
+   * The drive's side-street probes also aim beside a jam on a freeway (core
+   * ProbeOptions.freewayJams, #183). Left out: DEFAULT_PROBE_OPTIONS.freewayJams (off).
+   */
+  readonly freewayJams?: boolean
 }
 
-export const DEFAULT_DRIVE_SETTINGS: DriveSettings = { pollIntervalSec: 60, maxRequests: 60 }
+export const DEFAULT_DRIVE_SETTINGS: DriveSettings = { pollIntervalSec: 60, maxRequests: 60, freewayJams: DEFAULT_PROBE_OPTIONS.freewayJams }
+
+/** The probe options a drive with these settings uses: the defaults, with the freeway-jam switch from the settings. */
+export function driveProbeOptions(settings: DriveSettings): ProbeOptions {
+  return { ...DEFAULT_PROBE_OPTIONS, freewayJams: settings.freewayJams ?? DEFAULT_PROBE_OPTIONS.freewayJams }
+}
 
 /**
  * At most one Directions request per this many REAL milliseconds, whatever

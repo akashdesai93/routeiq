@@ -47,6 +47,8 @@ export interface Outside {
   closed?: Closure
   /** The road network has Parallel Street (S), a side street Mapbox never offers among its three. Default: no. */
   sideStreet?: boolean
+  /** Main Corridor's middle is a freeway, with Service Road (F) beside it, which Mapbox never offers. Default: no. */
+  freeway?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
   mapboxStatus?: number
   /** The map style to answer with. Default: a blank one (a background colour only). */
@@ -417,7 +419,7 @@ export class App {
     const url = new URL(request.url())
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue()
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
-    const { mapboxStatus, traffic = FREE_FLOW, closed = NO_CLOSURES, overpass, sideStreet = false } = this.outside
+    const { mapboxStatus, traffic = FREE_FLOW, closed = NO_CLOSURES, overpass, sideStreet = false, freeway = false } = this.outside
 
     if (url.hostname === 'api.mapbox.com') {
       if (mapboxStatus !== undefined) return route.fulfill({ status: mapboxStatus, json: { message: 'Not Authorized - Invalid Token' } })
@@ -431,7 +433,7 @@ export class App {
         const key = to.join(',')
         let world = this.worlds.get(key)
         if (world === undefined) {
-          world = new World(from, to, { sideStreet })
+          world = new World(from, to, { sideStreet, freeway })
           this.worlds.set(key, world)
         }
         // A side-street probe: one via with a `radiuses` entry of its own. The plan screen's

@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect, INDIAN_LAND, test, UPTOWN } from './harness.ts'
 import { FREE_FLOW, type Traffic } from './world/roads.ts'
-import { everyRoadSlow, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
+import { everyRoadSlow, freewayJam, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
 
 // Side-street probing on the plan screen (PLAN step 11b). Mapbox offers three
 // routes at most; the made-up network here also has Parallel Street (S), which
@@ -499,5 +499,96 @@ test('when the side streets keep losing, they never use up the checks before I a
   expect(total).toBeGreaterThan(twoMinutesBefore.requests)
   const spoken = await app.spoken()
   expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
+// Probes beside a freeway jam (#183, items 3 and 6), behind the "Probe beside freeway jams"
+// setting (core ProbeOptions.freewayJams), off by default until a phone drive. In the world with
+// a freeway, Main Corridor's middle is a freeway and Service Road (F) runs 800 m beside it;
+// Mapbox never offers Service Road. freewayJam: the freeway jams (4x) from 27 % to 40 % of the
+// trip, where Mapbox's three routes all run, from the drive's first check on.
+
+/** In the jam's stretch of the trip, and off the freeway's line: a via aimed beside the freeway jam. */
+const besideTheJam = (via: { f: number; side: number }) => via.f > 0.27 && via.f < 0.4 && Math.abs(via.side - 300) >= 500
+
+async function freewayJamsSetting(page: Page, on: boolean) {
+  await page.locator('details.drive-settings > summary').click()
+  const box = page.getByLabel('Probe beside freeway jams (off until a phone drive)')
+  await expect(box).not.toBeChecked()
+  if (on) await box.check()
+  await page.locator('details.drive-settings > summary').click()
+}
+
+test('when the freeway jams, it takes me off onto the road beside it and back on after', async ({ app, page }) => {
+  app.outside.freeway = true
+  app.outside.traffic = freewayJam()
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await freewayJamsSetting(page, true)
+  await app.snap('planned in free flow on the freeway, freeway-jam probes switched on')
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A', snapAtSec: [600] })
+  await app.snap('arrived by Service Road: the summary lists the switch')
+
+  expect(log.arrived).toBe(true)
+  // Mapbox never offered Service Road; only the drive's probes beside the freeway jam found it.
+  const offered = app.answers.filter((a) => !app.pathChecks.some((c) => c.n === a.n))
+  expect(offered.every((a) => a.routes.every((r) => r.name !== 'F'))).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const finds = driveProbes.filter((p) => p.road === 'F')
+  expect(finds.length).toBeGreaterThanOrEqual(2)
+  // Each find came from a via beside the jam on the freeway, and beat staying on the freeway by over 3 minutes.
+  for (const p of finds) {
+    expect(besideTheJam(p.via)).toBe(true)
+    const mainSec = app.answers.find((a) => a.n === p.forRequest)!.routes.find((r) => r.name === 'A')!.durationSec
+    expect(mainSec - p.durationSec!).toBeGreaterThan(180)
+  }
+  // One probe per check at most.
+  const perCheck = new Map<number, number>()
+  for (const p of driveProbes) perCheck.set(p.forRequest, (perCheck.get(p.forRequest) ?? 0) + 1)
+  expect(Math.max(...perCheck.values())).toBe(1)
+
+  // One switch, onto the road beside the freeway, after two checks in a row.
+  expect(log.statusLines.some((l) => /^Staying: faster route saves [\d.]+ minutes, confirming, check 1 of 2$/.test(l.text))).toBe(true)
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switching to a faster route via side streets')
+  const spoken = await app.spoken()
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toHaveLength(1)
+  expect(switches[0]).toMatch(/^Switching to a faster route via side streets\. Saves [\d.]+ minutes\. Turn in [\d.]+ miles\.$/)
+  expect(Number(/Saves ([\d.]+) minutes/.exec(switches[0]!)![1])).toBeGreaterThanOrEqual(3)
+  // Off the freeway onto Service Road, and back onto Main Corridor after the jam.
+  const after = spoken.slice(spoken.indexOf(switches[0]!) + 1)
+  const ontoService = after.findIndex((line) => /^Turn (left|right) onto Service Road\.$/.test(line))
+  expect(ontoService).toBeGreaterThanOrEqual(0)
+  expect(after.slice(ontoService + 1).some((line) => /^Turn (left|right) onto Main Corridor\.$/.test(line))).toBe(true)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+})
+
+test('with the freeway-jam probes off, a freeway jam sends no probe beside the freeway', async ({ app, page }) => {
+  // The same jam, the setting left at its default (off): the drive is as before #183's items 3 and 6.
+  app.outside.freeway = true
+  app.outside.traffic = freewayJam()
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await freewayJamsSetting(page, false)
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A', snapAtSec: [300] })
+  await app.snap('arrived on Main Corridor: no probe beside the freeway')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  // The delay over the typical time still opened the gate, so probes went out, as on the desk
+  // drive of #183: at the surface stretches, where no road is, never beside the freeway jam.
+  expect(driveProbes.length).toBeGreaterThanOrEqual(1)
+  expect(driveProbes.filter((p) => besideTheJam(p.via))).toEqual([])
+  expect(driveProbes.filter((p) => p.road === 'F')).toEqual([])
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.some((line) => line.includes('Service Road'))).toBe(false)
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })

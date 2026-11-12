@@ -1040,6 +1040,28 @@ lead distance, the cooldown, no return. No threshold changed.
   never held back, not even where nothing new is left to probe beside. An unknown delay
   re-arms nothing. A desk drive on a real corridor had sent 18 probes that all lost by 4 to
   6 minutes.
+- **Beside a freeway jam (#183, off by default).** With "Probe beside freeway jams" ticked in
+  the Reroute settings (`freewayJams`; the drive settings carry it to the live and the
+  simulated drive alike, it is not stored and a reload turns it off again), a jam on the
+  freeway is probed too. A freeway jam is a congested run (as above: `heavy` or `severe`,
+  runs `congestionGapM` apart joined) of at least `minFreewayJamM` (1000 m) inside one of the
+  route's freeway spans, starting at least `endpointClearanceM` (1 km) from the car and from
+  the destination. It opens the probe gate the way a jam on a surface stretch does
+  (`minDelaySec` still holds besides). The probe aims beside the middle of the jam, square
+  to the freeway, on each side, at `freewayOffsetsM` (800 m, then 1500 m: frontage roads and
+  parallel arterials sit further out than side streets); the via radius stays 250 m, so a
+  point with no road near it comes back NoSegment and costs only that request. Directions
+  then plans the way off before the jam, the road beside it and back on after; RouteIQ does
+  not pick the exit. Freeway jams come before surface stretches, the longest first, both of
+  a jam's sides (more room first) before the next; the checks take them in turn as above
+  (`round`, `keep` first). Judged exactly as every probe: `decideReroute` unchanged (2
+  minutes and 5 % saved, two checks in a row, the lead distance, the freeway lead, like for
+  like against the path check), no new request per check, the same caps and reserve. Item 6
+  of #183 (Mapbox answering a single route for the second half of a drive) needs no rule of
+  its own: these probes are then the only alternatives, under the same rules. The desk
+  drive that found it had about 2 km of heavy traffic ahead, all on freeway, and probes
+  aimed at surface points that were not the problem. Off (the default), nothing changes.
+  The plan screen's probes do not use it.
 - **Said as such.** A switch onto a probed route says "Switching to a faster route via side
   streets. Saves 4 minutes. Turn in 1.1 miles.", and the banner shows that line word for
   word; the simulated drive's log adds "(via side streets)".
@@ -1101,6 +1123,9 @@ durations are carried but not used for the choice yet.
 | `congestedLevels` | heavy, severe | Mapbox congestion levels that count as a jam to aim at |
 | `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
 | `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
+| `freewayJams` | false | Probe beside a jam on a freeway too (#183); off until a phone drive shows it helps. The drive's "Probe beside freeway jams" setting |
+| `minFreewayJamM` | 1000 m | A congested run inside a freeway span counts as a freeway jam from this long (`freewayJams` only) |
+| `freewayOffsetsM` | 800, 1500 m | Distances beside a freeway jam tried per side, nearest first (`freewayJams` only) |
 
 ### The plan and route screens (#85)
 

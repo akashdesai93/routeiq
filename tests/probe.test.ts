@@ -663,3 +663,108 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
     })
   })
 })
+
+describe('probes beside a freeway jam (ProbeOptions.freewayJams, #183 items 3 and 6)', () => {
+  const ON = { ...DEFAULT_PROBE_OPTIONS, freewayJams: true }
+  /** `route` with per-segment congestion: a segment whose middle lies in one of `jams` (meters along it) is at `level`, every other one is low. */
+  const withJams = (route: RouteCandidate, jams: readonly (readonly [number, number])[], level: CongestionLevel = 'heavy'): RouteCandidate => {
+    const along = alongRouteM(route.geometry)
+    const congestion = along.slice(1).map((end, i): CongestionLevel => {
+      const mid = (along[i]! + end) / 2
+      return jams.some(([a, b]) => mid > a && mid < b) ? level : 'low'
+    })
+    return { ...route, segmentTraffic: { congestion, durationSec: null } }
+  }
+  /** A (20 km east) with a freeway from 6 to 14 km, jammed from 8 to 10 km. */
+  const freewayA = (jams: readonly (readonly [number, number])[] = [[8000, 10000]], spans: [number, number][] = [[6000, 14000]]) =>
+    withJams(world('A', 1200, { limitedAccessSpansM: spans }), jams)
+  const freewayPoints = (points: readonly ViaPoint[]) => points.filter((p) => p.freeway === true)
+
+  it('is off by default, with documented distances', () => {
+    expect(DEFAULT_PROBE_OPTIONS.freewayJams).toBe(false)
+    expect(DEFAULT_PROBE_OPTIONS.minFreewayJamM).toBe(1000)
+    expect(DEFAULT_PROBE_OPTIONS.freewayOffsetsM).toEqual([800, 1500])
+  })
+
+  it('off: a freeway jam changes nothing, the points are those of the same route with no traffic', () => {
+    const jammed = freewayA()
+    const plain = world('A', 1200, { limitedAccessSpansM: [[6000, 14000]] })
+    const all = { ...DEFAULT_PROBE_OPTIONS, maxPoints: 10 }
+    expect(placed(selectViaPoints([jammed], all))).toEqual(placed(selectViaPoints([plain], all)))
+    expect(freewayPoints(selectViaPoints([jammed], all))).toEqual([])
+  })
+
+  it('on: the middle of the jam, square to the freeway, 800 m out on each side, before any surface stretch', () => {
+    const jammed = freewayA()
+    const points = selectViaPoints([jammed], { ...ON, maxPoints: 10 })
+    expect(points.slice(0, 2).every((p) => p.freeway === true)).toBe(true)
+    expect(freewayPoints(points)).toHaveLength(2)
+    for (const p of points.slice(0, 2)) {
+      expect(p.atDistanceM).toBeCloseTo(9000, 0)
+      expect(p.offsetM).toBe(800)
+      expect(p.targetSpanM[0]).toBeCloseTo(6000, 0)
+      expect(p.targetSpanM[1]).toBeCloseTo(14000, 0)
+      expect(p.congestedSpanM![0]).toBeCloseTo(8000, 0)
+      expect(p.congestedSpanM![1]).toBeCloseTo(10000, 0)
+      expect(p.reason).toContain('2.0 km jam on the freeway (8.0 km to 10.0 km from the start)')
+    }
+    expect(distanceM(points.find((p) => p.freeway === true && p.side === 'left')!.position, at(9000, 800))).toBeLessThan(2)
+    expect(distanceM(points.find((p) => p.freeway === true && p.side === 'right')!.position, at(9000, -800))).toBeLessThan(2)
+    // Then the surface stretches, as with the option off.
+    expect(placed(points.slice(2))).toEqual(placed(selectViaPoints([jammed], { ...DEFAULT_PROBE_OPTIONS, maxPoints: 8 })))
+  })
+
+  it('on: 1500 m out where 800 m is too close to a known route', () => {
+    // B runs 1 km north and C 1 km south: 800 m out is 200 m from them, under clearOfRoutesM (250 m).
+    const candidates = [freewayA(), world('B', 1300), world('C', 1250)]
+    const points = freewayPoints(selectViaPoints(candidates, { ...ON, maxPoints: 10 }))
+    expect(points.map((p) => p.offsetM)).toEqual([1500, 1500])
+    for (const p of points) for (const c of candidates) expect(lineDistanceM(p.position, c.geometry)).toBeGreaterThanOrEqual(DEFAULT_PROBE_OPTIONS.clearOfRoutesM)
+  })
+
+  // The test road has a vertex every 250 m, so the jams below are whole segments.
+  it('on: a jam must be at least 1000 m long', () => {
+    expect(freewayPoints(selectViaPoints([freewayA([[8000, 8750]])], { ...ON, maxPoints: 10 }))).toEqual([])
+    expect(freewayPoints(selectViaPoints([freewayA([[8000, 9000]])], { ...ON, maxPoints: 10 }))).toHaveLength(2)
+    // Runs up to congestionGapM apart are one jam: two of 500 m, 250 m apart, are one of 1250 m only with a gap allowed of over 250 m.
+    const twoRuns = freewayA([[8000, 8500], [8750, 9250]])
+    expect(freewayPoints(selectViaPoints([twoRuns], { ...ON, maxPoints: 10 }))).toEqual([])
+    expect(freewayPoints(selectViaPoints([twoRuns], { ...ON, maxPoints: 10, congestionGapM: 300 }))).toHaveLength(2)
+    // Only the part inside the freeway counts: 1.5 km of jam, 0.75 km of it on the freeway.
+    expect(freewayPoints(selectViaPoints([freewayA([[5250, 6750]])], { ...ON, maxPoints: 10 }))).toEqual([])
+  })
+
+  it('on: a jam that starts within the endpoint clearance of the start (the car) or of the end does not count', () => {
+    const spans: [number, number][] = [[0, 20_000]]
+    expect(freewayPoints(selectViaPoints([freewayA([[750, 3000]], spans)], { ...ON, maxPoints: 10 }))).toEqual([])
+    expect(freewayPoints(selectViaPoints([freewayA([[1000, 3000]], spans)], { ...ON, maxPoints: 10 }))).toHaveLength(2)
+    const short = { ...ON, maxPoints: 10, minFreewayJamM: 500 }
+    expect(freewayPoints(selectViaPoints([freewayA([[19_250, 20_000]], spans)], short))).toEqual([])
+    expect(freewayPoints(selectViaPoints([freewayA([[18_750, 20_000]], spans)], short)).map((p) => p.side).sort()).toEqual(['left', 'right'])
+  })
+
+  it('on: the longest jam first, both its sides before the next one', () => {
+    const jammed = freewayA([[3000, 4250], [8000, 10_000]], [[2000, 5000], [6000, 14_000]])
+    const points = freewayPoints(selectViaPoints([jammed], { ...ON, maxPoints: 10 }))
+    expect(points.map((p) => Math.round(p.atDistanceM))).toEqual([9000, 9000, 3625, 3625])
+  })
+
+  it('on: unknown road kinds are no freeway, and unknown congestion is no jam', () => {
+    expect(freewayPoints(selectViaPoints([{ ...freewayA(), limitedAccessSpansM: null }], { ...ON, maxPoints: 10 }))).toEqual([])
+    const unknown = withJams(world('A', 1200, { limitedAccessSpansM: [[6000, 14000]] }), [[8000, 10000]], 'unknown')
+    expect(freewayPoints(selectViaPoints([unknown], { ...ON, maxPoints: 10 }))).toEqual([])
+  })
+
+  it('during a drive, a freeway jam opens the probe gate the way a surface jam does', () => {
+    // The car 1 km along A, on a freeway all the way, on time (no delay over typical): only a jam can open the gate.
+    const here = at(1000, 0)
+    const onTime = withJams(candidate('A', here, 1450, { typicalDurationSec: 1450, limitedAccessSpansM: [[0, 30_000]] })!, [[6000, 9000]])
+    const input = { route: world('A', 1700), alongM: 1000, fresh: [onTime, candidate('B', here, 1600)!], memory: INITIAL_CHECK_PROBES, allowed: 1 }
+    expect(checkProbePlan(input)).toEqual({ points: [], skipped: 'not-held-up' })
+    const on = checkProbePlan(input, ON)
+    expect(on.skipped).toBeNull()
+    expect(on.points).toHaveLength(1)
+    // Beside the middle of the jam (7.5 km along from the car: 8.5 km east), on one side or the other.
+    expect(Math.min(distanceM(on.points[0]!, at(8500, 800)), distanceM(on.points[0]!, at(8500, -800)), distanceM(on.points[0]!, at(8500, 1500)), distanceM(on.points[0]!, at(8500, -1500)))).toBeLessThan(5)
+  })
+})

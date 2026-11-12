@@ -308,6 +308,20 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       out of checks without any probe (a cost decision for the owner); back-off after
       probes that keep losing, and the reason a probe was skipped in the diagnostics,
       follow in their own PR.
+      Probes beside a freeway jam (#183, items 3 and 6), built behind
+      `ProbeOptions.freewayJams`, off by default (owner decision (a)): a congested run of at
+      least `minFreewayJamM` (1000 m) inside a freeway span, starting at least the endpoint
+      clearance from the car and the destination, opens the gate and is probed beside its
+      middle at `freewayOffsetsM` (800, 1500 m), before any surface stretch; judged by the
+      unchanged reroute rules, no new request per check. The "Probe beside freeway jams"
+      drive setting switches it on for a run. e2e: "when the freeway jams, it takes me off
+      onto the road beside it and back on after" and "with the freeway-jam probes off, a
+      freeway jam sends no probe beside the freeway" (the made-up world's freeway and
+      Service Road). Open for later: turn it on by default after a phone drive; the Swift
+      port of the rule (`Probe.swift`'s `ProbeOptions` and `selectViaPoints`); the plan
+      screen's probes do not use it; a jam that starts within the endpoint clearance of the
+      car (the car already in it) is not probed beside, though an exit inside the jam might
+      still help.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

@@ -169,6 +169,14 @@ export function DrivePanel({ sim, showWhatIf = false }: DrivePanelProps) {
             value={settings.maxRequests}
             onChange={(n) => sim.setSettings({ ...settings, maxRequests: Math.round(n) })}
           />
+          <label className="setting">
+            <span>Probe beside freeway jams (off until a phone drive)</span>
+            <input
+              type="checkbox"
+              checked={settings.freewayJams === true}
+              onChange={(e) => sim.setSettings({ ...settings, freewayJams: e.target.checked })}
+            />
+          </label>
           {THRESHOLDS.map(({ key, label, scale = 1 }) => (
             <NumberSetting
               key={key}

@@ -84,3 +84,16 @@ export const JAM_ONLY_THE_EAST_LOOP_MISSES: Traffic = (route, at, n) => {
 export function everyRoadSlow(factor = 1.6, fromRequest = 2): Traffic {
   return (route, at, n) => FREE_FLOW(route, at, n) * (n >= fromRequest ? factor : 1)
 }
+
+/**
+ * In the world with a freeway (`{ freeway: true }`): a jam on the freeway, from 27 % to 40 % of
+ * the trip, where Main Corridor, East Loop and West Loop all run, `factor` times the usual pace
+ * from request `fromRequest` on. Mapbox's three routes all sit in it and Main Corridor stays the
+ * fastest of them. Service Road, beside the freeway, misses it: at 4x it saves about 4.5 minutes.
+ */
+export function freewayJam(factor = 4, fromRequest = 2): Traffic {
+  return (route, at, n) => {
+    const jammed = n >= fromRequest && Math.abs(at.side - 300) < 50 && at.f > 0.27 && at.f < 0.4
+    return FREE_FLOW(route, at, n) * (jammed ? factor : 1)
+  }
+}

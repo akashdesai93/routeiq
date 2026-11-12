@@ -27,6 +27,7 @@ import {
   cruiseSpeedMps,
   simulatedProbeAllowance,
   DEFAULT_DRIVE_SETTINGS,
+  driveProbeOptions,
   DRIVE_START,
   MIN_REQUEST_GAP_MS,
   pollGate,
@@ -189,7 +190,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       signal: controller.signal,
       whatIf: { route: run.route, alongM: run.clock.alongM, delaySec },
       baseline: roomForBaseline ? { route: run.route, alongM: run.clock.alongM, rerouteOptions } : null,
-      probes: probesAllowed > 0 ? { route: run.route, alongM: run.clock.alongM, allowed: probesAllowed, memory: run.probes, rerouteOptions } : null,
+      probes: probesAllowed > 0 ? { route: run.route, alongM: run.clock.alongM, allowed: probesAllowed, memory: run.probes, rerouteOptions, options: driveProbeOptions(settings) } : null,
       // Every request is counted as it goes out, so a check that is stopped still counts what it made.
       onRequest: (probe) => {
         run.clock = { ...run.clock, requestsUsed: run.clock.requestsUsed + 1 }

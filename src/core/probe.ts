@@ -85,6 +85,22 @@ export interface ProbeOptions {
    * length like a route with no traffic data.
    */
   readonly minCongestedM: number
+  /**
+   * Probe beside a jam on a freeway too (#183, items 3 and 6). Off by default: the owner turns it
+   * on after a phone drive. When false nothing changes; when true, a freeway jam (a congested
+   * run, joined across congestionGapM, of at least minFreewayJamM inside one freeway span of the
+   * route, starting at least endpointClearanceM from the start and from the end) is probed at
+   * its middle on both sides, at freewayOffsetsM, before any surface stretch. Directions then
+   * plans "leave before the jam, the road beside it, rejoin after"; the exit is not picked here.
+   */
+  readonly freewayJams: boolean
+  /** A congested run inside a freeway span counts as a freeway jam from this long, in meters (freewayJams only). */
+  readonly minFreewayJamM: number
+  /**
+   * Perpendicular distances beside a freeway jam, in meters, nearest first (freewayJams only).
+   * Further out than offsetsM: frontage roads and parallel arterials sit further from a freeway.
+   */
+  readonly freewayOffsetsM: readonly number[]
 }
 
 export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
@@ -100,6 +116,9 @@ export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
   congestedLevels: ['heavy', 'severe'],
   congestionGapM: 200,
   minCongestedM: 300,
+  freewayJams: false,
+  minFreewayJamM: 1000,
+  freewayOffsetsM: [800, 1500],
 }
 
 /** Which side of the base route, facing the direction of travel. */
@@ -125,6 +144,11 @@ export interface ViaPoint {
    * point was placed without traffic data (the middle of the stretch).
    */
   readonly congestedSpanM: DistanceSpanM | null
+  /**
+   * True when the point is beside a jam on a freeway (ProbeOptions.freewayJams): targetSpanM is
+   * then the freeway span and congestedSpanM the jam. Left out for a surface-street stretch.
+   */
+  readonly freeway?: true
 }
 
 const usable = (c: RouteCandidate) =>
@@ -235,6 +259,11 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`
  * farther from the other candidates comes first, then left; the first side of
  * every stretch comes before any second side, so a small budget spreads out.
  *
+ * With `freewayJams` on, freeway jams come first (see ProbeOptions.freewayJams):
+ * the longest first, each probed at its middle at `freewayOffsetsM`, both of
+ * its sides (more room first) before the next jam and before any surface
+ * stretch. With it off the output is exactly as without it.
+ *
  * `base`, when given and usable, is the route to probe beside instead of the
  * fastest (a drive probes beside the route being driven: see checkProbes).
  * Every candidate, `base` included, still counts as a known route to keep
@@ -273,10 +302,10 @@ export function selectViaPoints(
   // Only usable lines measure room: one NaN coordinate would make every room NaN and hide the side order.
   const others = candidates.filter((c) => c !== base && usable(c))
   const known = candidates.includes(base) ? candidates : [...candidates, base]
-  const offsets = [...options.offsetsM].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
+  const offsets = positive(options.offsetsM)
 
-  const rounds: ViaPoint[][] = [[], []]
-  for (const { span, jam } of stretches) {
+  /** The points beside the middle of `aim`, one per side (the nearest offset clear of every route), more room first. */
+  const beside = (span: DistanceSpanM, jam: DistanceSpanM | null, offsetsM: readonly number[], freeway: boolean): ViaPoint[] => {
     const aim = jam ?? span
     const midM = (aim[0] + aim[1]) / 2
     const here = pointAtDistance(base.geometry, midM)!
@@ -291,14 +320,16 @@ export function selectViaPoints(
           (180 / Math.PI)
     const found: { point: ViaPoint; roomM: number }[] = []
     for (const side of ['left', 'right'] as const) {
-      for (const offsetM of offsets) {
+      for (const offsetM of offsetsM) {
         const position = offsetPoint(mid, heading, side, offsetM)
         if (!isValidLngLat(position)) continue
         if (distanceM(position, origin) < clear || distanceM(position, destination) < clear) continue
         if (known.some((c) => distanceToLineM(position, c.geometry) < options.clearOfRoutesM)) continue
         const roomM = Math.min(...others.map((c) => distanceToLineM(position, c.geometry)))
-        const reason =
-          jam === null
+        const reason = freeway
+          ? `${offsetM} m ${side} of the route's ${km(aim[1] - aim[0])} jam on the freeway ` +
+            `(${km(aim[0])} to ${km(aim[1])} from the start)`
+          : jam === null
             ? `${offsetM} m ${side} of the fastest route's ${km(span[1] - span[0])} surface-street stretch ` +
               `(${km(span[0])} to ${km(span[1])} from the start)`
             : `${offsetM} m ${side} of the fastest route's ${km(jam[1] - jam[0])} jam on surface street ` +
@@ -313,6 +344,7 @@ export function selectViaPoints(
             side,
             offsetM,
             congestedSpanM: jam,
+            ...(freeway ? { freeway: true as const } : {}),
           },
           roomM,
         })
@@ -320,9 +352,47 @@ export function selectViaPoints(
       }
     }
     // More room first; equal (or unknown) room keeps left before right.
-    found.sort((a, b) => (b.roomM > a.roomM ? 1 : b.roomM < a.roomM ? -1 : 0)).forEach(({ point }, i) => rounds[i]!.push(point))
+    return found.sort((a, b) => (b.roomM > a.roomM ? 1 : b.roomM < a.roomM ? -1 : 0)).map(({ point }) => point)
   }
-  return rounds.flat().slice(0, options.maxPoints)
+
+  // Freeway jams first (only with freewayJams on): both sides of the longest, then the next.
+  const freewayPoints = options.freewayJams === true ? freewayJams(base, along, runs, options).flatMap(({ span, jam }) => beside(span, jam, positive(options.freewayOffsetsM), true)) : []
+  const rounds: ViaPoint[][] = [[], []]
+  for (const { span, jam } of stretches) beside(span, jam, offsets, false).forEach((point, i) => rounds[i]!.push(point))
+  return [...freewayPoints, ...rounds.flat()].slice(0, options.maxPoints)
+}
+
+/** Finite positive distances, nearest first. */
+const positive = (values: readonly number[]) => [...values].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
+
+/**
+ * The route's freeway jams (ProbeOptions.freewayJams): each congested run (`runs`, joined across
+ * congestionGapM) clipped to a freeway span, at least minFreewayJamM long, starting at least
+ * endpointClearanceM from the route's start (the car, during a drive) and from its end. The
+ * longest first; equal ones go to the earlier. None when the route's road kinds are unknown.
+ */
+function freewayJams(
+  base: RouteCandidate,
+  along: readonly number[],
+  runs: readonly DistanceSpanM[],
+  options: ProbeOptions,
+): { span: DistanceSpanM; jam: DistanceSpanM }[] {
+  const lengthM = along.at(-1)!
+  const clear = options.endpointClearanceM
+  const out: { span: DistanceSpanM; jam: DistanceSpanM }[] = []
+  // Overlapping or touching spans are one freeway, so a jam across them is one jam; empty, reversed or NaN ones are ignored.
+  const spans: DistanceSpanM[] = []
+  for (const [a, b] of (base.limitedAccessSpansM ?? []).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+    const last = spans.at(-1)
+    if (last !== undefined && a <= last[1]) spans[spans.length - 1] = [last[0], Math.max(last[1], b)]
+    else spans.push([a, b])
+  }
+  for (const span of spans) {
+    for (const jam of within(runs, span)) {
+      if (spanLength(jam) >= options.minFreewayJamM && jam[0] >= clear && jam[0] <= lengthM - clear) out.push({ span, jam })
+    }
+  }
+  return out.sort((x, y) => spanLength(y.jam) - spanLength(x.jam) || x.jam[0] - y.jam[0])
 }
 
 /**
