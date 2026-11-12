@@ -120,7 +120,7 @@ export function DrivePanel({ sim, showWhatIf = false }: DrivePanelProps) {
           </p>
         )}
 
-        {showWhatIf && (
+        {import.meta.env.DEV && showWhatIf && (
           <div className="whatif">
             <strong>What-if (simulated, not real traffic)</strong>
             <div className="drive-row">

@@ -57,6 +57,9 @@ jobs:
           filters: |
             native-core:
               - 'native/RouteIQCore/**'
+              # The Swift port's ContractVersionTests reads the web app's contract snapshot: a version
+              # bump there must run the Swift tests on the pull request, not first on main.
+              - 'docs/contracts/**'
               - 'native/scripts/**'
               - 'public/seed/osm-signals/**'
               - 'tests/fixtures/**'

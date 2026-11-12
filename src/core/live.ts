@@ -1,4 +1,5 @@
-import { isValidLngLat, lineFrom } from './geo.ts'
+import { formatDuration } from './format.ts'
+import { distanceM, isValidLngLat, lineFrom } from './geo.ts'
 import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import {
   checkProbeAllowance,
@@ -17,6 +18,7 @@ import {
   spokenDistance,
   spokenDuration,
   type RerouteCode,
+  type RerouteDecision,
   type RerouteOptions,
   type RerouteState,
 } from './reroute.ts'
@@ -74,8 +76,16 @@ export interface LiveOptions {
   readonly offRouteReserve: number
   /** No check is sent from a position older than this, in seconds (a tunnel): it would be asked from the wrong place. */
   readonly maxFixAgeSec: number
-  /** How long the "switched route" banner and its "Keep previous route" button stay, in seconds. */
+  /** How long the "switched route" banner and its "Keep my route" button stay, in seconds. */
   readonly switchBannerSec: number
+  /**
+   * While the switch banner shows, the turn card holds the distance the spoken line named only
+   * when its next turn is that turn-off: a maneuver within this many meters of it, in meters.
+   * A turn-off seen by its maneuver is that maneuver's own point; one seen by the routes' split
+   * is a point on the line near it. Also how near a new offer's turn-off must be to one turned
+   * down for the offer to read "Still faster".
+   */
+  readonly heldTurnMatchM: number
   /** A spell in the background shorter than this is not mentioned, in seconds. */
   readonly hiddenNoteMinSec: number
   /** How long the "was paused in the background" note stays, in seconds. */
@@ -104,6 +114,7 @@ export const DEFAULT_LIVE_OPTIONS: LiveOptions = {
   offRouteReserve: 5,
   maxFixAgeSec: 10,
   switchBannerSec: 8,
+  heldTurnMatchM: 50,
   hiddenNoteMinSec: 5,
   pausedNoteSec: 15,
   replanGapSec: 30,
@@ -152,7 +163,7 @@ export interface LiveSummary {
   readonly tripSec: number
   /** The route changes that were made and kept, in order. */
   readonly switches: readonly LiveSwitch[]
-  /** Switches the driver turned down with "Keep previous route". */
+  /** Switches the driver turned down with "Keep my route". */
   readonly declined: number
   readonly requestsUsed: number
 }
@@ -217,9 +228,44 @@ export interface LiveState {
   readonly eta: { readonly durationSec: number; readonly remainingM: number } | null
   /** Where a switch that is waiting (pending) or was just made leaves the old route. */
   readonly turn: { readonly at: LngLat; readonly pending: boolean } | null
-  /** Shown for a few seconds after a switch. */
-  readonly switchBanner: { readonly untilMs: number; readonly text: string; readonly canKeep: boolean } | null
-  /** What "Keep previous route" goes back to, while the banner is up. */
+  /**
+   * Shown for a few seconds after a switch (the confirmed stage of the switch
+   * moment, #84). `text` is the line spoken for it, word for word. The
+   * figures are those of the moment it was made (`atMs`): `afterSec` the new
+   * route's travel time, `beforeSec` the old one's (the new one plus the
+   * saving the engine measured, so the two differ by exactly what is said;
+   * null when no saving was measured), and `turnInM` the turn-off the spoken
+   * line names (null when it names none).
+   */
+  readonly switchBanner: {
+    readonly untilMs: number
+    readonly text: string
+    readonly canKeep: boolean
+    readonly atMs: number
+    readonly beforeSec: number | null
+    readonly afterSec: number
+    readonly turnInM: number | null
+  } | null
+  /**
+   * A faster route the engine is confirming (its 'confirming' or 'cooldown'
+   * answer): the pending stage of the switch moment (#84), which "Keep my
+   * route" can turn down too. `savingSec` against the route being driven
+   * (null: unknown); `lightsDelta` its light count minus the current route's
+   * (negative: fewer), compared with the route being driven as the same
+   * answer gave it, null unless both counts are full; `again` when it turns
+   * off where a route the driver turned down did. Null otherwise.
+   */
+  readonly offer: {
+    readonly savingSec: number | null
+    readonly lightsDelta: number | null
+    readonly turnInM: number
+    readonly again: boolean
+  } | null
+  /** Shown for a few seconds after "Keep my route": the calm banner of the declined stage (#43). */
+  readonly kept: { readonly untilMs: number; readonly noReturnSec: number } | null
+  /** Where the routes the driver turned down on this drive turn off: a new offer that turns off there is "still faster". */
+  readonly declinedTurns: readonly LngLat[]
+  /** What "Keep my route" goes back to, while the banner is up. */
   readonly undo: {
     readonly route: RouteCandidate
     readonly alongM: number
@@ -265,6 +311,9 @@ export const LIVE_IDLE: LiveState = {
   eta: null,
   turn: null,
   switchBanner: null,
+  offer: null,
+  kept: null,
+  declinedTurns: [],
   undo: null,
   switches: [],
   declinedSwitches: 0,
@@ -321,7 +370,7 @@ export type LiveEvent =
   | { readonly type: 'tick'; readonly nowMs: number }
   | { readonly type: 'visibility'; readonly nowMs: number; readonly hidden: boolean }
   | { readonly type: 'wake-lock'; readonly result: 'held' | 'unavailable' | 'released' }
-  /** The driver pressed "Keep previous route". */
+  /** The driver pressed "Keep my route": turns down the switch just made, or the faster route still being confirmed. */
   | { readonly type: 'keep-previous'; readonly nowMs: number }
   | { readonly type: 'mute'; readonly muted: boolean }
   /** The End tap, or the drive view being closed. */
@@ -419,6 +468,7 @@ function resolve(options: Partial<LiveOptions>): LiveOptions {
     offRouteReserve: Math.round(n(options.offRouteReserve, d.offRouteReserve)),
     maxFixAgeSec: n(options.maxFixAgeSec, d.maxFixAgeSec),
     switchBannerSec: n(options.switchBannerSec, d.switchBannerSec),
+    heldTurnMatchM: n(options.heldTurnMatchM, d.heldTurnMatchM),
     hiddenNoteMinSec: n(options.hiddenNoteMinSec, d.hiddenNoteMinSec),
     pausedNoteSec: n(options.pausedNoteSec, d.pausedNoteSec),
     replanGapSec: Math.max(minRequestGapSec, n(options.replanGapSec, d.replanGapSec)),
@@ -479,7 +529,7 @@ export function livePollGate(state: LiveState, nowMs: number, options: Partial<L
 const STOP_EFFECTS: readonly LiveEffect[] = [{ type: 'cancel-request' }, { type: 'stop-watching' }, { type: 'release-wake-lock' }]
 
 function fail(state: LiveState, message: string): LiveStep {
-  return { state: { ...state, status: 'failed', message, request: null, switchBanner: null, undo: null }, effects: STOP_EFFECTS }
+  return { state: { ...state, status: 'failed', message, request: null, switchBanner: null, offer: null, kept: null, undo: null }, effects: STOP_EFFECTS }
 }
 
 /** A route with a line to drive. */
@@ -558,7 +608,7 @@ function arrive(state: LiveState, nowMs: number): LiveStep {
     requestsUsed: state.requestsUsed,
   }
   return {
-    state: { ...state, status: 'arrived', summary, request: null, turn: null, switchBanner: null, undo: null, pausedNote: null },
+    state: { ...state, status: 'arrived', summary, request: null, turn: null, switchBanner: null, offer: null, kept: null, undo: null, pausedNote: null },
     effects: [...STOP_EFFECTS, { type: 'speak', line: { text: arrivalLine(summary), priority: 'urgent' } }],
   }
 }
@@ -575,7 +625,7 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   if (tracking.offRoute) {
     const firstWord = !next.offRouteNotified
     if (firstWord) {
-      next = { ...next, offRouteNotified: true, switchBanner: null, undo: null }
+      next = { ...next, offRouteNotified: true, switchBanner: null, offer: null, kept: null, undo: null }
       // Must be heard: the "New route" line that follows within a second or two would
       // otherwise take its place in the queue, and the driver would never hear why.
       effects.push({ type: 'speak', line: { text: SPOKEN.offRoute, priority: 'urgent', mustHear: true } })
@@ -607,6 +657,28 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
     }
   }
   return maybePoll({ state: next, effects }, nowMs, opts)
+}
+
+/**
+ * How many more lights `offered` has than `current` (negative: fewer). Null
+ * unless both counts are full: a partial or unknown count is never compared
+ * (unknown is never zero).
+ */
+function lightsDelta(current: RouteCandidate | undefined, offered: RouteCandidate | undefined): number | null {
+  if (current === undefined || offered === undefined || current.signalCoverage !== 'full' || offered.signalCoverage !== 'full') return null
+  if (current.signalCount === null || offered.signalCount === null) return null
+  return offered.signalCount - current.signalCount
+}
+
+/**
+ * The route being driven as this answer gave it (the engine's `current`: one
+ * of the fresh routes, or the answer for its own path), so its light count
+ * covers the same stretch, from the car on, as an offer's. Undefined: not
+ * among them.
+ */
+function freshCurrent(current: RerouteDecision['current'], answered: readonly RouteCandidate[]): RouteCandidate | undefined {
+  if (current === null) return undefined
+  return answered.find((c) => c.durationSec === current.durationSec && c.distanceM === current.distanceM)
 }
 
 /**
@@ -743,6 +815,20 @@ function checked(
         ...next,
         eta: current === null ? next.eta : { durationSec: current.durationSec, remainingM: current.distanceM },
         turn: decision.considered !== null && pending ? { at: decision.considered.turnAt, pending: true } : null,
+        offer:
+          decision.considered !== null && pending
+            ? {
+                savingSec: decision.considered.savingSec,
+                lightsDelta: lightsDelta(
+                  freshCurrent(current, [...routes, ...(baseline ?? [])]),
+                  routes.find((c) => c.id === decision.considered!.routeId),
+                ),
+                turnInM: decision.considered.turnInM,
+                again: state.declinedTurns.some((p) => distanceM(p, decision.considered!.turnAt) <= opts.heldTurnMatchM),
+              }
+            : null,
+        // A new offer is news of its own: the calm "kept" banner gives way to it.
+        kept: decision.considered !== null && pending ? null : next.kept,
       },
       effects: [],
     }
@@ -755,6 +841,9 @@ function checked(
   const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
   const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason, savingSec: offRoute ? null : saving }
+  const turnInM = decision.considered?.turnInM ?? null
+  // The banner shows what is said, word for word (#22).
+  const spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet)
   next = {
     ...next,
     route: chosen,
@@ -765,20 +854,19 @@ function checked(
     switches: quiet ? state.switches : [...state.switches, made],
     switchBanner: quiet ? null : {
       untilMs: nowMs + opts.switchBannerSec * 1000,
-      text: offRoute
-        ? 'New route from here'
-        : saving !== null
-          ? `Switched to a faster route${sideStreet ? ' via side streets' : ''}: saves ${spokenDuration(saving)}`
-          : 'Switched routes: the road ahead looks closed',
+      text: spokenSwitch,
       canKeep: !offRoute,
+      atMs: nowMs,
+      beforeSec: !offRoute && saving !== null ? chosen.durationSec + saving : null,
+      afterSec: chosen.durationSec,
+      turnInM: offRoute ? null : turnInM,
     },
+    offer: null,
+    kept: null,
     // Off the route there is no previous route to keep.
     undo: offRoute ? null : { route, alongM: tracking.alongRouteM, engine: state.engine, eta: state.eta },
   }
-  const say: LiveEffect = {
-    type: 'speak',
-    line: { text: switchLine(decision.code, saving, decision.considered?.turnInM ?? null, chosen.durationSec, sideStreet), priority: 'urgent' },
-  }
+  const say: LiveEffect = { type: 'speak', line: { text: spokenSwitch, priority: 'urgent' } }
   return { state: next, effects: [{ type: 'follow-route', geometry: chosen.geometry }, ...(quiet ? [] : [say])] }
 }
 
@@ -901,9 +989,30 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
     }
     case 'keep-previous': {
       const { undo, route, tracking, switchBanner } = state
-      if (state.status !== 'driving' || undo === null || route === null || tracking === null || switchBanner === null) return { state, effects: [] }
       const nowSec = (event.nowMs - (state.startedAtMs ?? event.nowMs)) / 1000
       const noReturnSec = opts.reroute.noReturnSec ?? DEFAULT_REROUTE_OPTIONS.noReturnSec
+      const kept = { untilMs: event.nowMs + opts.switchBannerSec * 1000, noReturnSec }
+      const pendingPath = state.engine.pending?.geometry
+      if (state.status === 'driving' && switchBanner === null && state.offer !== null && pendingPath !== undefined) {
+        // Turned down while it is still being confirmed (the pending stage): nothing to go back
+        // to. The engine drops the confirmation and is told not to offer that route again for
+        // noReturnSec, as after a switch.
+        return {
+          state: {
+            ...state,
+            engine: declineRoute(state.engine, pendingPath, nowSec + noReturnSec),
+            probes: { ...state.probes, keep: null },
+            turn: null,
+            offer: null,
+            kept,
+            declinedTurns: state.turn === null ? state.declinedTurns : [...state.declinedTurns, state.turn.at],
+            declinedSwitches: state.declinedSwitches + 1,
+            lastDecision: { action: 'stay', code: 'kept-previous', reason: 'Staying: you chose to keep your route', atMs: event.nowMs },
+          },
+          effects: [{ type: 'speak', line: { text: SPOKEN.keptPrevious, priority: 'urgent' } }],
+        }
+      }
+      if (state.status !== 'driving' || undo === null || route === null || tracking === null || switchBanner === null) return { state, effects: [] }
       const back = retrack(tracking, trackedRoute(undo.route.geometry), opts.tracking, undo.alongM)
       return {
         state: {
@@ -919,6 +1028,9 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           // The check that is out is cancelled below; its answer will never come.
           request: null,
           switchBanner: null,
+          offer: null,
+          kept,
+          declinedTurns: state.turn === null ? state.declinedTurns : [...state.declinedTurns, state.turn.at],
           undo: null,
           switches: state.switches.slice(0, -1),
           declinedSwitches: state.declinedSwitches + 1,
@@ -951,6 +1063,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       let next = state
       if (next.switchBanner !== null && event.nowMs >= next.switchBanner.untilMs) next = { ...next, switchBanner: null, undo: null }
       if (next.pausedNote !== null && event.nowMs >= next.pausedNote.untilMs) next = { ...next, pausedNote: null }
+      if (next.kept !== null && event.nowMs >= next.kept.untilMs) next = { ...next, kept: null }
       const request = next.request
       if (request !== null && event.nowMs - request.sentAtMs >= opts.requestTimeoutSec * 1000) {
         return maybePoll(timedOut(next, event.nowMs, opts), event.nowMs, opts)
@@ -979,6 +1092,91 @@ export interface LiveView {
   readonly warnings: readonly string[]
   readonly requestsUsed: number
   readonly maxRequests: number
+  /** The switch moment on screen (#84): a faster route being confirmed, the switch just made, or the route kept. Null: none. */
+  readonly moment: SwitchMoment | null
+  /**
+   * While the switch banner shows, the turn card holds the distance the spoken
+   * line named ("0.8 mi" for "Turn in 0.8 miles"), so screen and voice agree
+   * (#22); it counts down again once the banner closes. Null: show the real
+   * distance (no banner, or the next turn is not the turn-off).
+   */
+  readonly heldTurnText: string | null
+}
+
+/** The three stages of the switch moment, in words and figures (design/README.md, #22, #43, #44). */
+export type SwitchMoment =
+  | {
+      /** A faster route is being confirmed: nothing has changed yet. */
+      readonly stage: 'pending'
+      readonly title: string
+      readonly detail: string
+      readonly canKeep: true
+    }
+  | {
+      /** The switch is made. `title` is the spoken line, word for word. */
+      readonly stage: 'confirmed'
+      readonly title: string
+      /** Travel time and arrival on the route left behind; null when not known. */
+      readonly before: { readonly sec: number; readonly arriveAtMs: number } | null
+      readonly after: { readonly sec: number; readonly arriveAtMs: number }
+      readonly canKeep: boolean
+    }
+  | {
+      /** The driver kept their route. Calm, not news. */
+      readonly stage: 'kept'
+      readonly title: string
+      readonly detail: string
+      readonly canKeep: false
+    }
+
+/** The pending banner's title (#44, #43). */
+export const OFFER_TITLE = { first: 'Checking a faster route', again: 'Still faster. Checking again.' } as const
+
+/** "2 fewer lights", "1 more light", "same lights"; "lights: can't compare" when a count is not full. */
+function lightsWords(delta: number | null): string {
+  if (delta === null) return "lights: can't compare"
+  if (delta === 0) return 'same lights'
+  const n = Math.abs(delta)
+  return `${n} ${delta < 0 ? 'fewer' : 'more'} light${n === 1 ? '' : 's'}`
+}
+
+/** The spoken distance ("0.8 miles", "1 mile", "450 feet") as the turn card sets it ("0.8 mi", "1 mi", "450 ft"). */
+export function cardDistance(spoken: string): string {
+  return spoken.replace(/ miles?$/, ' mi').replace(/ feet$/, ' ft')
+}
+
+function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null {
+  if (state.status !== 'driving') return null
+  const banner = state.switchBanner
+  if (banner !== null) {
+    return {
+      stage: 'confirmed',
+      title: banner.text,
+      before: banner.beforeSec === null ? null : { sec: banner.beforeSec, arriveAtMs: banner.atMs + banner.beforeSec * 1000 },
+      after: { sec: banner.afterSec, arriveAtMs: banner.atMs + banner.afterSec * 1000 },
+      canKeep: banner.canKeep,
+    }
+  }
+  if (offRoute) return null
+  const offer = state.offer
+  if (offer !== null) {
+    const saves = offer.savingSec === null ? 'Faster than your route' : `Would save ${formatDuration(offer.savingSec)}`
+    return {
+      stage: 'pending',
+      title: offer.again ? OFFER_TITLE.again : OFFER_TITLE.first,
+      detail: `${saves} · ${lightsWords(offer.lightsDelta)}`,
+      canKeep: true,
+    }
+  }
+  if (state.kept !== null) {
+    return {
+      stage: 'kept',
+      title: SPOKEN.keptPrevious,
+      detail: `Won't offer that route again for ${formatDuration(state.kept.noReturnSec)}.`,
+      canKeep: false,
+    }
+  }
+  return null
 }
 
 export const WAKE_LOCK_WARNING = 'This browser cannot keep the screen awake. Keep the screen on yourself.'
@@ -1008,9 +1206,22 @@ export function liveView(state: LiveState, nowMs: number, options: Partial<LiveO
   if (state.gpsNote !== null && state.status !== 'failed') warnings.push(state.gpsNote)
   if (state.wakeLock === 'unavailable') warnings.push(WAKE_LOCK_WARNING)
 
+  const turn = route === null || tracking === null || offRoute ? null : nextTurn(route.guidance, tracking.alongRouteM)
+  const turnInM = state.switchBanner?.turnInM ?? null
+  const turnOff = state.turn !== null && !state.turn.pending ? state.turn.at : null
+  // Only when the next turn is the turn-off the line named (at its place, and no farther than it was):
+  // a shared turn before it keeps its own distance.
+  const heldTurnText =
+    turn !== null && turnInM !== null && turnOff !== null &&
+    distanceM(turn.location, turnOff) <= opts.heldTurnMatchM && turn.distanceM <= turnInM + opts.heldTurnMatchM
+      ? cardDistance(spokenDistance(turnInM))
+      : null
+
   return {
     status: state.status,
-    nextTurn: route === null || tracking === null || offRoute ? null : nextTurn(route.guidance, tracking.alongRouteM),
+    nextTurn: turn,
+    moment: switchMoment(state, offRoute),
+    heldTurnText,
     remainingM,
     remainingSec,
     arrivalAtMs: remainingSec === null ? null : nowMs + remainingSec * 1000,

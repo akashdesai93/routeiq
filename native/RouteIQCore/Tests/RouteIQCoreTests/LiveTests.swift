@@ -862,8 +862,9 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches.first?.code, .routeLost)
         XCTAssertEqual(s.state.switches.first?.atMs, s.nowMs())
         XCTAssertEqual(s.spoken(), ["Switching routes. The road ahead on your route looks closed. Turn in 1.4 miles."])
-        XCTAssertEqual(s.state.switchBanner?.text, "Switched routes: the road ahead looks closed")
+        XCTAssertEqual(s.state.switchBanner?.text, "Switching routes. The road ahead on your route looks closed. Turn in 1.4 miles.")
         XCTAssertEqual(s.state.switchBanner?.canKeep, true)
+        XCTAssertNil(s.state.switchBanner?.beforeSec)
     }
 
     // MARK: - describe('switching by itself')
@@ -887,7 +888,7 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches.first?.code, .fasterRoute)
         XCTAssertEqual(s.state.switches.first?.reason, "Switching: saves 5 minutes, turn in 1.9 miles")
         XCTAssertEqual(s.spoken(), ["Switching to a faster route. Saves 5 minutes. Turn in 1.9 miles."])
-        XCTAssertEqual(s.state.switchBanner?.text, "Switched to a faster route: saves 5 minutes")
+        XCTAssertEqual(s.state.switchBanner?.text, "Switching to a faster route. Saves 5 minutes. Turn in 1.9 miles.")
         XCTAssertEqual(s.state.switchBanner?.canKeep, true)
         XCTAssertEqual(s.state.turn?.at, at(5000, 0))
         XCTAssertEqual(s.state.turn?.pending, false)
@@ -1081,8 +1082,10 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(types(applied), ["follow-route", "speak"])
         XCTAssertEqual(s.spoken().last, "New route. 18 minutes to your destination.")
         // There is no previous route to keep after leaving it.
-        XCTAssertEqual(s.state.switchBanner?.text, "New route from here")
+        XCTAssertEqual(s.state.switchBanner?.text, s.spoken().last)
         XCTAssertEqual(s.state.switchBanner?.canKeep, false)
+        XCTAssertNil(s.state.switchBanner?.beforeSec)
+        XCTAssertNil(s.state.switchBanner?.turnInM)
         XCTAssertNil(s.state.undo)
         XCTAssertEqual(try XCTUnwrap(s.state.tracking).offFixes, 0)
         XCTAssertFalse(s.view().offRoute)
@@ -1458,7 +1461,7 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(s.state.route).source, .probe)
         XCTAssertEqual(s.state.switches.count, 1)
         XCTAssertEqual(s.spoken(), ["Switching to a faster route via side streets. Saves 5 minutes. Turn in 2.6 miles."])
-        XCTAssertEqual(s.state.switchBanner?.text, "Switched to a faster route via side streets: saves 5 minutes")
+        XCTAssertEqual(s.state.switchBanner?.text, "Switching to a faster route via side streets. Saves 5 minutes. Turn in 2.6 miles.")
         XCTAssertEqual(s.state.switchBanner?.canKeep, true)
         XCTAssertEqual(s.state.probes, CheckProbeMemory(used: 2, round: 2, keep: nil))
     }
@@ -1545,5 +1548,269 @@ final class LiveTests: XCTestCase {
         s.answer(faster(4200))
         XCTAssertEqual(s.state.lastDecision?.code, .reroute(.tooLate))
         XCTAssertEqual(s.state.switches, [])
+    }
+}
+
+// describe('the switch moment on screen (#84)'): the pending, confirmed and kept stages, as
+// the drive view shows them. The same cases as tests/live.test.ts.
+final class LiveSwitchMomentTests: XCTestCase {
+    /// B saves five minutes from the first check on.
+    private func faster(_ xM: Double) -> [RouteCandidate] { routesAt(xM, [.A: 1300, .B: 1000]) }
+
+    /// A full with 12 lights; B with 10, full or only partly counted.
+    private func withLights(_ bCoverage: SignalCoverage) -> (Double) -> [RouteCandidate] {
+        { xM in
+            self.faster(xM).map { c in
+                var c = c
+                if nameOf(c) == .A {
+                    c.signalCount = 12
+                    c.signalCoverage = .full
+                } else {
+                    c.signalCount = 10
+                    c.signalCoverage = bCoverage
+                }
+                return c
+            }
+        }
+    }
+
+    private func aWithLights() -> RouteCandidate {
+        var a = candidate(.A, at(0, 0), 1300)!
+        a.signalCount = 12
+        a.signalCoverage = .full
+        return a
+    }
+
+    private func step(_ at: Double, _ location: LngLat, _ text: String, modifier: String? = "left", type: String = "turn") -> GuidanceStep {
+        GuidanceStep(atDistanceM: at, location: location, type: type, modifier: modifier, primaryText: text, secondaryText: nil, announcements: [], synthesized: true)
+    }
+
+    func testPending_theFirstSightingSaysWhatItWouldSaveAndWhatItDoesToTheLightsAndNothingIsSwitched() throws {
+        let s = driving(.default, aWithLights())
+        cruise(s, 60, withLights(.full))
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.confirming))
+        let offer = try XCTUnwrap(s.state.offer)
+        XCTAssertEqual(offer.savingSec, 300)
+        XCTAssertEqual(offer.lightsDelta, -2)
+        XCTAssertFalse(offer.again)
+        XCTAssertEqual(s.view().moment, .pending(title: "Checking a faster route", detail: "Would save 5 min · 2 fewer lights"))
+        XCTAssertEqual(s.view().moment?.canKeep, true)
+        XCTAssertEqual(nameOf(try XCTUnwrap(s.state.route)), .A)
+        XCTAssertNil(s.state.switchBanner)
+    }
+
+    func testPending_aPartlyCountedRouteIsNeverComparedOnLights() throws {
+        let s = driving(.default, aWithLights())
+        cruise(s, 60, withLights(.partial))
+        XCTAssertNil(try XCTUnwrap(s.state.offer).lightsDelta)
+        XCTAssertEqual(s.view().moment, .pending(title: "Checking a faster route", detail: "Would save 5 min · lights: can't compare"))
+    }
+
+    func testPending_endsWhenACheckFindsNothingFaster() {
+        let s = driving()
+        cruise(s, 60, faster)
+        XCTAssertEqual(s.view().moment?.stage, "pending")
+        cruise(s, 120)
+        XCTAssertNil(s.state.offer)
+        XCTAssertNil(s.view().moment)
+    }
+
+    func testConfirmed_theBannerIsTheSpokenLineAndTheBeforeAndAfterFiguresDifferByExactlyTheSavingSaid() throws {
+        let s = driving()
+        cruise(s, 120, faster)
+        let banner = try XCTUnwrap(s.state.switchBanner)
+        XCTAssertEqual(banner.text, s.spoken().last)
+        XCTAssertEqual(banner.atMs, s.nowMs())
+        XCTAssertEqual(banner.afterSec, 1000)
+        XCTAssertEqual(banner.beforeSec, 1300)
+        XCTAssertEqual(s.view().moment, .confirmed(
+            title: "Switching to a faster route. Saves 5 minutes. Turn in 1.9 miles.",
+            before: SwitchMoment.Figures(sec: 1300, arriveAtMs: s.nowMs() + 1_300_000),
+            after: SwitchMoment.Figures(sec: 1000, arriveAtMs: s.nowMs() + 1_000_000),
+            canKeep: true
+        ))
+        // Once the banner closes, the offer it settled does not come back as "Checking a faster route".
+        cruise(s, 129, faster)
+        XCTAssertNil(s.state.switchBanner)
+        XCTAssertNil(s.view().moment)
+    }
+
+    func testConfirmed_theTurnCardHoldsTheDistanceTheLineSaidWhileTheBannerShowsThenCountsDown() throws {
+        // B with a turn at each of its corners: the first is the turn-off, 5 km along the main road.
+        let offer = { (xM: Double) in
+            self.faster(xM).map { c -> RouteCandidate in
+                var c = c
+                c.guidance = c.maneuvers.enumerated().map { i, m in
+                    self.step(m.atDistanceM, m.location, "\(nameOf(c)) road \(i)", modifier: m.kind == "turn" ? "left" : nil, type: m.kind)
+                }
+                return c
+            }
+        }
+        let s = driving()
+        cruise(s, 120, offer)
+        XCTAssertTrue(try XCTUnwrap(s.spoken().last).hasSuffix("Turn in 1.9 miles."))
+        XCTAssertEqual(s.view().heldTurnText, "1.9 mi")
+        // Four seconds on, 60 m nearer: still the figure that was said.
+        cruise(s, 124, offer)
+        XCTAssertLessThan(try XCTUnwrap(s.view().nextTurn).distanceM, try XCTUnwrap(s.state.switchBanner?.turnInM) - 50)
+        XCTAssertEqual(s.view().heldTurnText, "1.9 mi")
+        // The banner has closed: the real distance again.
+        cruise(s, 129, offer)
+        XCTAssertNil(s.state.switchBanner)
+        XCTAssertNil(s.view().heldTurnText)
+    }
+
+    func testConfirmed_aSharedTurnBeforeTheTurnOffKeepsItsOwnDistance() throws {
+        let withShared = { (xM: Double) in
+            self.faster(xM).map { c -> RouteCandidate in
+                var c = c
+                c.guidance = [self.step(400, at(xM + 400, 0), "Shared bend", modifier: "right")]
+                    + c.maneuvers.dropFirst().map { self.step($0.atDistanceM, $0.location, "Turn-off", type: $0.kind) }
+                return c
+            }
+        }
+        let s = driving()
+        cruise(s, 120, withShared)
+        XCTAssertTrue(try XCTUnwrap(s.spoken().last).hasSuffix("Turn in 1.9 miles."))
+        XCTAssertEqual(s.view().nextTurn?.primaryText, "Shared bend")
+        XCTAssertLessThan(try XCTUnwrap(s.view().nextTurn).distanceM, 500)
+        XCTAssertNil(s.view().heldTurnText)
+    }
+
+    func testConfirmed_aTurnBackAtTheTurnOffButFartherAlongIsNotGivenTheSpokenDistance() throws {
+        // B's only turn is at the turn-off's place, but 4 km farther along (the road loops back past it).
+        let looped = { (xM: Double) in
+            self.faster(xM).map { c -> RouteCandidate in
+                var c = c
+                if nameOf(c) == .B, c.maneuvers.count > 1 {
+                    let turnOff = c.maneuvers[1]
+                    c.guidance = [self.step(turnOff.atDistanceM + 4000, turnOff.location, "Loop")]
+                }
+                return c
+            }
+        }
+        let s = driving()
+        cruise(s, 120, looped)
+        XCTAssertEqual(nameOf(try XCTUnwrap(s.state.route)), .B)
+        let banner = try XCTUnwrap(s.state.switchBanner)
+        XCTAssertEqual(s.view().nextTurn?.primaryText, "Loop")
+        XCTAssertGreaterThan(try XCTUnwrap(s.view().nextTurn).distanceM, try XCTUnwrap(banner.turnInM) + 1000)
+        XCTAssertNil(s.view().heldTurnText)
+    }
+
+    func testPending_anOfferWhileOffTheRouteIsNotShown() {
+        let s = driving()
+        cruise(s, 60, faster)
+        XCTAssertEqual(s.view().moment?.stage, "pending")
+        for t in stride(from: 61.0, through: 75, by: 1) {
+            s.setTime(t)
+            s.fix(15 * t, 200)
+        }
+        XCTAssertTrue(s.view().offRoute)
+        XCTAssertNil(s.view().moment)
+    }
+
+    func testPending_anOfferThatArrivesAfterTheCarHasLeftTheRouteIsNotShown() throws {
+        let s = driving()
+        cruise(s, 60, faster)
+        let offer = try XCTUnwrap(s.state.offer)
+        for t in stride(from: 61.0, through: 75, by: 1) {
+            s.setTime(t)
+            s.fix(15 * t, 200)
+        }
+        var late = s.state
+        late.offer = offer
+        XCTAssertTrue(Live.liveView(late, s.nowMs()).offRoute)
+        XCTAssertNil(Live.liveView(late, s.nowMs()).moment)
+    }
+
+    func testKeepMyRouteWhilePending_dropsTheSideStreetViaBeingConfirmed() {
+        let s = driving()
+        cruise(s, 60, faster)
+        var state = s.state
+        state.probes.keep = at(2000, 300)
+        let kept = Live.liveStep(state, .keepPrevious(nowMs: s.nowMs()))
+        XCTAssertNil(kept.state.probes.keep)
+    }
+
+    func testANewOfferReplacesTheCalmKeptBannerAtOnce() {
+        // Checks every 10 s and a 30 s banner, so the next offer comes while "kept" still shows.
+        let s = driving(LiveOptions(pollIntervalSec: 10, switchBannerSec: 30))
+        cruise(s, 10, faster)
+        XCTAssertEqual(s.view().moment?.stage, "pending")
+        s.send(.keepPrevious(nowMs: s.nowMs()))
+        XCTAssertEqual(s.view().moment?.stage, "kept")
+        // C turns up at the next check: a different route, not the one turned down.
+        cruise(s, 20) { xM in routesAt(xM, [.A: 1300, .C: 1000]) }
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.confirming))
+        XCTAssertNil(s.state.kept)
+        XCTAssertEqual(s.view().moment, .pending(title: "Checking a faster route", detail: "Would save 5 min · lights: can't compare"))
+    }
+
+    func testADifferentRouteOfferedAfterOneWasTurnedDownIsAFirstOffer() {
+        let s = driving()
+        cruise(s, 60, faster)
+        s.send(.keepPrevious(nowMs: s.nowMs()))
+        cruise(s, 121) { xM in routesAt(xM, [.A: 1300, .C: 1000]) }
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.confirming))
+        XCTAssertEqual(s.view().moment, .pending(title: "Checking a faster route", detail: "Would save 5 min · lights: can't compare"))
+    }
+
+    func testKeepMyRouteWhilePending_nothingToUndoTheConfirmationIsDroppedAndThatRouteIsNotTaken() throws {
+        let s = driving()
+        cruise(s, 60, faster)
+        s.setTime(62)
+        s.fix(930)
+        let effects = s.send(.keepPrevious(nowMs: s.nowMs()))
+        XCTAssertEqual(types(effects), ["speak"])
+        XCTAssertEqual(s.spoken().last, Live.Spoken.keptPrevious)
+        XCTAssertNil(s.state.offer)
+        XCTAssertNil(s.state.turn)
+        XCTAssertEqual(s.state.declinedSwitches, 1)
+        XCTAssertEqual(s.state.switches, [])
+        XCTAssertNil(s.state.engine.pending)
+        XCTAssertEqual(try item(s.state.engine.declined, 0).untilSec, 662, accuracy: 0.5)
+        XCTAssertEqual(s.view().moment, .kept(title: "Keeping the previous route.", detail: "Won't offer that route again for 10 min."))
+        XCTAssertEqual(s.view().moment?.canKeep, false)
+        // B stays five minutes faster: it is never switched to while declined.
+        cruise(s, 300, faster)
+        XCTAssertEqual(nameOf(try XCTUnwrap(s.state.route)), .A)
+        XCTAssertEqual(s.state.switches, [])
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.driverDeclined))
+        XCTAssertNil(s.state.offer)
+    }
+
+    func testKeepMyRouteAfterTheSwitch_theCalmBannerShowsForTheBannerTimeThenGoes() {
+        let s = driving()
+        cruise(s, 120, faster)
+        s.setTime(122)
+        s.fix(1830)
+        s.send(.keepPrevious(nowMs: s.nowMs()))
+        XCTAssertEqual(s.view().moment?.stage, "kept")
+        cruise(s, 129, faster)
+        XCTAssertEqual(s.view().moment?.stage, "kept")
+        cruise(s, 130, faster)
+        XCTAssertNil(s.state.kept)
+        XCTAssertNil(s.view().moment)
+    }
+
+    func testOfferedAgainOnceTheNoReturnTimeIsUp_stillFasterCheckingAgain() {
+        // Slowly (5 m/s), so B's turn-off at 5 km is still ahead twelve minutes on.
+        let s = driving()
+        cruise(s, 60, faster, 5)
+        s.send(.keepPrevious(nowMs: s.nowMs()))
+        cruise(s, 659, faster, 5)
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.driverDeclined))
+        XCTAssertNil(s.view().moment)
+        // Declined until 660 s: the check then sees B again, as a new offer.
+        cruise(s, 661, faster, 5)
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.confirming))
+        XCTAssertEqual(s.view().moment, .pending(title: "Still faster. Checking again.", detail: "Would save 5 min · lights: can't compare"))
+    }
+
+    func testCardDistance_isTheSpokenDistanceAsTheTurnCardSetsIt() {
+        XCTAssertEqual(Live.cardDistance("0.8 miles"), "0.8 mi")
+        XCTAssertEqual(Live.cardDistance("1 mile"), "1 mi")
+        XCTAssertEqual(Live.cardDistance("450 feet"), "450 ft")
     }
 }

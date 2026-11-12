@@ -88,10 +88,10 @@ test('with the phone locked nothing is drawn, and the drive says and does exactl
   await context.close()
 })
 
-/** The drive view's arrival time ("8:21 AM"), in minutes of the day. */
+/** The drive view's arrival time ("8:21 AM", or "8:37 → 8:21 AM" just after a switch: the new one), in minutes of the day. */
 async function arrivalMinutes(app: App): Promise<number> {
-  const text = (await app.page.locator('.live-eta-clock').innerText()).trim()
-  const m = /^(\d{1,2}):(\d{2})\s*([AP]M)?$/i.exec(text)
+  const text = (await app.page.locator('.live-moment').innerText()).trim()
+  const m = /(\d{1,2}):(\d{2})\s*([AP]M)?(?!.*\d:\d)/is.exec(text)
   expect(m, `an arrival time, not "${text}"`).not.toBeNull()
   const h = Number(m![1])
   const hour = m![3] === undefined ? h : (h % 12) + (m![3].toUpperCase() === 'PM' ? 12 : 0)
@@ -113,6 +113,20 @@ test('when I unlock the phone just after a switch it made while locked, the scre
   const seenArrival = arrivals.get(seenLog.banners[0]!.atSec)!
   await context.close()
 
+  // Locked at 30 s, unlocked at 150 s, before the switch: the arrival time is worked out from
+  // the clock at the unlock, not from the one of the lock two minutes before (that would be 2
+  // or 3 minutes early): the same minute as with the screen on, give or take the one it can fall across.
+  const midContext = await browser.newContext()
+  const mid = new App(await midContext.newPage(), info)
+  mid.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
+  await mid.open({ fakeClock: true, shell: true, path: SHELL, storage: TOKEN })
+  await mid.routesReady()
+  let midArrival = 0
+  await mid.drive({ hideAtSec: 30, showAtSec: 150, maxSec: 152, onShow: async () => void (midArrival = await arrivalMinutes(mid)) })
+  expect(mid.unexpected).toEqual([])
+  expect(Math.abs(midArrival - arrivals.get(150)!)).toBeLessThanOrEqual(1)
+  await midContext.close()
+
   // Locked at 30 s; the switch is heard; the phone is unlocked the next moment, before any other fix or tick.
   app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
   await app.open({ fakeClock: true, shell: true, path: SHELL, storage: TOKEN })
@@ -127,17 +141,15 @@ test('when I unlock the phone just after a switch it made while locked, the scre
       await expect(app.page.locator('.live-banner')).toBeVisible()
       banner = await app.page.locator('.live-banner').innerText()
       arrival = await arrivalMinutes(app)
-      await expect(app.page.getByRole('button', { name: /Keep previous/ })).toBeVisible()
-      await app.snap('unlocked just after a switch made while locked: the banner and Keep previous route')
+      await expect(app.page.getByRole('button', { name: 'Keep my route' })).toBeVisible()
+      await app.snap('unlocked just after a switch made while locked: the banner and Keep my route')
     },
   })
   expect(log.heard).toHaveLength(1)
   // The banner of the switch that was spoken: the same saving.
   const saving = /Saves (\d+) minutes?/.exec(log.heard[0]!.text)![1]
-  expect(banner).toContain('Switched to a faster route')
-  expect(banner).toContain(`saves ${saving} minute`)
-  // The arrival time is today's, worked out from the clock now, not from when the screen went
-  // dark: the same minute as with the screen on (give or take the minute it can fall across).
-  // From the clock of the lock, two and a half minutes before, it would be 2 or 3 minutes early.
+  expect(banner).toContain('Switching to a faster route')
+  expect(banner).toContain(`Saves ${saving} minute`)
+  // And the switch's new arrival time, as with the screen on.
   expect(Math.abs(arrival - seenArrival)).toBeLessThanOrEqual(1)
 })
