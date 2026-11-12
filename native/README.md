@@ -117,11 +117,13 @@ Each one lands with tests before the next starts.
 
 | Workflow | Runner | When | What |
 | --- | --- | --- | --- |
-| `native-core.yml` | `ubuntu-24.04` (Linux, cheap) | push or PR touching `native/RouteIQCore/**` or `tests/fixtures/**` | `swift build --build-tests`, `swift test` |
-| `native-app.yml` (milestone 2) | `macos-26` (Xcode 26.6) | pull requests and pushes to main touching the app, or by hand | generate project, build unsigned `.ipa`, artifact |
+| `native-core.yml` | `ubuntu-24.04` (Linux, cheap) | called by `gate.yml` on a PR or a push to main touching `native/RouteIQCore/**` or `tests/fixtures/**`, or by hand | `swift build --build-tests`, `swift test` |
+| `native-app.yml` (milestone 2) | `macos-26` (Xcode 26.6) | called by `gate.yml` on a PR or a push to main touching the app, or by hand | generate project, build unsigned `.ipa`, artifact `RouteIQ-native-unsigned` |
 | `native-testflight.yml` (milestone 5) | `macos-26` | by hand only | archive, sign, upload to TestFlight |
 
-macOS runs are kept rare on purpose: path filters, no scheduled runs, and cancel-in-progress.
+When these run they count towards `required`, the one status check `main` requires
+(`docs/branch-protection.md`). macOS runs are kept rare on purpose: path filters (in
+`gate.yml`), no scheduled runs, and cancel-in-progress.
 GitHub Free on a private repository includes $12 of compute a month. That buys about 2,000 Linux
 minutes, or about 190 macOS minutes. A public repository would make all of it free, but whether
 to make it public is the owner's decision.

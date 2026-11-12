@@ -5,24 +5,12 @@ name: native-core
 # runner is enough and starts fastest. The GitHub-hosted ubuntu-24.04 image
 # ships a Swift toolchain, so nothing is downloaded.
 #
-# Push runs only on main; a branch is tested through its pull request, so
-# each change runs once.
+# Called by gate.yml on pull requests and pushes to main that touch the Swift package
+# (the path list is in gate.yml, under `changes`), and its result counts towards the
+# `required` check. It has no triggers of its own, so each change runs once; it can
+# also be started by hand.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'native/RouteIQCore/**'
-      - 'native/scripts/**'
-      - 'public/seed/osm-signals/**'
-      - 'tests/fixtures/**'
-      - '.github/workflows/native-core.yml'
-  pull_request:
-    paths:
-      - 'native/RouteIQCore/**'
-      - 'native/scripts/**'
-      - 'public/seed/osm-signals/**'
-      - 'tests/fixtures/**'
-      - '.github/workflows/native-core.yml'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
