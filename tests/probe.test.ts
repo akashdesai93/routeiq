@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
@@ -14,34 +12,18 @@ import {
   rememberCheckProbes,
   distanceM,
   localProjector,
-  pointToSegment,
   selectViaPoints,
   type LngLat,
   type RouteCandidate,
   type ViaPoint,
 } from '../src/core/index.ts'
-import { parseDirections } from '../src/providers/mapbox/adapter.ts'
 import { at, candidate } from './helpers/driveWorld.ts'
-
-function fixtureRoutes(name: string): readonly RouteCandidate[] {
-  const result = parseDirections(JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8')))
-  if (!result.ok) throw new Error(`expected routes, got ${result.kind}`)
-  return result.routes
-}
+import { fixtureRoutes, lineDistanceM } from './helpers/fixtures.ts'
 
 function world(name: Parameters<typeof candidate>[0], durationSec: number, extra: Partial<RouteCandidate> = {}) {
   const route = candidate(name, at(0, 0), durationSec, extra)
   if (route === null) throw new Error(`no route ${name}`)
   return route
-}
-
-function lineDistanceM(point: LngLat, line: readonly LngLat[]): number {
-  const project = localProjector(point)
-  let best = Infinity
-  for (let i = 1; i < line.length; i++) {
-    best = Math.min(best, pointToSegment(project(point), project(line[i - 1]!), project(line[i]!)).distanceM)
-  }
-  return best
 }
 
 /** The fastest is A (straight east 20 km); B runs 1 km north of it, C 1 km south. */
