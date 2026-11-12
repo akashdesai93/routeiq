@@ -37,7 +37,24 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   await app.snap('next launch: the trip, with Change token')
 
   // Half a minute into the drive the phone is locked, and stays locked to the end.
-  const log = await app.drive({ hideAtSec: 30 })
+  // Before that: the top bar is gone while driving, and Drive diagnostics is still one tap behind More.
+  const log = await app.drive({
+    hideAtSec: 30,
+    lookAtSec: [
+      {
+        atSec: 20,
+        look: async () => {
+          await page.getByRole('button', { name: 'More' }).click()
+          await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+          await expect(page.getByLabel('Diagnostics text')).toBeVisible()
+          await app.snap('driving in the iPhone app: Drive diagnostics from More')
+          await page.getByRole('button', { name: 'Close' }).click()
+          await page.getByRole('button', { name: 'Less' }).click()
+          await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
+        },
+      },
+    ],
+  })
   await app.snap('arrived, after a drive with the phone locked')
 
   expect(log.arrived).toBe(true)

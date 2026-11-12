@@ -54,9 +54,11 @@ interface AppProps {
   placeStore?: TextStore
   /** Shown in the top bar, after the name. The iPhone shell puts its "Change token" button here. */
   barExtra?: ReactNode
+  /** Shown in the drive view's More sheet. The top bar is hidden during a drive, so the iPhone shell puts "Drive diagnostics" here too. */
+  driveExtra?: ReactNode
 }
 
-export default function App({ status = tokenStatus, placeStore = deviceStore, barExtra = null }: AppProps) {
+export default function App({ status = tokenStatus, placeStore = deviceStore, barExtra = null, driveExtra = null }: AppProps) {
   const places = usePlaceBook(placeStore)
   // The last trip, when this device has one; otherwise the built-in trip.
   const [pins, setPins] = useState<Pins>(() =>
@@ -208,6 +210,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
               destinationLabel={pins.destination.label}
               speechSupported={live.speechSupported}
               replaying={live.replaying}
+              extra={driveExtra}
               dev={
                 import.meta.env.DEV
                   ? {

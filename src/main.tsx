@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './fonts.css'
+import './live.css'
 import { startNativeShell } from './device/native/index.ts'
 import { setDirectionsTransport } from './providers/mapbox/client.ts'
 import { Root } from './ShellRoot.tsx'
