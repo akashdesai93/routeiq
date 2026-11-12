@@ -21,8 +21,9 @@ landable. You do not land them; the reviewer does. Each run is one tick.
    code moved) before pushing. Comment on the PR what you changed and why.
 4. If a fix needs a decision (two PRs want the same thing differently), don't pick: comment
    on both and put it in `asks:`.
-5. Contract version or bundle budget collisions: follow `docs/contracts.md` and
-   `docs/branch-protection.md`; never raise a budget to fit a PR without saying why.
+5. Contract or bundle budget collisions: follow `docs/contracts.md` (a feature PR adds a file in
+   `docs/contracts/changes/` and never bumps `CORE_CONTRACT_VERSION`; the bump is the Swift
+   port's, once) and `docs/branch-protection.md`; never raise a budget to fit a PR without saying why.
 6. Post one status with what you made landable.
 
 {{note}}

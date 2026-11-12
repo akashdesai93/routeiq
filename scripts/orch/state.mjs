@@ -4,10 +4,11 @@
 //   node scripts/orch/state.mjs --out tmp/orch            # read GitHub, write every file below
 //   node scripts/orch/state.mjs --from raw.json --out d   # the same from a saved snapshot (tests, replays)
 //   node scripts/orch/state.mjs --save-raw raw.json       # also keep the snapshot
+//   node scripts/orch/state.mjs --dashboard tmp/mc        # also the owner's dashboard files (dashboard.mjs), exactly six
 //   node scripts/orch/state.mjs --print heartbeat-id      # the orchestrator's heartbeat comment id ('' if none)
 //   node scripts/orch/state.mjs --print health|board|morning
 //   options: --repo owner/name (default $GITHUB_REPOSITORY or akashdesai93/routeiq), --now <ISO>,
-//            --window-hours N, --local local.json ({ sessions, events } from the local fleet)
+//            --window-hours N, --local local.json ({ sessions, events, health } from the local fleet)
 //
 // Files: state.json (everything), sessions.json, prs.json, issues.json, events.json,
 // decisions.json, health.json, phone-queue.json, board.md, morning.md, alert.md.
@@ -15,6 +16,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderAlert, renderBoard, renderMorning } from './board.mjs'
+import { dashboardFiles } from './dashboard.mjs'
 import { DEFAULT_ORCH_OPTIONS } from './defaults.mjs'
 import { derive, mergeLocal } from './derive.mjs'
 
@@ -68,6 +70,12 @@ async function main() {
     mkdirSync(args.out, { recursive: true })
     for (const [name, text] of Object.entries(files)) writeFileSync(join(args.out, name), text)
     console.error(`state: wrote ${Object.keys(files).length} files to ${args.out}; health ${state.health.ok ? 'ok' : `${state.health.alerts.length} alert(s)`}`)
+  }
+  if (args.dashboard) {
+    const dash = dashboardFiles(state)
+    mkdirSync(args.dashboard, { recursive: true })
+    for (const [name, text] of Object.entries(dash)) writeFileSync(join(args.dashboard, name), text)
+    console.error(`state: wrote the dashboard's ${Object.keys(dash).length} files to ${args.dashboard}`)
   }
   const print = args.print
   if (print === 'heartbeat-id') console.log(state.health.heartbeat.orchestrator.comment_id ?? '')

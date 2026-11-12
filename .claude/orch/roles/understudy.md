@@ -24,7 +24,8 @@ jq '.heartbeat' tmp/orch/health.json
 ### 2. Act (only when stale)
 
 1. Edit (or create) the `heartbeat: understudy` comment on #17: `state: acting`,
-   `since: <UTC>`. Post one status (role `understudy`, state `working`).
+   `since: <UTC>`, `tick: <now, UTC>` (a new tick line on every edit, or GitHub keeps the old
+   `updated_at`). Post one status (role `understudy`, state `working`).
 2. **Main red:** if `health.main.state` is `red`, nothing lands. If the `main is red` issue
    has no claim younger than 2 h, claim it and fix main as a builder would. Then end.
 3. **Standing roles:** for each of reviewer and conductor whose newest status is older than
