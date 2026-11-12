@@ -3,6 +3,7 @@ import {
   CURRENT_LOCATION_ID,
   DEFAULT_TRIP,
   formatLatLng,
+  parseOtherAppEta,
   restoreTrip,
   type LngLat,
   type Place,
@@ -12,6 +13,8 @@ import {
 import { tokenStatus, type TokenStatus } from './config.ts'
 import { isNativeShell } from './device/native/index.ts'
 import { DrivePanel } from './DrivePanel.tsx'
+import { DrivesPanel } from './DrivesPanel.tsx'
+import { OtherAppEtaField } from './OtherAppEtaField.tsx'
 import { cruiseSpeedMps } from './drive/simulation.ts'
 import { LiveDriveView } from './LiveDriveView.tsx'
 import { DEFAULT_REPLAY_SETUP, replayPlanOf, type ReplaySetup } from './drive/replaySetup.ts'
@@ -25,6 +28,7 @@ import type { PinRole } from './map/pins.ts'
 import { PlanPanel, type PlaceOrigin } from './PlanPanel.tsx'
 import { RoutePanel } from './RoutePanel.tsx'
 import { localTextStore, type TextStore } from './storage/local.ts'
+import { useDriveLog } from './useDriveLog.ts'
 import { useDriveSim } from './useDriveSim.ts'
 import { usePlaceBook } from './usePlaceBook.ts'
 import { useRoutes } from './useRoutes.ts'
@@ -55,14 +59,20 @@ interface AppProps {
   status?: TokenStatus
   /** Swapped out in tests for a store in memory. */
   placeStore?: TextStore
+  /** Where the private drive log is kept (#107). Swapped out in tests. */
+  driveLogStore?: TextStore
   /** Shown in the top bar, after the name. The iPhone shell puts its "Change token" button here. */
   barExtra?: ReactNode
   /** Shown in the drive view's More sheet. The top bar is hidden during a drive, so the iPhone shell puts "Drive diagnostics" here too. */
   driveExtra?: ReactNode
 }
 
-export default function App({ status = tokenStatus, placeStore = deviceStore, barExtra = null, driveExtra = null }: AppProps) {
+export default function App({ status = tokenStatus, placeStore = deviceStore, driveLogStore = deviceStore, barExtra = null, driveExtra = null }: AppProps) {
   const places = usePlaceBook(placeStore)
+  // Another app's ETA for the trip, typed before Start drive (for comparing on the Drives screen).
+  const [otherEtaText, setOtherEtaText] = useState('')
+  const otherEta = parseOtherAppEta(otherEtaText)
+  const [drivesOpen, setDrivesOpen] = useState(false)
   // The last trip, when this device has one; otherwise the built-in trip.
   const [pins, setPins] = useState<Pins>(() =>
     places.book.lastTrip === null ? TEST_PINS : restoreTrip(places.book.lastTrip, TEST_PINS),
@@ -96,6 +106,12 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
     () => (inShell && testDriveSetup.enabled ? { origin: originPosition, preset: testDriveSetup.preset, multiplier: testDriveSetup.multiplier } : null),
     [inShell, testDriveSetup, originPosition],
   )
+  // The private drive log: the other app's ETA is read when the drive begins on its first route.
+  const tripForLog = useRef({ otherAppSec: otherEta.sec })
+  useEffect(() => {
+    tripForLog.current = { otherAppSec: otherEta.sec }
+  })
+  const drives = useDriveLog(driveLogStore, () => tripForLog.current)
   const setWhatIfDelaySec = sim.setWhatIfDelaySec
   const clearWhatIf = useCallback(() => setWhatIfDelaySec(0), [setWhatIfDelaySec])
   const live = useLiveDrive({
@@ -109,6 +125,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
     onWhatIfSpent: clearWhatIf,
     replay,
     testDrive,
+    observer: drives.observer,
   })
   const startLive = () => {
     stopDrive()
@@ -245,6 +262,9 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
               onRestart={startLive}
             />
           )}
+          {drivesOpen && !live.active && (
+            <DrivesPanel log={drives.log} storageNote={drives.storageNote} onClear={drives.clear} onClose={() => setDrivesOpen(false)} />
+          )}
           <div className="side">
             <PlanPanel
               pins={pins}
@@ -254,6 +274,8 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
               onPlace={choosePlace}
               onSwap={swap}
               onReset={reset}
+              onOpenDrives={() => setDrivesOpen(true)}
+              driveCount={drives.log.drives.length}
             />
             <RoutePanel
             ranked={polled !== null ? polled.ranked : routing.ranked}
@@ -273,12 +295,11 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
             canStartDrive={live.canStart && !routing.tokenRejected}
             originIsDeviceLocation={pins.origin.id === CURRENT_LOCATION_ID}
             startDriveExtra={
-              import.meta.env.DEV || inShell ? (
-                <>
-                  {import.meta.env.DEV && <ReplayPanel setup={replaySetup} onChange={setReplaySetup} />}
-                  {inShell && <TestDrivePanel setup={testDriveSetup} onChange={setTestDriveSetup} />}
-                </>
-              ) : null
+              <>
+                <OtherAppEtaField value={otherEtaText} problem={otherEta.problem} onChange={setOtherEtaText} />
+                {import.meta.env.DEV && <ReplayPanel setup={replaySetup} onChange={setReplaySetup} />}
+                {inShell && <TestDrivePanel setup={testDriveSetup} onChange={setTestDriveSetup} />}
+              </>
             }
           >
               <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />
