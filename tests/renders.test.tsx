@@ -67,6 +67,11 @@ vi.mock('mapbox-gl/esm', () => {
     fitBounds() {}
     easeTo() {}
     setPaintProperty() {}
+    getStyle() {
+      return { layers: [] }
+    }
+    getLayoutProperty() {}
+    setLayoutProperty() {}
     resize() {}
     remove() {}
   }

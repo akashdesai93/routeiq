@@ -359,8 +359,8 @@ test('when a jam builds during the drive, a side street found mid-drive takes me
 
   // One switch, onto the side street, after it held up for two checks in a row, with a way to undo it.
   expect(log.banners).toHaveLength(1)
-  expect(log.banners[0]!.text).toContain('Switched to a faster route via side streets')
-  expect(log.banners[0]!.text).toContain('Keep previous route')
+  expect(log.banners[0]!.text).toContain('Switching to a faster route via side streets')
+  expect(log.banners[0]!.text).toContain('Keep my route')
   const spoken = await app.spoken()
   const switches = spoken.filter((line) => line.startsWith('Switching'))
   expect(switches).toHaveLength(1)

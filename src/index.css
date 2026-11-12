@@ -9,6 +9,8 @@
   --raised2: #20242b;
   --hair: #2c3138;
   --hair2: #59616c;
+  /* The cards' edge over a night map (#145): 3.5:1 on its land, 4.1:1 on --glass. */
+  --hair-night: #6b737e;
   --fg: #f2f4f6;
   --dim: #9aa1ab;
   --amber: #ffb000;
@@ -144,6 +146,12 @@ button.link:hover { background: none; color: #ffffff; }
   .panel { order: 3; flex: none; background: var(--glass); font-size: 15px; }
   /* Clear of the sheet's rounded top, which laps 24px over the map. */
   .map .mapboxgl-ctrl-bottom-left, .map .mapboxgl-ctrl-bottom-right { bottom: 24px; }
+  .drive-log { max-height: 200px; }
+}
+/* Touch sizes: on a phone-width screen, and on any touch screen however wide (a phone on its
+   side is 844 px wide but still tapped with a finger, #132). The layout above stays width-only,
+   so a landscape phone keeps the side-by-side trip screen. */
+@media (max-width: 700px), (pointer: coarse) {
   /* Everything that is tapped is at least 44px high. */
   button, summary, .plan input, .setting input { min-height: 44px; }
   button { padding: 8px 14px; }
@@ -154,7 +162,6 @@ button.link:hover { background: none; color: #ffffff; }
   /* Height from min-height, not padding round the text: font metrics differ between machines (43 px in CI). */
   .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
-  .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
 }
 /* The attribution is never collapsed (it carries the OpenStreetMap credit), so on a narrow map it is kept clear of the Mapbox logo in the other corner. */
@@ -175,8 +182,9 @@ button.link:hover { background: none; color: #ffffff; }
 .token-screen p { margin: 8px 0; }
 .token-actions { display: flex; gap: 8px; }
 .shell-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-/* The iPhone shell's test drive (#86): the SIMULATED GPS badge, over the map below the turn card (which fills the width on a phone) for the whole drive. */
-.sim-badge { position: fixed; z-index: 40; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 150px); pointer-events: none; padding: 4px 10px; border: 2px solid #bf8700; border-radius: 6px; background: #fff8c5; color: #4d2d00; font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
+/* The iPhone shell's test drive (#86): the SIMULATED GPS badge, over the map below the turn card (which fills the width on a phone) for the whole drive.
+   A test-mode label, not news: a raised pill with words, never amber (#133, design-tokens rule 1). */
+.sim-badge { position: fixed; z-index: 40; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 150px); pointer-events: none; padding: 6px 12px; border: 1.5px solid var(--hair2); border-radius: 999px; background: var(--raised); color: var(--fg); font-weight: 700; font-size: 14px; letter-spacing: 0.04em; }
 .testdrive button[aria-pressed='true'], .diagnostics-which button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
 .testdrive .drive-row { flex-wrap: wrap; }
 .diagnostics-which { display: flex; gap: 8px; flex-wrap: wrap; }
