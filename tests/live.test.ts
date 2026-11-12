@@ -1473,6 +1473,45 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.view().moment).toBeNull()
   })
 
+  it('pending: an offer that arrives after the car has left the route is not shown, and offers no Keep', () => {
+    // The path the reviewer named (#135): a check answered "confirming" once the tracker already
+    // says off-route. drive() clears the offer on the first off-route fix; this answer comes after.
+    const s = driving()
+    cruise(s, 60, faster)
+    const offer = s.state.offer!
+    for (let t = 61; t <= 75; t++) {
+      s.setTime(t)
+      s.fix(15 * t, 200)
+    }
+    expect(s.view().offRoute).toBe(true)
+    const late = { ...s.state, offer }
+    expect(liveView(late, s.nowMs()).offRoute).toBe(true)
+    expect(liveView(late, s.nowMs()).moment).toBeNull()
+  })
+
+  it('confirmed: a turn back at the turn-off but farther along (a loop) is not given the spoken distance', () => {
+    // B's guidance: its only turn is at the turn-off's place, but 4 km farther along than the
+    // turn-off (the road loops back past it). The card must show that turn's own distance.
+    const looped = (xM: number) =>
+      faster(xM).map((c) => {
+        const turnOff = c.maneuvers[1]
+        if (nameOf(c) !== 'B' || turnOff === undefined) return c
+        return {
+          ...c,
+          guidance: [
+            { atDistanceM: turnOff.atDistanceM + 4000, location: turnOff.location, type: 'turn', modifier: 'left', primaryText: 'Loop', secondaryText: null, announcements: [], synthesized: true },
+          ],
+        }
+      })
+    const s = driving()
+    cruise(s, 120, looped)
+    expect(nameOf(s.state.route!)).toBe('B')
+    expect(s.state.switchBanner).not.toBeNull()
+    expect(s.view().nextTurn).toMatchObject({ primaryText: 'Loop' })
+    expect(s.view().nextTurn!.distanceM).toBeGreaterThan(s.state.switchBanner!.turnInM! + 1000)
+    expect(s.view().heldTurnText).toBeNull()
+  })
+
   it('"Keep my route" while pending drops the side-street via being confirmed, so no probe is spent on it', () => {
     const s = driving()
     cruise(s, 60, faster)

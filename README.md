@@ -1187,14 +1187,19 @@ banner over the time line. Amber appears only here, and only for news.
   They are the figures of the moment of the switch and do not tick; the old time is the
   new one plus the saving the engine measured, so the two differ by what was said (each
   rounded to the minute). The turn card holds the distance the line named ("0.8 mi") for
-  as long as the banner shows, then counts down again. The banner stays for
+  as long as the banner shows, then counts down again, but only when its next turn is the
+  turn-off itself: a maneuver within `heldTurnMatchM` (50 m) of the turn-off's place and no
+  more than that beyond the distance said. A turn both routes share before the turn-off, or
+  one that comes back past the turn-off later (a loop), keeps its own distance. The banner stays for
   `switchBannerSec` (8 s); doing nothing accepts the switch.
 - **Kept**: "Keep my route" (at either stage) leaves the driver on, or puts them back on,
   the route they were on, and tells the engine not to offer the other route again for
   `noReturnSec` (10 minutes). A calm outline, not amber, for `switchBannerSec`:
   "Keeping the previous route." (the spoken line) and "Won't offer that route again for
   10 min." Once that time is up, a route that is still faster comes back as an ordinary
-  pending offer titled "Still faster. Checking again."
+  pending offer titled "Still faster. Checking again." if it turns off within
+  `heldTurnMatchM` (50 m) of where a route the driver turned down did; any other route is
+  "Checking a faster route".
 - After leaving the route there is nothing to keep: the "New route" banner has no button.
 
 **Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):

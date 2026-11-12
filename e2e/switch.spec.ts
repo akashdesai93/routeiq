@@ -22,6 +22,32 @@ function said(line: string): { saveMin: number; turn: string } {
   return { saveMin: Number(m![1]), turn: `${m![2]} mi` }
 }
 
+/** "0.8 mi" or "450 ft" (the turn card's figure) → meters. */
+function cardMeters(text: string): number {
+  const m = /^([\d.]+) (mi|ft)$/.exec(text.trim())
+  expect(m, `a turn-card distance: ${text}`).not.toBeNull()
+  return Number(m![1]) * (m![2] === 'mi' ? 1609.344 : 0.3048)
+}
+
+/**
+ * What is cut off inside `root` (a box that clips its paint): an element whose content is wider than
+ * its box, or one that reaches past `root`'s edges. As "class: why".
+ */
+async function clipped(root: import('@playwright/test').Locator): Promise<string[]> {
+  return root.evaluate((el) => {
+    const outer = el.getBoundingClientRect()
+    return [el, ...el.querySelectorAll('*')].flatMap((e) => {
+      const r = e.getBoundingClientRect()
+      const out: string[] = []
+      if (e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push(`${e.className}: ${e.scrollWidth} wide in ${e.clientWidth}`)
+      if (r.top < outer.top || r.bottom > outer.bottom || r.left < outer.left || r.right > outer.right) {
+        out.push(`${e.className}: ${Math.round(r.top)}-${Math.round(r.bottom)} outside ${Math.round(outer.top)}-${Math.round(outer.bottom)}`)
+      }
+      return out
+    })
+  })
+}
+
 /** "10:24 AM" → minutes since midnight. */
 function clockMin(text: string): number {
   const m = /^(\d{1,2}):(\d{2})/.exec(text.trim())
@@ -66,7 +92,7 @@ test('when a faster route turns up, it first says it is checking and what it wou
         // distance. (On the turn-off itself the card holds the spoken figure: tests/live.test.ts.)
         const card = page.getByLabel('Next turn').locator('.live-turn-distance')
         const cardText = (await card.textContent())!
-        if (cardText !== turn) expect(Number.parseFloat(cardText)).toBeLessThan(Number.parseFloat(turn))
+        if (cardText !== turn) expect(cardMeters(cardText)).toBeLessThan(cardMeters(turn))
         // The old time and arrival, struck through, beside the new ones: they differ by what was said.
         const eta = sheet.locator('.live-eta-switch')
         const [oldMin, newText] = [await eta.locator('.live-eta-change .live-eta-old').textContent(), await eta.locator('.live-eta-new').textContent()]
@@ -77,7 +103,18 @@ test('when a faster route turns up, it first says it is checking and what it wou
         const newArrive = clockMin((await eta.locator('.live-eta-now').textContent())!)
         expect(Math.abs(oldArrive - newArrive - saveMin)).toBeLessThanOrEqual(1)
         await expect(keep).toBeVisible()
+        // Nothing in the time line is cut off by its box: the amber chip keeps its round corners.
+        expect(await clipped(eta)).toEqual([])
         await app.snap(`confirmed: ${line}`)
+        // On the narrowest phone (375 px: iPhone mini, SE) the old and new figures still fit their boxes,
+        // and the amber chip does not run into the struck arrival (#84 review).
+        await page.setViewportSize({ width: 375, height: 812 })
+        expect(await clipped(eta)).toEqual([])
+        const chip = (await eta.locator('.live-eta-new').boundingBox())!
+        const clock = (await eta.locator('.live-eta-arrive').boundingBox())!
+        expect(chip.x + chip.width).toBeLessThanOrEqual(clock.x)
+        await app.snap('confirmed at 375 px: old and new times fit')
+        await page.setViewportSize({ width: 390, height: 844 })
       }
     },
   })

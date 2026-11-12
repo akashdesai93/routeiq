@@ -209,9 +209,14 @@ const News = memo(function News({ stage, title, detail }: NewsProps) {
   )
 })
 
-/** "43 min" beside "35 min" reads "43 → 35 min": the unit once, after the new figure. */
+/**
+ * "43 min" beside "35 min" reads "43 → 35 min", and "8:37 AM" beside "8:20 AM" reads
+ * "8:37 → 8:20 AM": a unit or day half the two share is written once, after the new figure,
+ * so the line fits a 375 px phone.
+ */
 function bare(before: string, after: string): string {
-  return before.endsWith(' min') && after.endsWith(' min') ? before.slice(0, -4) : before
+  const unit = / [^\d\s]+$/.exec(after)?.[0]
+  return unit !== undefined && before.endsWith(unit) ? before.slice(0, -unit.length) : before
 }
 
 /**
@@ -243,7 +248,7 @@ const SwitchEta = memo(function SwitchEta({ beforeLeft, beforeArrive, afterLeft,
         <span className="live-eta-clock">
           {beforeArrive !== null && (
             <>
-              <s className="live-eta-old">{beforeArrive}</s>
+              <s className="live-eta-old">{bare(beforeArrive, afterArrive)}</s>
               <span className="live-eta-to"> → </span>
             </>
           )}
@@ -337,7 +342,7 @@ const MoreSheet = memo(function MoreSheet({ lights, lightsHint, distance, muted,
         {status}
         {replaying && ' · GPS replay (simulated position)'}
       </p>
-      {dev !== null && replaying && (
+      {import.meta.env.DEV && dev !== null && replaying && (
         <div className="live-dev" role="group" aria-label="Replay controls (development)">
           {REPLAY_MULTIPLIERS.map((m) => (
             <button key={m} type="button" aria-pressed={dev.multiplier === m} onClick={() => dev.setMultiplier(m)}>

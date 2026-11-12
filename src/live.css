@@ -122,7 +122,7 @@
 .live-eta-old { color: var(--dim); text-decoration-thickness: 2px; }
 .live-eta-change > .live-eta-old { font-family: var(--figure); font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
 .live-eta-to { color: var(--dim); font-family: 'Inter', system-ui, sans-serif; font-size: 20px; }
-.live-eta-new { padding: 2px 12px 3px; border-radius: 12px; background: var(--amber); color: #050607; }
+.live-eta-new { padding: 0 12px 3px; border-radius: 12px; background: var(--amber); color: #050607; }
 .live-eta-new .live-unit { color: #050607b3; }
 .live-eta-switch .live-eta-clock { display: flex; gap: 6px; align-items: baseline; }
 .live-eta-switch .live-eta-clock .live-eta-old { font-size: 20px; }
