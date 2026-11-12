@@ -1,14 +1,10 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PROBE_OPTIONS, routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
 import { parseDirections, type DirectionsResult } from '../src/providers/mapbox/adapter.ts'
 import { buildDirectionsUrl, fetchDirections, fetchProbeRoute, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
+import { fixture } from './helpers/fixtures.ts'
 
 // Hand-written bodies shaped like Directions API v5 responses. No test here touches the network.
-function fixture(name: string): unknown {
-  return JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8'))
-}
 const OK = fixture('directions.ok.json') as { code: string; routes: Record<string, unknown>[] }
 const FREEWAY = fixture('directions.freeway.json') as { code: string; routes: Record<string, unknown>[] }
 const CONGESTION = fixture('directions.congestion.json') as { code: string; routes: Record<string, unknown>[] }
