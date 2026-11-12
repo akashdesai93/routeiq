@@ -31,6 +31,20 @@ describe('offline shell: what the service worker stores', () => {
     }
   })
 
+  it('at the site root (the default base, "/"), another site is still never touched', () => {
+    // There every path starts with the scope's path, so only the origin check keeps a
+    // query-less file of another site (a tile, a script, a font) out of the store.
+    const atRoot = (url: string) => sw.requestPolicy({ url, method: 'GET', mode: 'cors' }, 'https://example.org/')
+    for (const url of [
+      'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/14/4512/6512.vector.pbf',
+      'https://api.mapbox.com/mapbox-gl-js/v3.0.0/mapbox-gl.js',
+      'https://overpass-api.de/api/interpreter',
+      'https://fonts.example.net/inter.woff2',
+    ]) {
+      expect(atRoot(url), url).toBe('pass')
+    }
+  })
+
   it('never stores an address of this site with a query string, so no access_token is ever kept', () => {
     expect(get('https://example.org/routeiq/assets/index-abc.js?access_token=pk.test')).toBe('pass')
     expect(get('https://example.org/routeiq/seed/osm-signals/index.json?v=2')).toBe('pass')
