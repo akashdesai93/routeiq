@@ -132,6 +132,25 @@ public struct RouteCandidate: Hashable, Sendable {
     public var limitedAccessSpansM: [DistanceSpanM]?
     /// Upcoming maneuvers, used to block impractical late switches.
     public var maneuvers: [Maneuver]
+    /// Turn-by-turn guidance for a live drive: one entry per maneuver, in
+    /// driving order, each with what to show and what to say (see Guidance).
+    /// Nil when the provider, or a test, has no turn data: the drive then
+    /// runs without turn prompts.
+    public var guidance: [GuidanceStep]?
+    /// Where the route came from. `.probe`: asked for through a via point
+    /// beside the fastest route (side-street probing), not one of the
+    /// provider's own alternatives. Nil, or `.provider`: the provider offered it.
+    public var source: RouteSource?
+    /// For a probed route asked for during a drive: the via point it was asked
+    /// through, so the next check can ask through the same point while the
+    /// reroute engine confirms it. Nil otherwise.
+    public var via: LngLat?
+    /// Live traffic along the route, one entry per segment of `geometry`
+    /// (entry i covers geometry[i] to geometry[i + 1]), from the provider's
+    /// per-segment annotations. Nil when the provider sent none; each list
+    /// inside is nil on its own when it is missing or does not have exactly
+    /// one entry per segment. Never guessed.
+    public var segmentTraffic: SegmentTraffic?
 
     public init(
         id: String,
@@ -144,7 +163,11 @@ public struct RouteCandidate: Hashable, Sendable {
         providerSignalCount: Int? = nil,
         intersections: [RouteIntersection]? = nil,
         limitedAccessSpansM: [DistanceSpanM]? = nil,
-        maneuvers: [Maneuver] = []
+        maneuvers: [Maneuver] = [],
+        guidance: [GuidanceStep]? = nil,
+        source: RouteSource? = nil,
+        via: LngLat? = nil,
+        segmentTraffic: SegmentTraffic? = nil
     ) {
         self.id = id
         self.geometry = geometry
@@ -157,6 +180,95 @@ public struct RouteCandidate: Hashable, Sendable {
         self.intersections = intersections
         self.limitedAccessSpansM = limitedAccessSpansM
         self.maneuvers = maneuvers
+        self.guidance = guidance
+        self.source = source
+        self.via = via
+        self.segmentTraffic = segmentTraffic
+    }
+}
+
+/// How congested one stretch of road is right now, in the provider's words
+/// (Mapbox: low, moderate, heavy, severe; `unknown` when it does not know).
+public enum CongestionLevel: String, Hashable, Sendable, CaseIterable {
+    case low
+    case moderate
+    case heavy
+    case severe
+    case unknown
+}
+
+/// See RouteCandidate.segmentTraffic. Both lists, when present, have geometry.count - 1 entries.
+public struct SegmentTraffic: Hashable, Sendable {
+    /// Congestion of each segment. Nil when the provider sent none, or the wrong number of entries.
+    public var congestion: [CongestionLevel]?
+    /// Traffic-aware travel time of each segment, in seconds. Nil when missing,
+    /// the wrong length, or any entry is not a number of 0 or more. Carried for
+    /// later use; nothing ranks or probes by it yet.
+    public var durationSec: [Double]?
+
+    public init(congestion: [CongestionLevel]?, durationSec: [Double]?) {
+        self.congestion = congestion
+        self.durationSec = durationSec
+    }
+}
+
+/// See RouteCandidate.source.
+public enum RouteSource: String, Hashable, Sendable {
+    case provider
+    case probe
+}
+
+/// Something to say before a maneuver, and where along the route to say it.
+public struct GuidanceAnnouncement: Hashable, Sendable {
+    /// Meters from the route start at which it becomes due. Never below 0.
+    public var atDistanceM: Double
+    /// Plain text for a text-to-speech engine (no SSML).
+    public var text: String
+
+    public init(atDistanceM: Double, text: String) {
+        self.atDistanceM = atDistanceM
+        self.text = text
+    }
+}
+
+/// One maneuver of a route as the driver is told about it.
+public struct GuidanceStep: Hashable, Sendable {
+    /// Distance from the route start to the maneuver, in meters.
+    public var atDistanceM: Double
+    public var location: LngLat
+    /// The provider's maneuver type: "turn", "fork", "off ramp", "merge", "roundabout", "arrive", ...
+    public var type: String
+    /// "left", "slight right", "uturn", "straight", ...; nil when the provider gives none.
+    public var modifier: String?
+    /// The big line of the turn banner: usually the road to turn onto. Never empty.
+    public var primaryText: String
+    /// The smaller line under it (a destination or a second road name). Nil when there is none.
+    public var secondaryText: String?
+    /// What to say on the way to this maneuver, in the order it becomes due.
+    public var announcements: [GuidanceAnnouncement]
+    /// True when the banner or the announcements were made up here from the
+    /// step's plain instruction, because the provider sent no banner or voice
+    /// instruction for it.
+    public var synthesized: Bool
+
+    public init(
+        atDistanceM: Double,
+        location: LngLat,
+        type: String,
+        modifier: String?,
+        primaryText: String,
+        secondaryText: String?,
+        announcements: [GuidanceAnnouncement],
+        synthesized: Bool
+    ) {
+        self.atDistanceM = atDistanceM
+        self.location = location
+        self.type = type
+        self.modifier = modifier
+        self.primaryText = primaryText
+        self.secondaryText = secondaryText
+        self.announcements = announcements
+        self.synthesized = synthesized
     }
 }
 
@@ -180,8 +292,6 @@ public struct SignalPoint: Hashable, Sendable {
 public enum SignalSource: String, Hashable, Sendable, CaseIterable {
     /// The main signal data (OpenStreetMap).
     case primary
-    /// A second dataset that only adds what the first lacks (City of Charlotte).
-    case gapFill
     /// The directions provider's own flag, used where no signal data was loaded.
     case fallback
 }
