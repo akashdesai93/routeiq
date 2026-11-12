@@ -485,7 +485,7 @@ final class ProbeTestsDuringADrive: XCTestCase {
 
     // it('has one documented budget')
     func testSideStreetProbesDuringADrive_hasOneDocumentedBudget() {
-        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1.5))
+        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1, reserveMargin: 3))
     }
 
     // MARK: describe('checkProbeAllowance: probes share the drive request budget')
@@ -525,10 +525,11 @@ final class ProbeTestsDuringADrive: XCTestCase {
 
     // it('keeps back what the plain checks until the arrival need, so the drive never goes blind (#183)')
     func testCheckProbeAllowance_keepsBackWhatThePlainChecksUntilTheArrivalNeed() {
-        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60), 45)
-        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1801, pollIntervalSec: 60), 46)
-        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 0, pollIntervalSec: 60), 0)
-        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60, budget: DriveProbeBudget(arrivalReserve: 1)), 30)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 2520, pollIntervalSec: 60), 45)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 2521, pollIntervalSec: 60), 46)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 0, pollIntervalSec: 60), 3)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60, budget: DriveProbeBudget(arrivalReserve: 1.5)), 48)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60, budget: DriveProbeBudget(reserveMargin: 0)), 30)
         XCTAssertNil(Probe.plainCheckReserve(remainingSec: nil, pollIntervalSec: 60))
         XCTAssertNil(Probe.plainCheckReserve(remainingSec: .nan, pollIntervalSec: 60))
         XCTAssertNil(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 0))
