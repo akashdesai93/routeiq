@@ -80,8 +80,16 @@ jobs:
   web:
     uses: ./.github/workflows/ci.yml
 
+  # Sharded over several runners (e2e.yml); fails when any shard fails.
   e2e:
     uses: ./.github/workflows/e2e.yml
+
+  # Merges the shards' reports into the one `e2e-report` artifact, also when a shard
+  # failed. Evidence, not a check: `required` does not wait for it.
+  e2e-report:
+    needs: e2e
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/e2e-report.yml
 
   native-core:
     needs: changes
@@ -101,7 +109,8 @@ jobs:
     if: needs.changes.outputs.shell-ios == 'true'
     uses: ./.github/workflows/shell-ios.yml
 
-  # The single required status check. `if: always()` matters: without it a failed job above
+  # The single required status check. It does not list e2e-report (see above).
+  # `if: always()` matters: without it a failed job above
   # would skip this one, and GitHub counts a skipped required check as passed.
   required:
     name: required
