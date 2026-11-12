@@ -1411,6 +1411,10 @@ describe('the switch moment on screen (#84)', () => {
       after: { sec: 1000, arriveAtMs: s.nowMs() + 1_000_000 },
       canKeep: true,
     })
+    // Once the banner closes, the offer it settled does not come back as "Checking a faster route".
+    cruise(s, 129, faster)
+    expect(s.state.switchBanner).toBeNull()
+    expect(s.view().moment).toBeNull()
   })
 
   it('confirmed: the turn card holds the distance the line said while the banner shows, then counts down', () => {

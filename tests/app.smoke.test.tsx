@@ -504,8 +504,8 @@ describe('RoutePanel', () => {
   it('lists ETA, distance and difference from typical, and marks the selected route', () => {
     const routes = [route('route-0', 900, 780), route('route-1', 840, null)]
     const html = renderToString(<RoutePanel {...idle} ranked={rankRoutes(routes)} selectedId="route-1" />)
-    expect(html).toContain('15 min')
-    expect(html).toContain('14 min')
+    expect(html).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
+    expect(html).toContain('<span class="route-eta">14<span class="unit"> min</span></span>')
     expect(html).toContain('5.8 mi')
     expect(html).toContain('2 min slower than typical')
     expect(html).toContain('No typical time available')
@@ -596,7 +596,7 @@ describe('RoutePanel', () => {
       <RoutePanel {...idle} signalsStatus="loading" ranked={rankRoutes(routes)} selectedId="route-0" />,
     )
     // Routes are already listed; only the signal line waits.
-    expect(loading).toContain('15 min')
+    expect(loading).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
     expect(loading).toContain('Counting signals…')
     expect(loading).not.toContain('Signals: unknown')
     expect(loading).not.toContain('title=')
@@ -624,7 +624,7 @@ describe('RoutePanel', () => {
         selectedId="route-0"
       />,
     )
-    expect(html).toContain('15 min')
+    expect(html).toContain('<span class="route-eta">15<span class="unit"> min</span></span>')
     // A lower bound is labelled as one; a full count is plain; missing data is never shown as zero.
     expect(html).toContain('≥ 9 signals (partial)')
     expect(html).toContain('>12 signals<')

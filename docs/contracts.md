@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 6** (Nov 12, 2026: version 5 plus the switch moment's fields on `LiveState`, #84). The Swift port is being brought up to it (#33);
+**Current version: 6** (Nov 12, 2026: version 5 plus the switch moment's fields on `LiveState`, #84). The Swift port matches it, except the drive log and the place book (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -109,7 +109,7 @@ the declarations that changed.
 | Side | Matches | Notes |
 | --- | --- | --- |
 | Web app (`src/`) | 6 | by definition |
-| Swift port (`native/RouteIQCore`) | 5, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive at version 5 (#33) | the switch moment's live-drive fields (version 6, #84), drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
+| Swift port (`native/RouteIQCore`) | 6, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment (#33, #84) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
