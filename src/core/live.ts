@@ -163,6 +163,12 @@ export interface LiveState {
    * until then only.
    */
   readonly picked: RouteCandidate | null
+  /**
+   * When the picked route's travel times were asked for (the plan screen's
+   * answer), on the session's clock. A drive that starts on the pick counts
+   * that as its last check (#71). Null: not known, the start counts instead.
+   */
+  readonly pickedAtMs: number | null
   /** Why the drive failed. Null otherwise. */
   readonly message: string | null
   /** A passing note about the position (no fix yet, poor accuracy). Null when there is none. */
@@ -233,6 +239,7 @@ export const LIVE_IDLE: LiveState = {
   destination: null,
   startedAtMs: null,
   picked: null,
+  pickedAtMs: null,
   message: null,
   gpsNote: null,
   lastFix: null,
@@ -268,8 +275,16 @@ export type LiveEvent =
   /**
    * The Start tap. `route`: the route picked on the plan screen, to be driven
    * (see LiveState.picked). Left out or null: the drive asks for its own.
+   * `routeAskedAtMs`: when that route's travel times were asked for, on the
+   * same clock as `nowMs` (see LiveState.pickedAtMs). Left out: unknown.
    */
-  | { readonly type: 'start'; readonly nowMs: number; readonly destination: LngLat; readonly route?: RouteCandidate | null }
+  | {
+      readonly type: 'start'
+      readonly nowMs: number
+      readonly destination: LngLat
+      readonly route?: RouteCandidate | null
+      readonly routeAskedAtMs?: number | null
+    }
   | { readonly type: 'fix'; readonly nowMs: number; readonly fix: PositionFix }
   | { readonly type: 'position-error'; readonly nowMs: number; readonly kind: PositionErrorKind }
   /**
@@ -588,17 +603,29 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   return maybePoll({ state: next, effects }, nowMs, opts)
 }
 
-/** The drive begins on `route`, from `fix`. */
-function begin(state: LiveState, route: RouteCandidate, candidates: readonly RouteCandidate[], fix: PositionFix, nowMs: number, opts: LiveOptions): LiveStep {
+/**
+ * The drive begins on `route`, from `fix`. `checkedAtMs`: when its travel times
+ * were asked for, the drive's last check (the plan's answer for a picked route).
+ */
+function begin(
+  state: LiveState,
+  route: RouteCandidate,
+  candidates: readonly RouteCandidate[],
+  fix: PositionFix,
+  nowMs: number,
+  opts: LiveOptions,
+  checkedAtMs: number = nowMs,
+): LiveStep {
   const started: LiveState = {
     ...state,
     status: 'driving',
     picked: null,
+    pickedAtMs: null,
     route,
     tracking: null,
     request: null,
     candidates,
-    lastCheckedAtMs: nowMs,
+    lastCheckedAtMs: checkedAtMs,
     eta: { durationSec: route.durationSec, remainingM: route.distanceM },
     guidance: armGuidance(route.guidance, 0, true),
     lastDecision: null,
@@ -618,7 +645,11 @@ function startOnPicked(state: LiveState, fix: PositionFix, nowMs: number, opts: 
   if (picked === null) return null
   const onIt = trackFix(null, trackedRoute(picked.geometry), fix, opts.tracking)
   if (onIt === null || onIt.offFixes > 0) return null
-  return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts)
+  // The plan's answer is the last check, as old as it is (#71): "checked N s ago" tells the
+  // truth from the start, and a plan older than the poll interval is checked at once.
+  const askedAt = state.pickedAtMs
+  const checkedAtMs = askedAt !== null && Number.isFinite(askedAt) ? Math.min(askedAt, nowMs) : nowMs
+  return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts, checkedAtMs)
 }
 
 /** The first route has come back. */
@@ -785,6 +816,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           destination: event.destination,
           startedAtMs: event.nowMs,
           picked: drivable(event.route) ? event.route : null,
+          pickedAtMs: drivable(event.route) && event.routeAskedAtMs != null && Number.isFinite(event.routeAskedAtMs) ? event.routeAskedAtMs : null,
           muted: state.muted,
         },
         effects: [

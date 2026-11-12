@@ -225,6 +225,54 @@ describe('the route picked on the plan screen (#66)', () => {
     expect(s.requests().map((r) => [r.atSec, r.effect.purpose, r.effect.baseline])).toEqual([[60, 'poll', true]])
   })
 
+  it('the answer of the plan is the last check: "checked N s ago" counts from when the plan was asked for (#71)', () => {
+    const s = session()
+    // The trip was planned 40 s before the Start tap.
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 40_000 })
+    s.fix(0)
+    expect(s.state.status).toBe('driving')
+    expect(s.view().checkedAgoSec).toBe(40)
+    s.setTime(5)
+    expect(s.view().checkedAgoSec).toBe(45)
+    // The first check comes a poll interval after the plan, not after the Start tap.
+    cruiseOnB(s, 19, (xM) => ({ routes: offered(xM) }))
+    expect(s.requests()).toHaveLength(0)
+    cruiseOnB(s, 20, (xM) => ({ routes: offered(xM) }))
+    expect(s.requests().map((r) => [r.atSec, r.effect.purpose])).toEqual([[20, 'poll']])
+    expect(s.view().checkedAgoSec).toBe(0)
+  })
+
+  it('a plan older than the poll interval is checked at once, and a check alone never switches', () => {
+    const s = session()
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 600_000 })
+    s.fix(0)
+    expect(s.view()).toMatchObject({ checkedAgoSec: 600, checking: true })
+    // Asked from the first fix on the route.
+    expect(s.requests().map((r) => [r.atSec, r.effect.purpose])).toEqual([[0, 'poll']])
+    s.setTime(1)
+    s.fix(15)
+    // Even a much faster route is only a first sighting: confirmation needs the next check too.
+    s.answer(offered(15, 800), undefined, [candidate('B', at(15, 0), 1250, { source: 'probe' })!])
+    expect(s.state.switches).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'confirming' })
+  })
+
+  it('without the time of the plan, or with one from the future, the Start tap counts as the last check, as before', () => {
+    for (const routeAskedAtMs of [undefined, null, Number.NaN, 1e15]) {
+      const s = session()
+      s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs })
+      s.fix(0)
+      expect(s.view().checkedAgoSec, String(routeAskedAtMs)).toBe(0)
+    }
+    // A drive that asks for its own route (the fix was not on the pick) counts its own answer.
+    const s = session()
+    s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs: s.nowMs() - 40_000 })
+    s.fix(2000, 600)
+    s.setTime(3)
+    s.answer([candidate('A', at(0, 0), 1300)!])
+    expect(s.view().checkedAgoSec).toBe(0)
+  })
+
   it('a slower route picked on purpose is driven too, not the fastest', () => {
     const s = session()
     const slower = candidate('C', at(0, 0), 1400)!

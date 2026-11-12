@@ -1019,8 +1019,10 @@ destination stops and shows a short summary (trip time, the switches and why).
 with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
 route the plan's probes found (`source: 'probe'`). When the first good fix is on that
 route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
-request of its own, and the plan's answer counts as the first one: the first check goes
-out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+request of its own, and the plan's answer counts as the first one, as old as it is
+(#71): "checked N s ago" counts from when the plan was asked for, not from the Start
+tap, and the first check goes out a poll interval (60 s) after the plan, at once when
+the plan is older than that. A check alone never switches (confirmation needs two). A first fix that is not on it (the trip was planned
 from somewhere else) plans a route from there, as before. From then on the engine judges
 the picked route like any other. Mapbox does not offer a side street by itself, so a
 check from the car usually lacks it; the existing path check (`baselineProbe`, one more

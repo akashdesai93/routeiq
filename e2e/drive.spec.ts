@@ -145,6 +145,22 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
 })
 
+test('right after Start, "checked" says how old the plan is, not 0 s', async ({ app, page }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // The trip was planned, then the driver waited 40 s before tapping Start drive (#71).
+  await page.clock.fastForward(40_000)
+  await app.drive({ maxSec: 6 })
+  await app.snap('just after Start: checked about 45 s ago')
+
+  const text = (await page.getByText(/checked \d+ s ago/).textContent()) ?? ''
+  const seconds = Number(/checked (\d+) s ago/.exec(text)?.[1])
+  expect(seconds).toBeGreaterThanOrEqual(45)
+  expect(seconds).toBeLessThan(60)
+  // The first check is still to come: it is due a minute after the plan, not after the tap.
+  expect(app.directionsRequests).toBe(1)
+})
+
 test('the map fills the drive view, and fits the trip screen again after End', async ({ app, page }) => {
   await app.open()
   await app.routesReady()

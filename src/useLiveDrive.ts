@@ -34,6 +34,8 @@ export interface LiveDriveConfig {
   readonly destination: LngLat
   /** The route picked on the plan screen: Start drive drives it (a side-street route too). Read at Start only. */
   readonly route: RouteCandidate | null
+  /** When that route's travel times were asked for, on the session clock (device/clock.ts). Read at Start only. */
+  readonly routeFetchedAtMs?: number | null
   /** The reroute thresholds, shared with the simulated drive's settings box. */
   readonly rerouteOptions: RerouteOptions
   /** The poll interval and the request budget, shared with the simulated drive's. */
@@ -111,7 +113,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [])
 
   const start = useCallback(() => {
-    const { token, destination, route, replay } = latest.current
+    const { token, destination, route, replay, routeFetchedAtMs = null } = latest.current
     if (token === null) return
     runnerRef.current?.runner.dispose()
     // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
@@ -182,7 +184,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     runnerRef.current = { runner, now }
     setReplaying(replaySource !== null)
     setSpeechSupported(speaker.supported)
-    runner.start(destination, route)
+    // A replay runs on its own clock: the plan's time means nothing on it.
+    runner.start(destination, route, replaySource === null ? routeFetchedAtMs : null)
   }, [optionsOf])
 
   const end = useCallback(() => {
