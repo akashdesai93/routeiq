@@ -49,6 +49,8 @@ export interface Outside {
   sideStreet?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
   mapboxStatus?: number
+  /** The map style to answer with. Default: a blank one (a background colour only). */
+  mapStyle?: object
   /**
    * Side-street probes are not answered until `releaseProbes()`: each waits,
    * the way a slow answer from Mapbox would. Default: answered at once.
@@ -381,7 +383,7 @@ export class App {
 
     if (url.hostname === 'api.mapbox.com') {
       if (mapboxStatus !== undefined) return route.fulfill({ status: mapboxStatus, json: { message: 'Not Authorized - Invalid Token' } })
-      if (url.pathname.startsWith('/styles/v1/')) return route.fulfill({ json: BLANK_STYLE })
+      if (url.pathname.startsWith('/styles/v1/')) return route.fulfill({ json: this.outside.mapStyle ?? BLANK_STYLE })
       if (url.pathname.startsWith('/directions/v5/mapbox/driving-traffic/')) {
         const coords = decodeURIComponent(url.pathname.split('/').at(-1)!).split(';')
         const points = coords.map((c) => c.split(',').map(Number) as LngLat)

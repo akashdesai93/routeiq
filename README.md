@@ -1175,6 +1175,9 @@ plugin `RouteIQNative` is present, `src/device/native`):
   are discarded. The drive view shows a SIMULATED GPS badge and the diagnostics say so.
   Route requests are real and count against the request budget. The browser's
   development replay is separate and unchanged.
+- **Phone lab** (shell only, off unless started over USB with `-routeiqLab`): the PC runs
+  a drive on the real phone with nobody touching it, and checks what the app did while
+  it was in the background or the phone asleep. [docs/phone-lab.md](docs/phone-lab.md).
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
@@ -1194,6 +1197,9 @@ only for a full count, "≥ N data missing" for a partial one, "Unknown" otherwi
 with the engine's latest reason, "checked N s ago" and the request count, and in the
 iPhone app "Drive diagnostics". Every control is 44 px or more, the cards keep clear of
 the phone's safe areas, and the one animation is off under `prefers-reduced-motion`.
+On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
+the sheet stack in a column on the left and the map fills the right, so the car stays in
+view; the sheet scrolls in its column with More and End pinned at its foot (#131).
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
@@ -1422,6 +1428,17 @@ on the phone, and a text that looked as if it held a position, a token or an add
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own
 position is discarded while one runs and reaches neither the drive nor Mapbox.
+
+**The phone lab** ([docs/phone-lab.md](docs/phone-lab.md)) is off unless the shell app is
+started over USB, from a computer the phone trusts, with the launch argument `-routeiqLab`;
+opened by hand, the app never has it. With it, a test hook presses the app's own buttons,
+and every few seconds one file in the app's temporary folder is replaced with a report for
+that computer to pull: the drive diagnostics and which screen is up, as counts, times and
+fixed words. No position, address, road name or token is written to it, and the lab makes
+no network request of its own. A lab drive over USB starts only where the computer put the
+simulated position: the hook asks the phone for its position once, compares it in memory,
+and on any other position does not start a drive and says only "not at the simulated
+start". In lab mode the web view can be inspected from that computer.
 
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for
