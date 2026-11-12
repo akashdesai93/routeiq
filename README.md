@@ -59,9 +59,17 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`, `npm run pr
 `npm run build:signals` (rebuilds the OpenStreetMap signal tiles shipped with the app from
 extracts on disk); see Data sources.
 
-CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, lint and tests on Node 24
-(Ubuntu) on every push to `main` and every pull request. `.github/workflows/e2e.yml` runs
-the end-to-end scenarios alongside and uploads their report as the `e2e-report` artifact.
+CI runs on every pull request and every push to `main` from one workflow,
+`.github/workflows/gate.yml`. It calls `ci.yml` (`npm ci`, typecheck, lint, tests, the
+production build and its size budget, on Node 24 on Ubuntu) and `e2e.yml` (the end-to-end
+scenarios, report uploaded as the `e2e-report` artifact) every time, and the Swift tests
+and the two macOS builds when their paths change. Its last job, `required`, is the one
+status check `main` requires: `main` is protected and every change arrives through a pull
+request. See [docs/branch-protection.md](docs/branch-protection.md).
+
+`npm run size` (after a build) checks the bundle-size budget in
+`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, and the CSS
+may each grow 10 % before CI fails.
 
 ## End-to-end scenarios
 
@@ -188,6 +196,14 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
   It is passed to the build step only and never printed; the build stops if it is missing
   or not a `pk.` token. The site is served under `/routeiq/` (`PAGES_BASE`); local dev,
   preview and e2e keep `/`. See [docs/phone-testing.md](docs/phone-testing.md).
+
+## Contracts
+
+The shapes the Swift port and the iPhone shell depend on (routes, signal tiles and index, the
+place book, the reroute options and state, the live events and effects, the native plugin) are
+versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 1. What is in it,
+the JSON Schemas, and how to change a contract are in [docs/contracts.md](docs/contracts.md).
+`tests/contracts.test.ts` fails on a change of shape without a version bump.
 
 ## Layout
 
