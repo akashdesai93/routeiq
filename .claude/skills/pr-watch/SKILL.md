@@ -70,6 +70,11 @@ For each open, non-draft PR on `akashdesai93/routeiq`
    Give the agent the diff, not your opinion of it.
 6. **Decide**, and post the verdict as a PR comment whose first line is
    `verdict: approve <sha7>` or `verdict: changes <sha7>` (`state.mjs` reads it):
+   - **Bundle growth** (#170): when `required` fails only on the size gate (the PR adds more
+     than 4 kB JS / 2 kB CSS), add `size-ok` only if the growth is worth it, and say why in
+     the verdict (`size-ok: <reason>`). Otherwise ask for it to be smaller. A PR that edits
+     `scripts/bundle-budget.json` gets `size-ok` only for an owner decision on an issue; never
+     to fit a PR.
    - **Merge** when the reviewer reports no blocking finding, every Copilot and CodeQL
      thread has an outcome (step 3), verify is green, the PR has
      no conflicts, `required` is green on the head you reviewed, and the PR body says how

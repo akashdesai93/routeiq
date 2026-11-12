@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { areasOf, evaluate, recheckMain, rerunRequired } from '../../scripts/orch/gates.mjs'
+import { areasOf, evaluate, recheckMain, rerunRequired, sizeGrowthArg } from '../../scripts/orch/gates.mjs'
 
 // The gates the Gate's `required` job holds (docs/orchestrator.md). Each case is planted from
 // what really went wrong on the first night: a rule that lived only in a prompt let it through.
@@ -194,5 +194,50 @@ describe('re-check after a push to main', () => {
     const errors = await recheckMain('R', { pushed: ['src/core/live.ts'], pushedAt: '2026-11-12T11:00:00Z', gh: call, log: () => {}, rerun: async (_R, sha) => void reran.push(sha) })
     expect(reran).toEqual(['bbb'])
     expect(errors).toEqual([{ pr: 1, message: 'HTTP 404' }])
+  })
+})
+
+// #170: the bundle-size ceiling is the owner's, and a PR may add at most growthPerPr to it.
+// The night before, every code PR failed on size once main reached 99.6 % of "measured + 10 %",
+// and each fix re-based the budget upwards in a feature PR.
+describe('bundle growth gate (#170)', () => {
+  // What #127's merge into main added on 2026-11-12, and a small change.
+  const grew = (appJs: number, css = 0) => ({ appJs: { base: 413_800, pr: 413_800 + appJs, limit: 4000 }, css: { base: 72_105, pr: 72_105 + css, limit: 2000 } })
+
+  it('fails a PR that grows the app JavaScript by more than 4 kB, and says by how much', () => {
+    const r = evaluate(pr(), null, grew(4001))
+    expect(gates(r)).toEqual(['size'])
+    expect(r.failures[0].message).toMatch(/appJs grows by 4\.0 kB \(413\.8 kB on main → 417\.8 kB\)/)
+  })
+
+  it('passes a PR at the limit, a PR that shrinks the bundle, and fails CSS over its own 2 kB', () => {
+    expect(gates(evaluate(pr(), null, grew(4000, 2000)))).toEqual([])
+    expect(gates(evaluate(pr(), null, grew(-30_000)))).toEqual([])
+    expect(evaluate(pr(), null, grew(0, 2001)).failures.map((f) => f.message)).toEqual([expect.stringMatching(/^css grows by 2\.0 kB/)])
+  })
+
+  it('size-ok (the reviewer\'s, with a reason) passes the growth', () => {
+    expect(gates(evaluate(pr({ labels: ['size-ok'] }), null, grew(40_000, 9000)))).toEqual([])
+  })
+
+  it('a growth that was not measured fails: unknown is never zero', () => {
+    expect(gates(evaluate(pr(), null, null))).toEqual(['size'])
+    expect(gates(evaluate(pr(), null, { appJs: { base: 1, pr: null, limit: 4000 } }))).toEqual(['size'])
+    expect(gates(evaluate(pr(), null, {}))).toEqual(['size'])
+  })
+
+  it('without --size-growth (a local run) there is no growth to check', () => {
+    expect(gates(evaluate(pr(), null))).toEqual([])
+    expect(sizeGrowthArg(['--pr', '5'])).toBeUndefined()
+    expect(sizeGrowthArg(['--pr', '5', '--size-growth', ''])).toBeNull()
+    expect(sizeGrowthArg(['--pr', '5', '--size-growth', 'not json'])).toBeNull()
+    expect(sizeGrowthArg(['--size-growth', JSON.stringify(grew(1))])).toEqual(grew(1))
+  })
+
+  it('holds a feature PR that edits the ceiling file (as #127 and #141 re-based it), until size-ok', () => {
+    const files = ['scripts/bundle-budget.json', 'src/App.tsx']
+    expect(gates(evaluate(pr({ files }), null, grew(0)))).toEqual(['size'])
+    expect(evaluate(pr({ files }), null).failures[0].message).toMatch(/owner's bundle ceiling/)
+    expect(gates(evaluate(pr({ files, labels: ['size-ok'] }), null, grew(0)))).toEqual([])
   })
 })

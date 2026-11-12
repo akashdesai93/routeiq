@@ -42,6 +42,7 @@ npm run design:shots           # every screen at iPhone sizes into design-shots/
 npx playwright test e2e/drive.spec.ts -g "wrong turn"   # one scenario (after npm run e2e:build)
 (cd native/RouteIQCore && swift build --build-tests && swift test)   # native sessions only
 node --test native/scripts/pack-signal-bundle.test.mjs              # native: signal bundle packer
+node --test native/scripts/signal-parity-reference.test.mjs         # native: signal parity reference (frozen fixture bundle)
 ```
 
 To save tokens, wrap the test run with rtk: `rtk test npx.cmd vitest run`.

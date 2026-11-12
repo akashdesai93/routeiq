@@ -31,6 +31,14 @@ jobs:
         run: swift build --build-tests
       - name: Test
         run: swift test
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
       - name: Test the signal bundle packer
         working-directory: .
         run: node --test native/scripts/pack-signal-bundle.test.mjs
+      # The Swift parity test's reference is the web app's own counts on a frozen fixture bundle:
+      # it must be exactly what the script writes, and a refresh of public/seed must not move it (#193).
+      - name: Test the signal parity reference
+        working-directory: .
+        run: node --test native/scripts/signal-parity-reference.test.mjs
