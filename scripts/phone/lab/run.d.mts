@@ -12,6 +12,9 @@ export interface LabRunOptions {
   fix: string | null
   early: string | null
   native: string[]
+  waitSec: number
+  cold: boolean
+  seconds: number
   lock: boolean
   ownerUnlocksAfter: boolean
   inApp: boolean
@@ -42,4 +45,5 @@ export function summaryMarkdown(run: {
 }): string
 
 export function labLaunchArgs(name: string, options: Pick<LabRunOptions, 'web' | 'native'>): string[]
-export function driveScreenScenario(options: Pick<LabRunOptions, 'early' | 'fix'>): string
+export function driveScreenScenario(options: Pick<LabRunOptions, 'early' | 'fix' | 'waitSec'>): string
+export function flatStretches(samples: readonly { sec: number; look: { flat: number; shade: number } | null }[], max?: number, minSec?: number): { from: number; to: number }[]

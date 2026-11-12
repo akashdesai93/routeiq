@@ -47,6 +47,16 @@ export const LAB_ROUTES_WAIT_MS = 90_000
 export const LAB_START_RADIUS_M = 250
 /** A `testdrive-fix-…` scenario tries its fix this long after the driving screen came up, in milliseconds. */
 export const LAB_FIX_AFTER_MS = 12_000
+/** `testdrive-wait-<sec>`: the longest wait it may ask for before Start drive, in seconds. */
+export const LAB_MAX_WAIT_SEC = 120
+
+/** The seconds a `testdrive-wait-<sec>` scenario waits with the plan screen ready before Start drive; 0 for any other scenario. */
+export function startWaitSec(scenario: string): number {
+  const m = /^testdrive-wait-(\d{1,3})$/.exec(scenario)
+  if (m === null) return 0
+  const sec = Number(m[1])
+  return sec >= 1 && sec <= LAB_MAX_WAIT_SEC ? sec : 0
+}
 /** How often the position is asked for while waiting for the simulated one, in milliseconds. */
 export const LAB_POSITION_RETRY_MS = 3_000
 /** How many history lines are kept. */
@@ -331,6 +341,8 @@ export interface StartLabOptions {
  *   probe.ts) and notes it, for finding out why a screen does not paint.
  *   `testdrive-fix-kick-<kick>` asks the native side for that kick instead
  *   (LAB_NATIVE_KICKS), and `testdrive-fix-snapshot` for a native snapshot.
+ * - `testdrive-wait-<sec>`: the test drive, pressed only `sec` seconds after
+ *   the plan screen is ready (#136: is a start soon after launch the trigger?).
  * - `testdrive-early-<name>`: the test drive with one thing changed on the
  *   page from before Start drive is pressed (`EARLY_FIXES` in probe.ts: no
  *   map, a red ground), for #136.
@@ -353,7 +365,10 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
   let lastReport = -Infinity
   const start = driveStart(scenario)
   // `testdrive-fix-<name>`: the same drive, and LAB_FIX_AFTER_MS into it one thing is tried on the page (probe.ts).
-  const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-') || scenario.startsWith('testdrive-early-')
+  const waitMs = startWaitSec(scenario) * 1000
+  const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-') || scenario.startsWith('testdrive-early-') || waitMs > 0
+  /** When the plan screen was first ready to start (routes listed, test drive on); `testdrive-wait-<sec>` counts from there. */
+  let readySince: number | null = null
   const fix = scenario.startsWith('testdrive-fix-') ? labFix(scenario.slice('testdrive-fix-'.length), plugin, probe?.fixes ?? {}, (what) => lab.note(what)) : undefined
   const early = scenario.startsWith('testdrive-early-') ? probe?.early?.[scenario.slice('testdrive-early-'.length)] : undefined
   let earlyDone = early === undefined
@@ -412,7 +427,12 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
           if (testDrive) {
             // Two beats: switch it on, and start only after the page shows it on.
             if (!lab.testDriveOn()) lab.startTestDrive()
-            else if (!earlyDone) {
+            else if (readySince === null && waitMs > 0) {
+              readySince = at
+              lab.note(`plan screen ready: waiting ${waitMs / 1000} s before Start drive`)
+            } else if (readySince !== null && at - readySince < waitMs) {
+              // A person reading the routes before tapping (#136: a finger start after several seconds drew).
+            } else if (!earlyDone) {
               lab.note(`early: ${early?.() ?? 'nothing'}`)
               earlyDone = true
             } else if (pressStart()) autopilot = 'done'

@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { checkDrawnWithin, DEFAULT_LAB_CHECKS, firstDrawn, nativeMetrics, parseLabReport } from '../scripts/phone/lab/assertions.mjs'
 import { readPlan } from '../scripts/phone/lab/queue.mjs'
-import { driveScreenScenario, EARLY_NAMES, labLaunchArgs, NATIVE_SWITCHES, parseArgs } from '../scripts/phone/lab/run.mjs'
+import { driveScreenScenario, EARLY_NAMES, flatStretches, labLaunchArgs, NATIVE_SWITCHES, parseArgs } from '../scripts/phone/lab/run.mjs'
 import { createDriveDiagnostics } from '../src/device/native/diagnostics.ts'
-import { LAB_NATIVE_KICKS, labFix, startLab, type LabDocument, type LabPlugin } from '../src/lab/lab.ts'
+import { LAB_NATIVE_KICKS, labFix, startLab, startWaitSec, type LabDocument, type LabPlugin } from '../src/lab/lab.ts'
 import { EARLY_FIXES } from '../src/lab/probe.ts'
 
 // #136, round 2: the driving screen is black on the iPhone after Start drive. These pin the
@@ -231,5 +231,63 @@ describe('the app side of the lab for #136', () => {
     expect(parsed?.native).toEqual(probe)
     expect(parsed?.startPressedAt).toBe('21:00:00')
     expect(nativeMetrics(parsed?.native ?? null)).toContainEqual(['longest main-thread stall since Start drive, ms', 2300])
+  })
+})
+
+describe('how the drive is started (#136: a finger start after some seconds drew, the lab\'s quick start did not)', () => {
+  const el = (textContent: string) => ({ textContent, disabled: false, checked: true, clicks: 0, click() {
+    this.clicks++
+  } })
+
+  it('testdrive-wait-<sec> presses Start drive only that long after the plan screen is ready, not before', async () => {
+    expect(startWaitSec('testdrive-wait-10')).toBe(10)
+    expect(startWaitSec('testdrive-wait-0')).toBe(0)
+    expect(startWaitSec('testdrive-wait-500')).toBe(0)
+    expect(startWaitSec('testdrive')).toBe(0)
+    const start = el('Start drive')
+    const doc: LabDocument = {
+      querySelector: (s) => ({ '.plan': el('plan'), '.testdrive input[type="checkbox"]': el('') } as Record<string, unknown>)[s] ?? null,
+      querySelectorAll: (s) => (s === 'button' ? [start] : s === '.routes > li' ? [el('Route')] : []),
+    }
+    let nowMs = 1_000_000
+    let beat = () => {}
+    await startLab({
+      plugin: { lab: () => Promise.resolve({ enabled: true, scenario: 'testdrive-wait-10' }), labReport: () => Promise.resolve() },
+      diagnostics: createDriveDiagnostics(() => nowMs),
+      target: { document: doc },
+      now: () => nowMs,
+      every: (_ms, fn) => {
+        beat = fn
+      },
+    })
+    const pass = (ms: number) => {
+      nowMs += ms
+      beat()
+    }
+    pass(1000) // ready: the wait starts
+    for (let i = 0; i < 9; i++) pass(1000)
+    expect(start.clicks).toBe(0)
+    pass(1000)
+    expect(start.clicks).toBe(1)
+  })
+
+  it('run.mjs: --wait and --cold for drive-screen only, one change per run', () => {
+    const wait = parseArgs(['--scenario', 'drive-screen', '--wait', '10', '--cold'])
+    if ('error' in wait) throw new Error(wait.error)
+    expect(driveScreenScenario(wait)).toBe('testdrive-wait-10')
+    expect(wait.cold).toBe(true)
+    expect(parseArgs(['--scenario', 'starts-and-plans', '--cold'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'drive-screen', '--wait', '10', '--early', 'nomap'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'drive-screen', '--wait', '2.5'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'watch-screen', '--seconds', '90'])).not.toHaveProperty('error')
+  })
+
+  it('watch-screen: a flat stretch of 2 s or more is reported with its times; a single flat frame is not', () => {
+    const look = (flat: number) => ({ flat, shade: 0 })
+    const samples = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((sec) => ({ sec, look: look(sec >= 3 && sec <= 6 ? 0.99 : 0.4) }))
+    expect(flatStretches(samples)).toEqual([{ from: 3, to: 6 }])
+    expect(flatStretches([{ sec: 0, look: look(0.4) }, { sec: 1, look: look(0.99) }, { sec: 2, look: look(0.4) }])).toEqual([])
+    // Still flat at the end of the watch counts too.
+    expect(flatStretches([{ sec: 0, look: look(0.4) }, { sec: 5, look: look(0.99) }, { sec: 9, look: look(0.99) }])).toEqual([{ from: 5, to: 9 }])
   })
 })

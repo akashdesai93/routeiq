@@ -101,6 +101,7 @@ place names; it is for the person at the console and is never written to the rep
 | `starts-and-plans` | Starts the app, waits for the plan screen, takes a screenshot. No simulated position. | 30 s |
 | `locked-wrong-turn` | Stands 4.4 km into the Uptown → SouthPark drive, starts the app in lab mode (it starts the drive), sends it to the background, replays the `wrong-turn` track for 170 s (the turn comes about 70 s in), waits 15 s, brings the app back. | 5 min |
 | `background-soak` | The same with the track that stays on the route, from its start, for `--minutes` (default 10). One CPU, memory and battery sample a minute. | 12 min |
+| `watch-screen` | Starts nothing. Takes screenshots one after another for `--seconds` (default 120) while a **person** opens RouteIQ from its icon and taps Start drive with a finger; `watched.json` and the check say where the screen was flat for 2 s or more. For #136: lab starts against human starts. | 2 min |
 | `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots one after another for up to 40 s, each stamped with its seconds since Start drive (`drawn.json`). Passes when the driving screen is drawn **within 2 s of Start drive and stays drawn**. With `--fix <name>` the app tries one thing 12 s in (page: `resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`; native: `kick-layout` … `kick-readd`, `snapshot`); with `--early <name>` it changes the page before Start drive (`nomap`, `red`, `rednomap`); with `--native <list>` the app starts with native lab switches (below, #136). The report's `layout` and `native` lines say how the page and the web view are laid out. No simulated position. | 30–60 s |
 
 Options: `--lock --owner-unlocks-after` (put the phone to sleep while away; the car is then the
@@ -165,6 +166,13 @@ Playwright drew it, and the iOS Simulator job runs without WebGL. So:
   (passcode; no touch). The owner does those once per such build.
 
 ### Lab switches for the black driving screen (#136)
+
+How the drive is started can be varied too: `--wait <sec>` (the hook waits that long with the
+plan screen ready before pressing Start drive, as a person reading the routes would) and
+`--cold` (the app is sent to the background for 15 s before the lab launches it, instead of being
+killed in front and started again at once). Every `drive-screen` run also takes
+`after-relaunch-8s.png` 8 s after the lab's closing plain relaunch: two plan screens were black
+right after it.
 
 `--native a,b` starts the app with `-routeiqLabSwitch a,b`. RouteIQLab.swift reads it only when
 `-routeiqLab` is there too; opened by hand, none of this exists. One switch per run unless the

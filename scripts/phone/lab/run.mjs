@@ -22,6 +22,7 @@ export const SCENARIOS = Object.freeze({
   'starts-and-plans': 'Starts the app and checks that the plan screen lists routes.',
   'locked-wrong-turn': 'Starts a drive, puts the app in the background (and the phone to sleep with --lock), replays a drive with a wrong turn, and checks what the app did meanwhile.',
   'background-soak': 'The same with a drive that stays on the route, for --minutes (default 10), with CPU and battery samples.',
+  'watch-screen': 'Starts nothing: takes screenshots one after another for --seconds (default 120) while a PERSON opens RouteIQ from its icon and taps Start drive. When the drive screen first shows up and whether it is drawn (#136: lab starts against finger starts).',
   'drive-screen': 'Starts the in-app test drive, leaves the app in front and takes screenshots one after another for 40 s: how many seconds after Start drive is the driving screen drawn (it must be within 2 s and stay drawn)? With --fix <name>, tries that 12 s in.',
 })
 
@@ -53,6 +54,9 @@ export const USAGE = [
   '  --fix <name>     drive-screen: tried 12 s in. resize | reflow | layer | nomap | red | scroll (src/lab/probe.ts),',
   '                   kick-layout | kick-display | kick-scroll | kick-frame | kick-opaque | kick-readd (native), snapshot',
   '  --early <name>   drive-screen: changed on the page before Start drive: nomap | red | rednomap',
+  '  --wait <sec>     drive-screen: wait this long with the plan screen ready before Start drive (1-120)',
+  '  --cold           drive-screen: first leave the app in the background 15 s (Calculator in front), then launch it',
+  '  --seconds <n>    watch-screen: how long to watch (default 120)',
   `  --native <list>  native lab switches, comma-separated (#136): ${NATIVE_SWITCHES.join(' ')}`,
   '  --push-web       build the web app (native/shell) and copy it into the app first; the app then runs that build',
   '  --web            run the web build that was pushed earlier instead of the one in the app',
@@ -60,13 +64,14 @@ export const USAGE = [
 ].join('\n')
 
 export function parseArgs(argv) {
-  const options = { scenario: null, fix: null, early: null, native: [], lock: false, ownerUnlocksAfter: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
-  const numbers = { '--away-sec': 'awaySec', '--minutes': 'minutes', '--from-m': 'fromM', '--speed': 'speed' }
+  const options = { scenario: null, fix: null, early: null, native: [], waitSec: 0, cold: false, seconds: 120, lock: false, ownerUnlocksAfter: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
+  const numbers = { '--away-sec': 'awaySec', '--minutes': 'minutes', '--from-m': 'fromM', '--speed': 'speed', '--wait': 'waitSec', '--seconds': 'seconds' }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--lock') options.lock = options.inApp = true
     else if (arg === '--owner-unlocks-after') options.ownerUnlocksAfter = true
     else if (arg === '--in-app') options.inApp = true
+    else if (arg === '--cold') options.cold = true
     else if (arg === '--no-gps') options.gps = false
     else if (arg === '--push-web') options.pushWeb = options.web = true
     else if (arg === '--web') options.web = true
@@ -94,6 +99,10 @@ export function parseArgs(argv) {
   if (options.fix !== null && (options.scenario !== 'drive-screen' || !/^[a-z][a-z-]{1,15}$/.test(options.fix))) return { error: '--fix <name> goes with --scenario drive-screen' }
   if (options.early !== null && (options.scenario !== 'drive-screen' || !EARLY_NAMES.includes(options.early))) return { error: `--early <name> goes with --scenario drive-screen: ${EARLY_NAMES.join(' | ')}` }
   if (options.early !== null && options.fix !== null) return { error: '--early and --fix cannot be combined: one change per run' }
+  if ((options.waitSec > 0 || options.cold) && options.scenario !== 'drive-screen') return { error: '--wait and --cold go with --scenario drive-screen' }
+  if (options.waitSec > 0 && (!Number.isInteger(options.waitSec) || options.waitSec > 120)) return { error: '--wait must be a whole number of seconds, 1 to 120' }
+  if (options.waitSec > 0 && (options.early !== null || options.fix !== null)) return { error: '--wait cannot be combined with --early or --fix: one change per run' }
+  if (options.scenario === 'watch-screen' && (options.seconds < 10 || options.seconds > 600)) return { error: '--seconds must be between 10 and 600' }
   if (options.speed < 1 || options.speed > 40) return { error: '--speed must be between 1 and 40 m/s' }
   if (options.lock && !options.ownerUnlocksAfter) return { error: '--lock leaves the phone with its screen off, and nothing can be looked at after it until someone wakes the phone. Add --owner-unlocks-after to say that is understood, and make it the last run.' }
   if (options.inApp && !options.gps) return { error: '--no-gps goes with the USB position, not with --lock or --in-app' }
@@ -106,8 +115,28 @@ export function labLaunchArgs(name, options) {
   return ['-routeiqLab', name, ...(options.web ? ['-routeiqLabWeb'] : []), ...(options.native.length > 0 ? ['-routeiqLabSwitch', options.native.join(',')] : [])]
 }
 
+/** Stretches of 2 s or more where the screenshots were flat (not drawn), as { from, to } seconds. */
+export function flatStretches(samples, max = DEFAULT_LAB_CHECKS.maxFlatShare, minSec = 2) {
+  const list = samples.filter((s) => s.look != null).sort((a, b) => a.sec - b.sec)
+  const out = []
+  let from = null
+  let last = null
+  for (const s of list) {
+    if (s.look.flat >= max) {
+      if (from === null) from = s.sec
+      last = s.sec
+    } else if (from !== null) {
+      if (last - from >= minSec) out.push({ from, to: last })
+      from = null
+    }
+  }
+  if (from !== null && last - from >= minSec) out.push({ from, to: last })
+  return out
+}
+
 /** The lab scenario drive-screen starts the app with: the test drive, with its --fix or --early. */
 export function driveScreenScenario(options) {
+  if (options.waitSec > 0) return `testdrive-wait-${options.waitSec}`
   return options.early !== null ? `testdrive-early-${options.early}` : options.fix !== null ? `testdrive-fix-${options.fix}` : 'testdrive'
 }
 
@@ -255,10 +284,32 @@ async function main(argv) {
         say(`read through ${seen.via}`)
         checks = [checkPlanShowsRoutes(seen)]
       }
+    } else if (scenario === 'watch-screen') {
+      say(`watching the screen for ${options.seconds} s: open RouteIQ from its icon now, wait as you would, and tap Start drive with a finger`)
+      const began = Date.now()
+      const samples = []
+      let n = 0
+      while (Date.now() - began < options.seconds * 1000) {
+        const sec = (Date.now() - began) / 1000
+        samples.push({ sec, look: await shot(`watch-${String(++n).padStart(3, '0')}-${sec.toFixed(1)}s.png`) })
+      }
+      writeFileSync(path.join(dir, 'watched.json'), JSON.stringify(samples.map((s) => ({ sec: Math.round(s.sec * 10) / 10, flat: s.look?.flat ?? null, shade: s.look?.shade ?? null, rgb: s.look?.rgb ?? null })), null, 1))
+      files.push('watched.json')
+      const flatRuns = flatStretches(samples)
+      const where = flatRuns.map((r) => `${r.from.toFixed(1)} to ${r.to.toFixed(1)} s`).join(', ')
+      say(flatRuns.length === 0 ? 'no flat (undrawn) stretch of 2 s or more' : `flat stretches: ${where}`)
+      checks = [{ name: 'no flat (undrawn) screen for 2 s or more while watched', pass: flatRuns.length === 0, detail: flatRuns.length === 0 ? `${samples.length} screenshots over ${options.seconds} s` : `flat from ${where} (look at the screenshots: a flat screen can also be the wallpaper or the launch screen)` }]
     } else if (scenario === 'drive-screen') {
       const name = driveScreenScenario(options)
       const stopSyslog = phone.startSyslog()
       cleanups.push(() => stopSyslog())
+      if (options.cold) {
+        // #136: the lab's launch kills the app while it is in front and starts it again at once.
+        // Cold: the app goes to the background first and is left there before the launch.
+        await phone.launch(BACKGROUND_APP)
+        say('cold start: app sent to the background, waiting 15 s before launching it')
+        await pause(15_000)
+      }
       if ((await phone.launch(bundle, { args: labArgs(name) })) === null) throw new Error('the app did not start')
       say(`app started in lab mode (${name}${options.native.length > 0 ? `, native switches ${options.native.join(',')}` : ''}): it switches the in-app test drive on and presses Start drive; the phone's position is not used`)
       // The app writes its report the moment it presses Start drive, so a pull once a second
@@ -449,7 +500,19 @@ async function main(argv) {
     if (phone !== null) {
       // Out of lab mode first: a plain start ends the lab drive (and its use of the position) and
       // leaves the app in front as the owner knows it. Only then back to the real GPS.
-      if (bundle !== null) say((await phone.launch(bundle)) !== null ? 'app restarted without the lab' : 'the app could not be restarted')
+      if (bundle !== null && scenario !== 'watch-screen') {
+        const restarted = (await phone.launch(bundle)) !== null
+        say(restarted ? 'app restarted without the lab' : 'the app could not be restarted')
+        // #136: two plan screens were black right after this relaunch. Look at it, every time.
+        if (restarted && scenario === 'drive-screen') {
+          try {
+            await sleep(8000)
+            await shot('after-relaunch-8s.png')
+          } catch {
+            // Only a look.
+          }
+        }
+      }
       const cleared = await phone.clearLocation()
       const again = await phone.disconnect({ clear: simulated !== null })
       if (simulated !== null) {
