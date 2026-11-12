@@ -17,6 +17,7 @@ import {
   type RouteCandidate,
   type RouteDelta,
 } from './core/index.ts'
+import { Figure } from './Figure.tsx'
 import type { SignalsStatus } from './useRoutes.ts'
 
 interface RoutePanelProps {
@@ -120,26 +121,6 @@ function HandoffLinks({
 }
 
 /**
- * A figure as it is typeset in the approved design: the digits large, the unit
- * small and dim beside them. The text is unchanged ("35 min" reads "35 min").
- */
-function Figure({ text }: { text: string }) {
-  return (
-    <>
-      {text.split(/(\d[\d.,:]*)/).map((part, i) =>
-        part === '' ? null : i % 2 === 1 ? (
-          part
-        ) : (
-          <span key={i} className="unit">
-            {part}
-          </span>
-        ),
-      )}
-    </>
-  )
-}
-
-/**
  * The delta row under the route list (#21, #44): what the recommended route
  * gives against the next one, "−8 min · −2 lights · −3 mi". The words come
  * from core (routeDelta); lights it cannot compare say so, never 0.
@@ -237,7 +218,7 @@ export function RoutePanel({
                 )}
               </span>
               <span className="route-eta">
-                <Figure text={formatDuration(route.durationSec)} />
+                <Figure text={formatDuration(route.durationSec)} unitClass="unit" />
               </span>
               <span className="route-facts">
                 <span className="route-distance">{formatDistance(route.distanceM)}</span>{' '}
