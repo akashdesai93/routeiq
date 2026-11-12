@@ -68,8 +68,11 @@ status check `main` requires: `main` is protected and every change arrives throu
 request. See [docs/branch-protection.md](docs/branch-protection.md).
 
 `npm run size` (after a build) checks the bundle-size budget in
-`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, and the CSS
-may each grow 10 % before CI fails.
+`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, the CSS, and
+what the page loads before its first paint (the files `dist/index.html` names) may each grow
+10 % before CI fails. The map (Mapbox GL JS and its CSS) is loaded after the first screen
+(`src/map/LazyMapView.tsx`), so a static import that pulls Mapbox back into the first load
+fails the up-front budget.
 
 ## End-to-end scenarios
 

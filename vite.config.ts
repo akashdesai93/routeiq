@@ -31,10 +31,17 @@ export default defineConfig({
     // change at different times, so the browser keeps the big one cached across app
     // releases, and scripts/check-bundle-size.mjs can hold the app's own code to a budget.
     // Only the three files Mapbox loads up front; the rest it still loads on demand.
+    // The map itself is loaded after the first screen (src/map/LazyMapView.tsx), so the
+    // entry must not import anything from the mapbox-gl chunk. Vite's preload helper is
+    // used by both the app's and Mapbox's dynamic imports, and would otherwise land in
+    // the mapbox-gl chunk and pull all of it in up front: it gets its own small chunk.
     rolldownOptions: {
       output: {
         codeSplitting: {
-          groups: [{ name: 'mapbox-gl', test: /mapbox-gl[\\/]dist[\\/]esm[\\/](mapbox-gl|core|shared)\.js$/ }],
+          groups: [
+            { name: 'preload-helper', test: /vite[\\/]preload-helper/, priority: 2 },
+            { name: 'mapbox-gl', test: /mapbox-gl[\\/]dist[\\/]esm[\\/](mapbox-gl|core|shared)\.js$/, priority: 1 },
+          ],
         },
       },
     },

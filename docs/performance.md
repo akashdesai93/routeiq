@@ -14,7 +14,8 @@ The scripts are in `scripts/perf/`. They import `src/core` (and two pure helpers
 
 | What | Command |
 | --- | --- |
-| Bundle sizes | `npm run build` (the table Vite prints) |
+| Bundle sizes | `npm run build` (the table Vite prints), then `npm run size` |
+| First paint on a slowed CPU | `npm run e2e:build`, then `node scripts/perf/firstpaint.mjs dist-e2e 20` |
 | Per-tick cost | `node scripts/perf/tick.mjs` |
 | Per-check and per-plan cost | `node scripts/perf/check.mjs` (about 4 minutes: the last table is slow on purpose) |
 | Renders and map updates per second | `npm i --no-save jsdom`, then `npx vitest run --config scripts/perf/vitest.config.ts --silent=false --reporter=verbose` |
@@ -49,6 +50,32 @@ running came out up to 50% higher.
 - **First paint** waits for the whole entry chunk (1.7 MB to parse) and the CSS; nothing
   else blocks it. `src/main.tsx` does no awaited work before `createRoot().render()`.
 - How much of the entry chunk is the app's own code: not measured yet.
+
+### After #97: the map after the first screen
+
+Measured on `main` at `324db44` and on the #97 branch, the same way: `npm run build` then
+`npm run size` for sizes, and `node scripts/perf/firstpaint.mjs <dist-e2e build> 20` for
+timing (headless Chromium, 390 x 844, CPU 4x slower, served from disk with everything
+outside localhost refused; three rounds of 20 runs each, alternated, ranges shown). By then `main` already had Mapbox
+GL JS in its own `mapbox-gl-*.js` chunk, but `MapView` imported it statically, so the
+entry still loaded and ran all of it before the first paint.
+
+| | `main` | #97 |
+| --- | ---: | ---: |
+| JavaScript before first paint | 1,733 kB (481 kB gzip) | 381 kB (122 kB gzip) |
+| CSS before first paint | 65.0 kB (9.7 kB gzip) | 16.2 kB (4.2 kB gzip) |
+| First contentful paint, median / p95 | 312-336 / 480-516 ms | 284-292 / 316-352 ms |
+| Plan panel on screen, median / p95 | 540-590 / 616-634 ms | 415-419 / 458-496 ms |
+| Map canvas made, median / p95 | 552-602 / 634-650 ms | 743-763 / 796-826 ms |
+
+The plan panel and the routes come 125 to 175 ms sooner on the slowed CPU; the map comes
+150 to 190 ms later, because its code is only fetched once the first screen has rendered.
+Starting the fetch earlier (at module load, or with a `modulepreload` hint) was tried and
+measured no better. Render counts during a drive are the same as before
+(`scripts/perf/renders.test.tsx`). The panels stay in the entry: `LiveDriveView` because a
+drive must never wait on a file, `DriveDiagnosticsPanel` because it is 2.4 kB (1.1 kB gzip)
+and is opened during a drive, and `ReplayPanel` is development only and already left out of
+production builds.
 
 ## 2. Per-tick cost (once a second while driving)
 
@@ -182,8 +209,8 @@ Desktop numbers, on the synthetic 60 km / 3000-vertex route. "Now" is what was m
 
 | Budget | Limit | Now | Status |
 | --- | --- | --- | --- |
-| Entry JS chunk (app + React, Mapbox split out), gzip | 150 kB | 479.5 kB (Mapbox included) | over |
-| Mapbox GL in its own cached chunk | yes | no | over |
+| Entry JS chunk (app + React, Mapbox split out), gzip | 150 kB | 122 kB (#97) | ok |
+| Mapbox GL in its own cached chunk, loaded after the first screen | yes | yes (#97) | ok |
 | CSS, gzip | 12 kB | 8.35 kB | ok |
 | Pure logic per 1 s tick, p95 | 4 ms | 0.96 ms | ok |
 | Data handed to the map per fix | 1 kB (the car only) | 66.4 kB | over |

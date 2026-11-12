@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Bundle-size budget. Reads the production build in dist/assets and fails when the app's
-// own JavaScript or the CSS has grown past the budget in scripts/bundle-budget.json.
+// own JavaScript, the CSS, or what the page loads before its first paint has grown past
+// the budget in scripts/bundle-budget.json.
 //
 //   npm run build && npm run size          check (CI does this)
 //   npm run size -- --update               after a deliberate growth: record the new
@@ -60,8 +61,27 @@ if (!files.some((f) => f.kind === 'mapbox' && baseName(f.name) === 'mapbox-gl'))
   process.exit(1)
 }
 
-const measured = { appJs: total('appJs'), css: total('css') }
-const labels = { appJs: 'App JavaScript (without Mapbox GL JS)', css: 'CSS' }
+// What the page loads before its first paint: the files dist/index.html names (its module
+// script, modulepreloads and stylesheets). Mapbox GL JS is loaded later
+// (src/map/LazyMapView.tsx), so a static import that pulls it back in shows up here.
+const html = readFileSync(join(root, 'dist', 'index.html'), 'utf8')
+const upFront = new Set([...html.matchAll(/(?:src|href)="[^"]*\/assets\/([^"/]+\.(?:js|css))"/g)].map((m) => m[1]))
+for (const f of files) f.upFront = upFront.has(f.name)
+const totalUpFront = (ext, field = 'size') =>
+  files.filter((f) => f.upFront && f.name.endsWith(ext)).reduce((sum, f) => sum + f[field], 0)
+if (!files.some((f) => f.upFront && f.name.endsWith('.js'))) {
+  console.error('dist/index.html names no script in dist/assets: is this the built app?')
+  process.exit(1)
+}
+
+const measured = { appJs: total('appJs'), css: total('css'), entryJs: totalUpFront('.js'), entryCss: totalUpFront('.css') }
+const gzipOf = { appJs: total('appJs', 'gzip'), css: total('css', 'gzip'), entryJs: totalUpFront('.js', 'gzip'), entryCss: totalUpFront('.css', 'gzip') }
+const labels = {
+  appJs: 'App JavaScript (without Mapbox GL JS)',
+  css: 'CSS',
+  entryJs: 'JavaScript loaded before first paint',
+  entryCss: 'CSS loaded before first paint',
+}
 const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`
 
 if (process.argv.includes('--update')) {
@@ -82,7 +102,7 @@ const rows = Object.keys(measured).map((key) => {
     console.error(`scripts/bundle-budget.json has no numeric "${key}.budget".`)
     process.exit(1)
   }
-  return { key, label: labels[key], size: measured[key], gzip: total(key, 'gzip'), limit, over: measured[key] > limit }
+  return { key, label: labels[key], size: measured[key], gzip: gzipOf[key], limit, over: measured[key] > limit }
 })
 
 const lines = [
@@ -98,11 +118,11 @@ const lines = [
   '',
   '<details><summary>Files</summary>',
   '',
-  '| file | counted as | size | gzip |',
-  '| --- | --- | ---: | ---: |',
+  '| file | counted as | up front | size | gzip |',
+  '| --- | --- | :---: | ---: | ---: |',
   ...files
     .toSorted((a, b) => b.size - a.size)
-    .map((f) => `| \`${f.name}\` | ${f.kind} | ${kB(f.size)} | ${kB(f.gzip)} |`),
+    .map((f) => `| \`${f.name}\` | ${f.kind} | ${f.upFront ? 'yes' : ''} | ${kB(f.size)} | ${kB(f.gzip)} |`),
   '',
   '</details>',
   '',
