@@ -150,6 +150,12 @@ export interface LiveSwitch {
   readonly code: RerouteCode
   /** The engine's sentence for it. */
   readonly reason: string
+  /**
+   * The time the engine said the switch saves, in seconds: the fresh time of
+   * the route left minus that of the new one. Null when it claimed none (a
+   * closure ahead, a new route after leaving the old one).
+   */
+  readonly savingSec: number | null
 }
 
 export interface LiveSummary {
@@ -834,7 +840,7 @@ function checked(
   const saving = decision.considered?.savingSec ?? null
   const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
-  const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason }
+  const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason, savingSec: offRoute ? null : saving }
   const turnInM = decision.considered?.turnInM ?? null
   // The banner shows what is said, word for word (#22).
   const spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet)

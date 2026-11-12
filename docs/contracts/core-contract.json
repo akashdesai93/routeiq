@@ -1,6 +1,6 @@
 {
-  "version": 5,
-  "hash": "4ffa7daa55615e5991104c8503f660d3d7ddbb6172e9b4f4ece050ddcc954a5e",
+  "version": 6,
+  "hash": "d94f8991775aada140c52bbc2c950effc74ed8892e178fb6ca508a9ae5cc6dfd",
   "history": [
     {
       "version": 1,
@@ -20,14 +20,21 @@
     },
     {
       "version": 5,
-      "hash": "4ffa7daa55615e5991104c8503f660d3d7ddbb6172e9b4f4ece050ddcc954a5e"
+      "hash": "b770e5a33ec7284a45120bf1e2a61f3a280b34040f812adf72ed7ec696e19737"
+    },
+    {
+      "version": 6,
+      "hash": "d94f8991775aada140c52bbc2c950effc74ed8892e178fb6ca508a9ae5cc6dfd"
     }
   ],
   "declarations": {
     "CheckProbeMemory": "interface CheckProbeMemory { readonly used : number readonly round : number readonly keep : LngLat | null }",
     "CongestionLevel": "type CongestionLevel = 'low' | 'moderate' | 'heavy' | 'severe' | 'unknown'",
     "DistanceSpanM": "type DistanceSpanM = readonly [ startM : number , endM : number ]",
+    "DriveLog": "interface DriveLog { readonly version : typeof DRIVE_LOG_VERSION readonly drives : readonly DriveRecord [ ] }",
+    "DriveOutcome": "type DriveOutcome = 'arrived' | 'ended' | 'unfinished'",
     "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number }",
+    "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome }",
     "GuidanceAnnouncement": "interface GuidanceAnnouncement { readonly atDistanceM : number readonly text : string }",
     "GuidanceCursor": "interface GuidanceCursor { readonly next : number }",
     "GuidanceStep": "interface GuidanceStep { readonly atDistanceM : number readonly location : LngLat readonly type : string readonly modifier : string | null readonly primaryText : string readonly secondaryText : string | null readonly announcements : readonly GuidanceAnnouncement [ ] readonly synthesized : boolean }",
@@ -37,8 +44,10 @@
     "LiveState": "interface LiveState { readonly status : LiveStatus readonly destination : LngLat | null readonly startedAtMs : number | null readonly picked : RouteCandidate | null readonly pickedAtMs : number | null readonly message : string | null readonly gpsNote : string | null readonly lastFix : PositionFix | null readonly route : RouteCandidate | null readonly tracking : TrackingState | null readonly engine : RerouteState readonly guidance : GuidanceCursor readonly request : { readonly id : number readonly purpose : RequestPurpose readonly sentAtMs : number readonly alongM : number readonly distanceFromRouteM : number readonly extraSent ? : number readonly probesSent ? : number } | null readonly nextRequestId : number readonly requestsUsed : number readonly probes : CheckProbeMemory readonly lastRequestAtMs : number | null readonly lastCheckedAtMs : number | null readonly recheck : boolean readonly lastDecision : { readonly action : 'stay' | 'switch' readonly code : RerouteCode | 'kept-previous' readonly reason : string readonly atMs : number } | null readonly candidates : readonly RouteCandidate [ ] | null readonly eta : { readonly durationSec : number readonly remainingM : number } | null readonly turn : { readonly at : LngLat readonly pending : boolean } | null readonly switchBanner : { readonly untilMs : number readonly text : string readonly canKeep : boolean readonly atMs : number readonly beforeSec : number | null readonly afterSec : number readonly turnInM : number | null } | null readonly offer : { readonly savingSec : number | null readonly lightsDelta : number | null readonly turnInM : number readonly again : boolean } | null readonly kept : { readonly untilMs : number readonly noReturnSec : number } | null readonly declinedTurns : readonly LngLat [ ] readonly undo : { readonly route : RouteCandidate readonly alongM : number readonly engine : RerouteState readonly eta : LiveState [ 'eta' ] } | null readonly switches : readonly LiveSwitch [ ] readonly declinedSwitches : number readonly offRouteNotified : boolean readonly offRouteReplans : number readonly hiddenSinceMs : number | null readonly pausedNote : { readonly seconds : number readonly untilMs : number } | null readonly wakeLock : WakeLockStatus readonly muted : boolean readonly summary : LiveSummary | null }",
     "LiveStatus": "type LiveStatus = 'idle' | 'locating' | 'planning' | 'driving' | 'arrived' | 'failed'",
     "LiveSummary": "interface LiveSummary { readonly tripSec : number readonly switches : readonly LiveSwitch [ ] readonly declined : number readonly requestsUsed : number }",
-    "LiveSwitch": "interface LiveSwitch { readonly atMs : number readonly code : RerouteCode readonly reason : string }",
+    "LiveSwitch": "interface LiveSwitch { readonly atMs : number readonly code : RerouteCode readonly reason : string readonly savingSec : number | null }",
     "LngLat": "type LngLat = readonly [ lng : number , lat : number ]",
+    "LoggedSignals": "interface LoggedSignals { readonly count : number readonly partial : boolean }",
+    "LoggedSwitch": "interface LoggedSwitch { readonly atSec : number readonly code : RerouteCode readonly accepted : boolean readonly claimedSavingSec : number | null readonly newRouteSec : number | null readonly realisedSavingSec : number | null readonly toSource : RouteSource }",
     "Maneuver": "interface Maneuver { readonly atDistanceM : number readonly kind : string readonly location : LngLat }",
     "NativeFix": "interface NativeFix { readonly lng : number readonly lat : number readonly accuracy ? : number readonly speed ? : number readonly course ? : number readonly timestamp ? : number readonly simulated ? : boolean }",
     "NativeListenerHandle": "interface NativeListenerHandle { remove ( ) : Promise < void > }",

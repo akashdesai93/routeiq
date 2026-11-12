@@ -19,13 +19,15 @@ export interface E2EWindow {
     /** Every URL the page handed to fetch, in order, including calls cancelled before they left. */
     fetched: string[]
     fix: (lng: number, lat: number, headingDeg: number, speedMps: number) => void
+    /** Location permission is taken away: every position watch gets a "denied" error. */
+    deny: () => void
     /** The position "Use my location" gets; null answers with a refusal. */
     here: [number, number] | null
   }
 }
 
 export function installBrowserStubs(): void {
-  type Watcher = { ok: (p: GeolocationPosition) => void }
+  type Watcher = { ok: (p: GeolocationPosition) => void; fail?: (e: GeolocationPositionError) => void }
   const w = window as unknown as E2EWindow & Window
   const watchers = new Map<number, Watcher>()
   let nextId = 1
@@ -43,6 +45,9 @@ export function installBrowserStubs(): void {
     fix(lng, lat, headingDeg, speedMps) {
       for (const watcher of watchers.values()) watcher.ok(position(lng, lat, speedMps > 0.5 ? headingDeg : null, speedMps))
     },
+    deny() {
+      for (const watcher of watchers.values()) watcher.fail?.({ code: 1, PERMISSION_DENIED: 1, message: 'denied' } as GeolocationPositionError)
+    },
   }
 
   const geolocation = {
@@ -53,9 +58,9 @@ export function installBrowserStubs(): void {
         else ok(position(here[0], here[1], null, null))
       }, 0)
     },
-    watchPosition(ok: (p: GeolocationPosition) => void) {
+    watchPosition(ok: (p: GeolocationPosition) => void, fail?: (e: GeolocationPositionError) => void) {
       const id = nextId++
-      watchers.set(id, { ok })
+      watchers.set(id, { ok, fail })
       return id
     },
     clearWatch(id: number) {
