@@ -20,6 +20,7 @@ names. Use the token, never the raw value, and never invent a near-copy.
 | `--raised` | `#171a1f` | a control or tile inside a sheet | |
 | `--hair` | `#2c3138` | hairline borders (decoration only) | 1.5:1 |
 | `--hair2` | `#59616c` | grabber, off toggle, quiet outlines | 3.1:1 (UI only) |
+| `--hair-night` | `#6b737e` | the turn card's and the sheet's edge over the night map (#145) | 4.1:1 (UI only; 3.5:1 on the night land) |
 | `--fg` | `#f2f4f6` | text, the primary (filled white) button | 17.6:1 |
 | `--dim` | `#9aa1ab` | units, labels, secondary text | 7.5:1 |
 | `--amber` | `#ffb000` | **news only**: a pending or confirmed switch | 10.6:1 |

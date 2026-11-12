@@ -9,6 +9,8 @@
   --raised2: #20242b;
   --hair: #2c3138;
   --hair2: #59616c;
+  /* The cards' edge over a night map (#145): 3.5:1 on its land, 4.1:1 on --glass. */
+  --hair-night: #6b737e;
   --fg: #f2f4f6;
   --dim: #9aa1ab;
   --amber: #ffb000;
