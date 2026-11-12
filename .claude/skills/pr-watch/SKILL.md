@@ -24,21 +24,32 @@ For each open, non-draft PR on `akashdesai93/routeiq`
    `pr-watch: reviewed <sha>` comment).
 2. **CI:** `gh pr checks N`. The check that decides is `required`; the others (`web / …`,
    `e2e / …`, the native and macOS jobs when they ran) say which part failed. A pending
-   check is no reason to wait with the review (step 4). A failing check means comment with
+   check is no reason to wait with the review (step 5). A failing check means comment with
    the failing job and its log tail (`gh run view --log-failed`), then stop for this PR.
    CodeQL is not required: read its annotations, and treat a new high-severity alert as a
    blocking finding.
-3. **Local verify** for PRs that touch the web app (`src/`, `tests/`, `scripts/`,
+3. **Review findings** (CLAUDE.md, "Review findings become checks"). Read Copilot's review
+   comments and the CodeQL alerts on the newest commit
+   (`gh api repos/akashdesai93/routeiq/pulls/N/comments`, `/pulls/N/reviews`, and the
+   `CodeQL` check run's annotations). Every thread needs an outcome before the merge:
+   - a **true** finding is fixed in this PR together with a guard (a test that fails
+     without the fix, a lint rule or a CI step; a reviewer-checklist line only when
+     nothing automated fits). A fix with no guard is a blocking finding: request changes.
+   - **noise** gets a one-line reply on the thread saying why, then the thread is resolved.
+   - a kind of finding you have seen before on another PR needs an automated guard, not a
+     checklist line: request one, or file a `triage` issue for it.
+4. **Local verify** for PRs that touch the web app (`src/`, `tests/`, `scripts/`,
    `package*.json`) when CI doesn't already run typecheck, lint and test: check the
    branch out in a scratch worktree
    (`git worktree add ../routeiq-review-N origin/<branch>`), run `npm.cmd ci` and the
    `/verify` steps there, then `git worktree remove` it. Never use the main checkout.
-4. **Review:** spawn one `route-logic-reviewer` agent with the PR number, and have it
+5. **Review:** spawn one `route-logic-reviewer` agent with the PR number, and have it
    read `gh pr diff N` itself. Native-only PRs (`native/**`, `.github/workflows/native-*`)
    are reviewed against `native/README.md` and their parity with `src/core` instead.
    Give the agent the diff, not your opinion of it.
-5. **Decide:**
-   - **Merge** when the reviewer reports no blocking finding, verify is green, the PR has
+6. **Decide:**
+   - **Merge** when the reviewer reports no blocking finding, every Copilot and CodeQL
+     thread has an outcome (step 3), verify is green, the PR has
      no conflicts, and the PR body says how it was verified. Use
      `gh pr merge N --squash --auto`: GitHub merges it as soon as `required` is green, and
      refuses while it is red, so there is no merging on red CI. If GitHub says the branch
@@ -58,7 +69,7 @@ For each open, non-draft PR on `akashdesai93/routeiq`
    - **Escalate** with `needs-human` and a comment when the PR changes product behaviour
      beyond its issue, touches licensing, privacy or tokens, deletes data, or changes
      CI permissions or secrets. Name the PR in the next status update to the owner.
-6. Record each outcome on the status board (see the `status` skill).
+7. Record each outcome on the status board (see the `status` skill).
 
 Never use `--admin`, never force-push, never push to `main`, and never take branch
 protection off: only the owner does that. If GitHub Actions is down (runs queued with no
