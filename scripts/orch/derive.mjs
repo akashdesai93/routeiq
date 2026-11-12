@@ -251,6 +251,8 @@ export function derive(raw, opts = {}) {
     ? { state: 'unknown', sha: null, url: null, at: null }
     : { state: newest.conclusion === 'success' ? 'green' : 'red', conclusion: newest.conclusion, sha: newest.head_sha.slice(0, 7), url: newest.html_url, at: newest.created_at }
 
+  const bundle = bundleHeadroom(raw.main?.bundle)
+
   const orphaned = prs.filter((p) => p.orphaned).map((p) => ({ pr: p.number, title: p.title, reason: p.conflicting ? 'conflicting' : 'red', idle_h: p.idle_h, author: p.author, author_state: p.author_state }))
   // Silent counts only with work in flight: an open PR of its own, or an open issue it works on.
   // in_flight (the board's Sessions table) also counts an open issue the session only names;
@@ -310,6 +312,7 @@ export function derive(raw, opts = {}) {
   const alerts = []
   if (heartbeat.orchestrator.alert) alerts.push({ key: 'heartbeat', text: heartbeat.orchestrator.at ? `Orchestrator heartbeat is ${Math.round(heartbeat.orchestrator.age_min / 6) / 10} h old` : 'No orchestrator heartbeat on #17' })
   if (main.state === 'red') alerts.push({ key: 'main', text: `main is red at ${main.sha} (${main.conclusion})` })
+  for (const m of bundle.high) alerts.push({ key: `bundle-${m.key}`, text: `main's ${m.key} is ${(m.used * 100).toFixed(1)} % of its bundle ceiling (${(m.size / 1000).toFixed(1)} of ${(m.ceiling / 1000).toFixed(1)} kB): raise the ceiling or cut code, by decision (#170)` })
   for (const p of orphaned) alerts.push({ key: `orphan-${p.pr}`, text: `PR #${p.pr} is ${p.reason} with no push for ${p.idle_h} h` })
   for (const s of silent) alerts.push({ key: `silent-${s.name}`, text: `${s.name} (${s.role}) is ${s.status} and silent for ${s.silent_h} h` })
   for (const d of stray) alerts.push({ key: `stray-${d.about[0] ?? d.who}`, text: `Decision asked by ${d.who} is not on a needs-human issue${d.about.length ? ` (${d.about.map((n) => `#${n}`).join(', ')})` : ''}` })
@@ -318,6 +321,7 @@ export function derive(raw, opts = {}) {
     generated_at: now,
     ok: alerts.length === 0,
     main,
+    bundle,
     heartbeat,
     orphaned_prs: orphaned,
     silent_sessions: silent,
@@ -353,4 +357,19 @@ export function mergeLocal(state, local) {
   for (const e of local.events || []) if (!events.has(key(e))) events.set(key(e), e)
   const localHealth = local.health && typeof local.health === 'object' ? { local_health: local.health } : {}
   return { ...state, ...localHealth, sessions: [...sessions.values()].sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))), events: [...events.values()].sort(byAt) }
+}
+
+/**
+ * Main's bundle against the owner's ceiling (#170), from the `bundle-size` notice of its Gate run
+ * (scripts/check-bundle-size.mjs, headroomReport). `high` lists the measures above `alertAt`.
+ * No notice means unknown: no alert, and nothing is reported as 0 %.
+ */
+export function bundleHeadroom(notice) {
+  if (!notice || typeof notice !== 'object' || !(notice.alertAt > 0)) return { state: 'unknown', measures: [], high: [] }
+  const measures = Object.entries(notice)
+    .filter(([, v]) => v && typeof v === 'object' && Number.isFinite(v.size) && Number.isFinite(v.ceiling) && v.ceiling > 0)
+    .map(([key, v]) => ({ key, size: v.size, ceiling: v.ceiling, used: v.size / v.ceiling }))
+  if (measures.length === 0) return { state: 'unknown', measures: [], high: [] }
+  const high = measures.filter((m) => m.used > notice.alertAt)
+  return { state: high.length ? 'high' : 'ok', alert_at: notice.alertAt, sha: notice.head_sha ? String(notice.head_sha).slice(0, 7) : null, url: notice.url ?? null, measures, high }
 }
