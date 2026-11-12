@@ -248,6 +248,8 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 drive's state (a record begins when the drive sets off, is written at a
                 switch and at the end), the coarse corridor key, the stored shape read
                 back without trusting it, the per-corridor summaries and the CSV export.
+                stops.ts is its stop meter (#196): where the car stood still on a
+                drive, whether at a light, and street against freeway time.
                 tracking.ts turns raw position fixes into a place on the route, with
                 an off-route verdict that takes patience. guidance.ts picks the turn
                 to show and the announcement that is due. speechQueue.ts is what is
@@ -1463,12 +1465,36 @@ at the start against what the drive really took. Rules: `src/core/driveLog.ts`; 
   see the end of is still kept, as "not finished") and when the drive arrives or End is
   tapped. Nothing is written or computed on the 1-second tick. A development replay and the
   iPhone app's test drive (simulated GPS) are not logged.
+- **Stops (#196):** during the drive every fix is handed to a stop meter
+  (`src/core/stops.ts`). The car is **stopped** while its speed is under a walking pace
+  (`crawlSpeedMps`; the device's own speed reading, else the drive's smoothed speed), so
+  creeping in a queue counts as waiting; a stop shorter than `minStopSec` is not kept. When
+  the car moves off, the stop is **at a light** if a light the route's count found (the same
+  OpenStreetMap data and rules, loaded once per route) lies up to `lightAheadM` ahead of
+  where the car last stood or `lightBehindM` behind it. It is **not at a light** only when
+  the light data covers the whole route; with partial or missing data, or with the car off
+  the route, the place is **unknown**, never "no light". Each stop keeps seconds into the
+  drive, its length (to a tenth of a second), the meters driven before it, its place and the
+  road (street, freeway, or unknown): no position, no light id. The totals (time stopped,
+  stops and time at lights) count every stop, so the listed stops add up to them; at most
+  `maxStopsKept` are listed. The meter also adds up the time on **streets** and on
+  **freeway** (the route's limited-access spans, `RouteCandidate.limitedAccessSpansM`) and,
+  for a drive that kept no switch, sets it against the first route's prediction per part
+  (from Mapbox's per-segment times). Unknown road class on any route of the drive leaves the
+  split out. Cost per fix: a few comparisons and additions, no search, no write; the light
+  lookup runs once per stop. A drive recorded before this has no stops (shown as nothing,
+  not as zero). Stops are measured only, not used for ranking or switching (step 3 of #196
+  waits for the owner's decision).
 - **Drives screen:** the Drives button on the plan screen. Newest drive first (predicted,
-  took, the difference, the other app's ETA, switches), then a summary per corridor
+  took, the difference, the other app's ETA, switches, and the stops: moving against
+  stopped, the time at lights, the three longest waits at lights with how far into the drive
+  they were, and streets and freeway predicted against taken), then a summary per corridor
   (Corridor A, B, ... by first drive): the median error overall, by hour of the start and
   by route source ("Mapbox routes: under-estimated by 2 min"). Only arrived drives are
   compared; a drive ended early or not finished is listed and counted, not compared.
-- **Export:** the log as CSV (one row per drive, start time in UTC, hour in local time),
+- **Export:** the log as CSV (one row per drive, start time in UTC, hour in local time;
+  the last three columns are the minutes stopped, the stops at lights and the minutes at
+  lights, blank when not measured),
   through the share sheet (in the iPhone app, the app's own; in a browser, where it offers
   one), or Copy. **Clear drive log** asks once,
   then removes it from the device.
@@ -1480,6 +1506,14 @@ at the start against what the drive really took. Rules: `src/core/driveLog.ts`; 
 | `corridorGridDeg` | 0.01° | each end is rounded to this grid (about 1.1 km) before the corridor key is made |
 | `maxDrives` | 500 | drives kept; the oldest go first |
 | `maxOtherAppMin` | 600 | the largest other-app ETA accepted, in minutes |
+
+| Setting (`DEFAULT_STOP_OPTIONS`) | Value | Meaning |
+| --- | --- | --- |
+| `crawlSpeedMps` | 1.5 m/s | under this (about 5 km/h, a walking pace) the car is stopped or crawling |
+| `minStopSec` | 5 s | a shorter stop is not kept |
+| `lightAheadM` | 80 m | a light up to this far ahead of where the car last stood makes it a wait at a light (a queue several cars long) |
+| `lightBehindM` | 25 m | ...or up to this far behind (the light's point inside the junction, the car crept past it) |
+| `maxStopsKept` | 100 | stops listed per drive; the totals count all |
 
 The stored shape is versioned: localStorage key `routeiq.drives.v1`, value
 `{ "version": 1, "drives": [...] }` (`DriveLog` in the core contract, docs/contracts.md). A
@@ -1592,8 +1626,9 @@ RouteIQ; a destination picked from search is kept in the recent list (below).
 
 **The drive log** (Drives screen) lives only on the device, in localStorage under
 `routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
-holds times, durations, distances, light counts, switch savings, request counts and, for
-each drive, the route's source (Mapbox or side street, never the route itself or its
+holds times, durations, distances, light counts, switch savings, request counts, stops
+(seconds into the drive, length, meters driven before them, at a light or not; never a
+position or which light) and, for each drive, the route's source (Mapbox or side street, never the route itself or its
 id) and a corridor key: the drive's first position and its destination, each rounded
 to about a kilometre and hashed together, so a record holds no coordinate, address or
 place name. The rounding is what protects you; the hash only makes the key short. Someone
@@ -1602,7 +1637,11 @@ says roughly which areas you drive between and when, and is treated as private. 
 never sent anywhere: the only way out is Export, which hands the CSV to the share sheet or
 the clipboard for you to send yourself. "Clear drive log" removes all of it, as does
 clearing the site's (or the app's) data. The other app's ETA you type is kept with its
-drive only.
+drive only. To tell a wait at a light, the drive loads the lights of the route it is on from
+the same signal data as the route's light count: the bundled tiles, else the device cache,
+and Overpass only for a tile the bundle does not cover, at most once per tile per session
+(the check that counted the route asked already). Only tile bounding boxes leave the
+device, as for the count; the car's position is read in memory and not kept.
 
 **Saved places, recent destinations and the last trip** live only in this browser's
 localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They

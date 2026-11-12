@@ -313,6 +313,21 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     destination) is not logged; the realised saving is measured for the last kept
     switch only.
 
+13. **Where the driver waits** (#196). Steps 1 and 2 **done**: the stop meter
+    (`src/core/stops.ts`) measures each stop of a live drive on the device (speed under a
+    walking pace for 5 s or more), tells a wait at a known light from one elsewhere (unknown
+    when the light data is partial), and adds up street against freeway time; the drive log
+    keeps it with no position, and the Drives screen shows moving against stopped, the time
+    at lights, the worst three lights and streets/freeway predicted against taken. Tests:
+    `tests/stops.test.ts`; e2e: "after a drive, the Drives screen shows where I sat at
+    lights, and the waits add up to the time I stood still" (`e2e/stops.spec.ts`).
+    Step 3 (an expected wait per light added to a route's time when ranking and switching)
+    is **waiting for the owner's decision** on #196: it reverses the "no per-signal penalty"
+    rule and needs a per-light history on the phone, which the privacy rules do not allow
+    today. Open for later: a freeway scenario once the made-up world has one (#191); the
+    per-light history by hour and direction (part of step 3's decision); a stop under way
+    when a switch is written is left out of that write (it is in the final one).
+
 ## Native iPhone + CarPlay (later)
 
 - Swift app on Mapbox Navigation SDK for iOS v3 (current 3.34.2: Swift 5.9+,

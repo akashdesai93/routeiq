@@ -14,6 +14,21 @@ export function formatDuration(sec: number): string {
   return min === 0 ? `${h} h` : `${h} h ${min} min`
 }
 
+/**
+ * A wait, to the second: "45 s", "1 min 5 s", "3 min", "1 h 2 min". A minute
+ * or more drops the seconds once it reaches 10 minutes, an hour or more drops them always.
+ */
+export function formatWait(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return NOT_AVAILABLE
+  const total = Math.round(sec)
+  if (total < 60) return `${total} s`
+  if (total >= 3600) return formatDuration(total)
+  const min = Math.floor(total / 60)
+  const s = total % 60
+  if (min >= 10) return `${Math.round(total / 60)} min`
+  return s === 0 ? `${min} min` : `${min} min ${s} s`
+}
+
 /** US units: "5.8 mi", "12 mi", or feet (to the nearest 10) under a tenth of a mile. */
 export function formatDistance(meters: number): string {
   if (!Number.isFinite(meters) || meters < 0) return NOT_AVAILABLE

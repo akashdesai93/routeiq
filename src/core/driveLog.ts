@@ -1,6 +1,7 @@
 import { geometryHash } from './hash.ts'
 import type { LiveState, LiveSwitch } from './live.ts'
 import type { RerouteCode } from './reroute.ts'
+import { driveStops, meterFix, startStopMeter, type DriveStops, type LightsOf, type LoggedStop, type StopMeter } from './stops.ts'
 import type { LngLat, RouteSource, SignalCoverage } from './types.ts'
 
 /**
@@ -107,6 +108,11 @@ export interface DriveRecord {
   /** Route requests the drive made (probes included). */
   readonly requests: number
   readonly outcome: DriveOutcome
+  /**
+   * Where the car stood still, and street against freeway time (see stops.ts, #196).
+   * Null for a drive recorded before stops were measured: not measured, never "no stops".
+   */
+  readonly stops: DriveStops | null
 }
 
 export interface DriveLog {
@@ -168,9 +174,14 @@ export interface DriveRecorder {
   readonly done: boolean
   /** What was seen last, to tell a change from a tick. */
   readonly seen: { readonly switches: readonly LiveSwitch[]; readonly declined: number; readonly offRoute: boolean }
+  /** The stops measured so far (stops.ts). In memory only; written into the record. Null before the drive began. */
+  readonly meter: StopMeter | null
 }
 
-export const RECORDER_IDLE: DriveRecorder = { draft: null, done: false, seen: { switches: [], declined: 0, offRoute: false } }
+export const RECORDER_IDLE: DriveRecorder = { draft: null, done: false, seen: { switches: [], declined: 0, offRoute: false }, meter: null }
+
+/** No lights known for any route: every stop's place is 'unknown'. */
+const NO_LIGHTS: LightsOf = () => undefined
 
 /** What the recorder needs from outside the live state, at the start of a drive. Used in memory only. */
 export interface DriveContext {
@@ -212,6 +223,7 @@ function begin(state: LiveState, nowMs: number, context: DriveContext, options: 
     offRouteEvents: 0,
     requests: state.requestsUsed,
     outcome: 'unfinished',
+    stops: null,
   }
 }
 
@@ -232,8 +244,22 @@ function realise(draft: DriveRecord, endMs: number): readonly LoggedSwitch[] {
   })
 }
 
-function finish(draft: DriveRecord, state: LiveState, nowMs: number, outcome: 'arrived' | 'ended'): DriveRecord {
-  return {
+/** The record's stops from the meter. `final`: the drive is over, so a stop under way is closed. */
+function withStops(draft: DriveRecord, meter: StopMeter | null, state: LiveState, nowMs: number, lightsOf: LightsOf, final: boolean): DriveRecord {
+  if (meter === null) return draft
+  const switched = draft.switches.some((s) => s.accepted)
+  return { ...draft, stops: driveStops(meter, state, nowMs, lightsOf, final, switched) }
+}
+
+function finish(
+  draft: DriveRecord,
+  meter: StopMeter | null,
+  state: LiveState,
+  nowMs: number,
+  outcome: 'arrived' | 'ended',
+  lightsOf: LightsOf,
+): DriveRecord {
+  const done: DriveRecord = {
     ...draft,
     endedAtMs: nowMs,
     actualSec: elapsedSec(draft, nowMs),
@@ -241,6 +267,7 @@ function finish(draft: DriveRecord, state: LiveState, nowMs: number, outcome: 'a
     requests: state.requestsUsed,
     outcome,
   }
+  return withStops(done, meter, state, nowMs, lightsOf, true)
 }
 
 /**
@@ -256,6 +283,8 @@ function finish(draft: DriveRecord, state: LiveState, nowMs: number, outcome: 'a
  * - "Off the route" said for a new excursion is counted (no write).
  * - Arriving writes the record as 'arrived', with the real time and each
  *   kept switch's realised saving.
+ * - Each new fix is handed to the stop meter (stops.ts): a few comparisons,
+ *   nothing written. The stops go into the record whenever it is written.
  */
 export function observeDrive(
   recorder: DriveRecorder,
@@ -264,6 +293,8 @@ export function observeDrive(
   /** Asked for only when the drive begins on its first route, never on a tick. */
   context: () => DriveContext,
   options: Partial<DriveLogOptions> = {},
+  /** The lights of a route, asked for once per stop (when the car moves off). Left out: no lights known. */
+  lightsOf: LightsOf = NO_LIGHTS,
 ): RecorderStep {
   if (recorder.done) return { recorder, write: null }
   const seen = recorder.seen
@@ -272,20 +303,27 @@ export function observeDrive(
     if (state.status !== 'driving') return { recorder, write: null }
     draft = begin(state, nowMs, context(), options)
     if (draft === null) return { recorder, write: null }
+    const meter = meterFix(startStopMeter(state.route!, nowMs), state, nowMs, lightsOf)
     // Anything that happened before the record began is not this record's.
-    return { recorder: { draft, done: false, seen: { switches: state.switches, declined: state.declinedSwitches, offRoute: state.offRouteNotified } }, write: null }
+    return {
+      recorder: { draft, done: false, seen: { switches: state.switches, declined: state.declinedSwitches, offRoute: state.offRouteNotified }, meter },
+      write: null,
+    }
   }
 
   if (state.status === 'arrived') {
-    const done = finish(draft, state, nowMs, 'arrived')
+    const done = finish(draft, recorder.meter, state, nowMs, 'arrived', lightsOf)
     return { recorder: { ...RECORDER_IDLE, done: true }, write: done }
   }
   if (state.status !== 'driving') return { recorder, write: null }
 
+  const meter = recorder.meter === null ? null : meterFix(recorder.meter, state, nowMs, lightsOf)
   const switchesChanged = state.switches !== seen.switches
   const declinedChanged = state.declinedSwitches !== seen.declined
   const offRouteChanged = state.offRouteNotified !== seen.offRoute
-  if (!switchesChanged && !declinedChanged && !offRouteChanged) return { recorder, write: null }
+  if (!switchesChanged && !declinedChanged && !offRouteChanged) {
+    return meter === recorder.meter ? { recorder, write: null } : { recorder: { ...recorder, meter }, write: null }
+  }
 
   let write = false
   if (offRouteChanged && state.offRouteNotified) draft = { ...draft, offRouteEvents: draft.offRouteEvents + 1 }
@@ -311,9 +349,9 @@ export function observeDrive(
     draft = { ...draft, switches: [...draft.switches, ...added] }
     write = true
   }
-  if (write) draft = { ...draft, actualSec: elapsedSec(draft, nowMs), requests: state.requestsUsed }
+  if (write) draft = withStops({ ...draft, actualSec: elapsedSec(draft, nowMs), requests: state.requestsUsed }, meter, state, nowMs, lightsOf, false)
   return {
-    recorder: { draft, done: false, seen: { switches: state.switches, declined: state.declinedSwitches, offRoute: state.offRouteNotified } },
+    recorder: { draft, done: false, seen: { switches: state.switches, declined: state.declinedSwitches, offRoute: state.offRouteNotified }, meter },
     write: write ? draft : null,
   }
 }
@@ -323,9 +361,9 @@ export function observeDrive(
  * A drive that began on a route and has not arrived is written as 'ended';
  * otherwise there is nothing to write.
  */
-export function endDrive(recorder: DriveRecorder, state: LiveState, nowMs: number): RecorderStep {
+export function endDrive(recorder: DriveRecorder, state: LiveState, nowMs: number, lightsOf: LightsOf = NO_LIGHTS): RecorderStep {
   if (recorder.done || recorder.draft === null) return { recorder: { ...RECORDER_IDLE, done: true }, write: null }
-  return { recorder: { ...RECORDER_IDLE, done: true }, write: finish(recorder.draft, state, nowMs, 'ended') }
+  return { recorder: { ...RECORDER_IDLE, done: true }, write: finish(recorder.draft, recorder.meter, state, nowMs, 'ended', lightsOf) }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +393,41 @@ function parseSwitch(raw: unknown): LoggedSwitch | null {
   return { atSec, code, accepted, claimedSavingSec, newRouteSec, realisedSavingSec, toSource }
 }
 
+const isPlace = (v: unknown): v is LoggedStop['place'] => v === 'light' || v === 'none' || v === 'unknown'
+const isRoad = (v: unknown): v is LoggedStop['road'] => v === 'surface' || v === 'freeway' || v === 'unknown'
+const isCount = (v: unknown): v is number => isNum(v) && v >= 0
+
+function parseStop(raw: unknown): LoggedStop | null {
+  if (!isObject(raw)) return null
+  const { atSec, durationSec, drivenM, place, road } = raw
+  if (!isCount(atSec) || !isCount(durationSec) || !isNumOrNull(drivenM) || !isPlace(place) || !isRoad(road)) return null
+  return { atSec, durationSec, drivenM, place, road }
+}
+
+function parsePart(raw: unknown): { predictedSec: number | null; actualSec: number } | null {
+  if (!isObject(raw) || !isNumOrNull(raw.predictedSec) || !isCount(raw.actualSec)) return null
+  return { predictedSec: raw.predictedSec, actualSec: raw.actualSec }
+}
+
+/** A record's stops read back. Undefined when they are damaged (the record is then dropped); null when not measured. */
+function parseStops(raw: unknown): DriveStops | null | undefined {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw) || !Array.isArray(raw.list)) return undefined
+  const { count, stoppedSec, lightStops, lightSec, unknownStops } = raw
+  if (!isCount(count) || !isCount(stoppedSec) || !isCount(lightStops) || !isCount(lightSec) || !isCount(unknownStops)) return undefined
+  const list = raw.list.map(parseStop)
+  if (list.some((s) => s === null)) return undefined
+  let parts: DriveStops['parts'] = null
+  if (raw.parts !== null) {
+    if (!isObject(raw.parts)) return undefined
+    const surface = parsePart(raw.parts.surface)
+    const freeway = parsePart(raw.parts.freeway)
+    if (surface === null || freeway === null) return undefined
+    parts = { surface, freeway }
+  }
+  return { list: list as LoggedStop[], count, stoppedSec, lightStops, lightSec, unknownStops, parts }
+}
+
 function parseRecord(raw: unknown): DriveRecord | null {
   if (!isObject(raw)) return null
   const r = raw
@@ -373,6 +446,9 @@ function parseRecord(raw: unknown): DriveRecord | null {
   if (!Array.isArray(r.switches)) return null
   const switches = r.switches.map(parseSwitch)
   if (switches.some((s) => s === null)) return null
+  // A record from before stops were measured has none: read as not measured.
+  const stops = parseStops(r.stops)
+  if (stops === undefined) return null
   // Rebuilt field by field: anything else that was stored is not carried along.
   return {
     id: r.id,
@@ -390,6 +466,7 @@ function parseRecord(raw: unknown): DriveRecord | null {
     offRouteEvents: r.offRouteEvents,
     requests: r.requests,
     outcome: r.outcome,
+    stops,
   }
 }
 
@@ -506,12 +583,13 @@ export function errorWords(errorSec: number): string {
 const csvMin = (sec: number | null) => (sec === null ? '' : (sec / 60).toFixed(1))
 
 export const DRIVE_LOG_CSV_HEADER =
-  'started,corridor,hour,outcome,route_source,predicted_min,actual_min,error_min,other_app_min,other_app_error_min,distance_km,lights,switches_kept,switches_declined,claimed_saving_min,realised_saving_min,off_route,requests'
+  'started,corridor,hour,outcome,route_source,predicted_min,actual_min,error_min,other_app_min,other_app_error_min,distance_km,lights,switches_kept,switches_declined,claimed_saving_min,realised_saving_min,off_route,requests,stopped_min,light_stops,light_wait_min'
 
 /**
  * The log as CSV, oldest first, for the share sheet or the clipboard. The
  * start time is UTC (ISO 8601) and the hour is the device's local hour.
  * Corridors are their letters; lights are blank when unknown and "≥N" when partial.
+ * The stop columns are blank for a drive recorded before stops were measured.
  */
 export function driveLogCsv(log: DriveLog): string {
   const labels = corridorLabels(log)
@@ -539,6 +617,9 @@ export function driveLogCsv(log: DriveLog): string {
       csvMin(sum(realised)),
       String(d.offRouteEvents),
       String(d.requests),
+      csvMin(d.stops?.stoppedSec ?? null),
+      d.stops === null ? '' : String(d.stops.lightStops),
+      csvMin(d.stops?.lightSec ?? null),
     ].join(',')
   })
   return [DRIVE_LOG_CSV_HEADER, ...rows].join('\n')
