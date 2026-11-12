@@ -150,6 +150,8 @@ test('right after Start, "checked" says how old the plan is, not 0 s', async ({ 
   await app.routesReady()
   // The trip was planned, then the driver waited 40 s before tapping Start drive (#71).
   await page.clock.fastForward(40_000)
+  // And the machine running this is slow at the wrong moment: the clock flake of #71 stays covered.
+  app.slowMomentAtStartMs = 1500
   await app.drive({ maxSec: 6 })
   await app.snap('just after Start: checked about 45 s ago')
 

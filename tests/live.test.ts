@@ -263,6 +263,9 @@ describe('the route picked on the plan screen (#66)', () => {
       s.send({ type: 'start', nowMs: s.nowMs(), destination: DESTINATION, route: sideStreet(), routeAskedAtMs })
       s.fix(0)
       expect(s.view().checkedAgoSec, String(routeAskedAtMs)).toBe(0)
+      // And the checks keep their minute: a time from the future must not hold them back.
+      cruiseOnB(s, 60, (xM) => ({ routes: offered(xM) }))
+      expect(s.requests().map((r) => r.atSec), String(routeAskedAtMs)).toEqual([60])
     }
     // A drive that asks for its own route (the fix was not on the pick) counts its own answer.
     const s = session()

@@ -137,6 +137,8 @@ export class App {
   private readonly hangingN = new Map<Request, number>()
   readonly unexpected: string[] = []
   outside: Outside = {}
+  /** Real milliseconds lost between reading the page clock and pausing it at drive start: the #71 race, on purpose. */
+  slowMomentAtStartMs = 0
   private shot = 0
 
   constructor(page: Page, info: TestInfo) {
@@ -252,8 +254,7 @@ export class App {
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
     const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [] } = options
-    const now = await page.evaluate(() => Date.now())
-    await page.clock.pauseAt(now + 1000)
+    await pauseSoon(page, this.slowMomentAtStartMs)
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
 
@@ -447,6 +448,25 @@ export class App {
     }
     this.unexpected.push(`${request.method()} ${url.origin}${url.pathname}`)
     return route.abort('blockedbyclient')
+  }
+}
+
+/**
+ * Pauses the page's fake clock a second from now. Until it is paused the clock runs in real
+ * time, so on a slow moment (a busy machine) the second can be over before pauseAt is called,
+ * and pauseAt refuses a time in the past (#71). The time is then read again and asked again.
+ */
+async function pauseSoon(page: Page, slowMomentMs = 0) {
+  for (let attempt = 1; ; attempt++) {
+    const now = await page.evaluate(() => Date.now())
+    // A scenario can make the first try slow on purpose, to keep the race covered.
+    if (attempt === 1 && slowMomentMs > 0) await new Promise((r) => setTimeout(r, slowMomentMs))
+    try {
+      await page.clock.pauseAt(now + 1000)
+      return
+    } catch (error) {
+      if (attempt >= 5 || !String(error).includes('Cannot fast-forward to the past')) throw error
+    }
   }
 }
 

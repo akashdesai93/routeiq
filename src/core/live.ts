@@ -648,7 +648,7 @@ function startOnPicked(state: LiveState, fix: PositionFix, nowMs: number, opts: 
   // The plan's answer is the last check, as old as it is (#71): "checked N s ago" tells the
   // truth from the start, and a plan older than the poll interval is checked at once.
   const askedAt = state.pickedAtMs
-  const checkedAtMs = askedAt !== null && Number.isFinite(askedAt) ? Math.min(askedAt, nowMs) : nowMs
+  const checkedAtMs = askedAt !== null ? Math.min(askedAt, nowMs) : nowMs
   return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts, checkedAtMs)
 }
 
