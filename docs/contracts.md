@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 3** (Nov 12, 2026: version 2 plus the private drive log, #107). The Swift port does not match it yet;
+**Current version: 4** (Nov 12, 2026: version 3 plus the private drive log, #107). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -108,15 +108,19 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 3 | by definition |
+| Web app (`src/`) | 4 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 3 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| iPhone shell plugin (`native/shell`) | 4 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
-- **3** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
+- **4** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
   none); the private drive log `DriveLog` (`DriveRecord`, `LoggedSwitch`, `LoggedSignals`, `DriveOutcome`)
   joins the contract as data kept on the device.
+- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.
 - **2** (Nov 12, 2026, #86): the iPhone shell's plugin only; the Swift port is not affected.
   `NativeFix.simulated` (true on a test drive's made-up position), the new
   `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
