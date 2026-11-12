@@ -96,7 +96,9 @@ start e2e-report\index.html                    # the one-page report
   don't collide, in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
   and `.env.local` is never used.
 - **Fully offline.** Every request that leaves localhost is answered by the test
-  (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a
+  (`e2e/harness.ts`); one that nothing answers fails the scenario, and so does one that
+  went round the harness's routing (`unrouted`: in WebKit a page a service worker controls
+  fetches round it, so the WebKit project blocks service workers). Directions come from a
   made-up road network between the trip's two points (`e2e/world/roads.ts`): three routes
   that share their start and end, answered from wherever the car is, as Mapbox does.
   Some scenarios add a side street Mapbox never offers, reachable only by a request with

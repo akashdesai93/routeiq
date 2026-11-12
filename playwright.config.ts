@@ -38,7 +38,11 @@ export default defineConfig({
     {
       name: 'webkit-iphone',
       testMatch: '**/webkit.smoke.spec.ts',
-      use: { ...devices['iPhone 14'], locale: 'en-US', timezoneId: 'America/New_York' },
+      // Service workers blocked: in WebKit a page a service worker controls (the offline app
+      // shell, #184) fetches round Playwright's routing, so requests would reach the real
+      // network. The harness fails any request it never saw (App.unrouted). The offline
+      // shell has its own scenario in Chromium (e2e/offline.spec.ts).
+      use: { ...devices['iPhone 14'], locale: 'en-US', timezoneId: 'America/New_York', serviceWorkers: 'block' },
     },
   ],
   webServer: [
