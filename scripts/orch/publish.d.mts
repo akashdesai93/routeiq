@@ -7,3 +7,7 @@ export function alertAction(
   alert: { ok: boolean; keys: string[]; body: string },
 ): { action: 'none' | 'create' | 'reopen' | 'update' | 'close'; comment: string | null }
 export function hasMorningToday(comments: { body: string }[], nowIso: string): boolean
+export function publish(
+  argv: string[],
+  io?: { gh?: (args: string[]) => string; log?: (line: string) => void; env?: Record<string, string | undefined>; now?: string },
+): void

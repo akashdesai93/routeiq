@@ -59,17 +59,29 @@ function bodyFile(text) {
   return f
 }
 
-function main() {
-  const argv = process.argv.slice(2)
+/**
+ * Runs the publish steps. `io.gh` does every GitHub call (reads too), so a test can check that
+ * a dry run writes nothing: every write goes through `act`, which skips it when `--dry-run`.
+ */
+export function publish(argv, io = {}) {
+  const run = io.gh || gh
+  const log = io.log || console.log
+  const env = io.env || process.env
+  const now = io.now || new Date().toISOString()
   const dirAt = argv.indexOf('--dir')
   if (dirAt < 0 || !argv[dirAt + 1]) throw new Error('--dir <state.mjs output folder> is required')
   const dir = argv[dirAt + 1]
   const dry = argv.includes('--dry-run')
-  const repo = process.env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'
+  const repo = env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'
   const R = `repos/${repo}`
-  const act = (what, args) => {
-    console.log(`${dry ? 'dry run: ' : ''}${what}`)
-    if (!dry) gh(args)
+  const act = (what, args, { tolerate = false } = {}) => {
+    log(`${dry ? 'dry run: ' : ''}${what}`)
+    if (dry) return
+    try {
+      run(args)
+    } catch (e) {
+      if (!tolerate) throw e
+    }
   }
   const state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
 
@@ -80,13 +92,14 @@ function main() {
   if (argv.includes('--alert')) {
     const body = readFileSync(join(dir, 'alert.md'), 'utf8')
     const alert = { ok: state.health.alerts.length === 0, keys: keysOf(body), body }
-    const found = JSON.parse(gh(['api', `${R}/issues?labels=${ALERT_LABEL}&state=all&per_page=5&sort=created&direction=desc`]))
+    const found = JSON.parse(run(['api', `${R}/issues?labels=${ALERT_LABEL}&state=all&per_page=5&sort=created&direction=desc`]))
       .filter((i) => !i.pull_request)[0]
     const existing = found ? { number: found.number, state: found.state, body: found.body } : null
     const { action, comment } = alertAction(existing, alert)
-    console.log(`alert: ${action}${existing ? ` #${existing.number}` : ''} (${alert.keys.length} problem(s))`)
+    log(`alert: ${action}${existing ? ` #${existing.number}` : ''} (${alert.keys.length} problem(s))`)
     if (action === 'create') {
-      try { gh(['api', '-X', 'POST', `${R}/labels`, '-f', `name=${ALERT_LABEL}`, '-f', 'color=b60205', '-f', 'description=The fleet needs attention (board.yml)']) } catch { /* the label exists */ }
+      // Fails harmlessly when the label exists already.
+      act(`create the ${ALERT_LABEL} label if missing`, ['api', '-X', 'POST', `${R}/labels`, '-f', `name=${ALERT_LABEL}`, '-f', 'color=b60205', '-f', 'description=The fleet needs attention (board.yml)'], { tolerate: true })
       act('open the alert issue', ['api', '-X', 'POST', `${R}/issues`, '-f', `title=${ALERT_TITLE}`, '-F', `body=@${bodyFile(body)}`, '-f', `labels[]=${ALERT_LABEL}`, '--jq', '.html_url'])
     }
     if (action === 'reopen' || action === 'update') {
@@ -99,11 +112,11 @@ function main() {
   }
 
   if (argv.includes('--morning')) {
-    const since = new Date(Date.now() - 24 * 3600e3).toISOString()
-    const comments = JSON.parse(gh(['api', `${R}/issues/${BOARD}/comments?since=${since}&per_page=100`]))
-    if (hasMorningToday(comments, state.generated_at)) console.log('morning report: already posted today')
+    const since = new Date(new Date(now).getTime() - 24 * 3600e3).toISOString()
+    const comments = JSON.parse(run(['api', `${R}/issues/${BOARD}/comments?since=${since}&per_page=100`]))
+    if (hasMorningToday(comments, state.generated_at)) log('morning report: already posted today')
     else act(`post the morning report on #${BOARD}`, ['api', '-X', 'POST', `${R}/issues/${BOARD}/comments`, '-F', `body=@${bodyFile(readFileSync(join(dir, 'morning.md'), 'utf8'))}`, '--jq', '.html_url'])
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) publish(process.argv.slice(2))
