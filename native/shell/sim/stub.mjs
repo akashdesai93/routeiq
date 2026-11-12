@@ -49,7 +49,15 @@ export async function startStub({ port = 8521, log = () => {} } = {}) {
   const directions = []
   const unexpected = []
   const queue = []
-  const waiting = new Map()
+  // The commands waiting for the page's answer, by the id this stub gave them. A table with
+  // no prototype, read only through `answerFor`: an id from a report never reaches an
+  // inherited name such as `constructor` or `__proto__`.
+  const waiting = Object.create(null)
+  const answerFor = (id) => {
+    if (!Number.isSafeInteger(id) || id < 1 || !Object.hasOwn(waiting, id)) return null
+    const answer = waiting[id]
+    return typeof answer === 'function' ? answer : null
+  }
   let commandId = 0
   let requestNumber = 0
 
@@ -126,11 +134,18 @@ export async function startStub({ port = 8521, log = () => {} } = {}) {
         } catch {
           return json(res, 400, { error: 'not JSON' })
         }
+        const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+        const results = isObject(report) ? (report.results ?? []) : null
+        if (!Array.isArray(results) || !results.every(isObject)) {
+          return json(res, 400, { error: 'a report is an object whose results are objects' })
+        }
         report.receivedAtMs = Date.now()
         reports.push(report)
-        for (const result of report.results ?? []) {
-          waiting.get(result.id)?.(result)
-          waiting.delete(result.id)
+        for (const result of results) {
+          const answer = answerFor(result.id)
+          if (answer === null) continue
+          delete waiting[result.id]
+          answer(result)
         }
         json(res, 200, { commands: queue.splice(0) })
       })
@@ -150,7 +165,7 @@ export async function startStub({ port = 8521, log = () => {} } = {}) {
   })
 
   return {
-    port,
+    port: server.address().port,
     world,
     reports,
     directions,
@@ -162,15 +177,15 @@ export async function startStub({ port = 8521, log = () => {} } = {}) {
       queue.push({ id, cmd, arg })
       return new Promise((resolve) => {
         const timer = setTimeout(() => {
-          waiting.delete(id)
+          delete waiting[id]
           const at = queue.findIndex((c) => c.id === id)
           if (at !== -1) queue.splice(at, 1)
           resolve({ id, ok: false, value: 'no answer' })
         }, timeoutMs)
-        waiting.set(id, (result) => {
+        waiting[id] = (result) => {
           clearTimeout(timer)
           resolve(result)
-        })
+        }
       })
     },
     close: () =>

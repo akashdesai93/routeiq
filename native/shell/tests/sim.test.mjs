@@ -152,3 +152,27 @@ test('a plain iPhone on the newest iOS runtime is picked', () => {
   assert.equal(pickDevice(list, 'iPhone 16').udid, 'old');
   assert.equal(pickDevice({ devices: {} }), null);
 });
+
+test('the stub hands a result only to the command that waits for it, and a bad report never stops it', async () => {
+  const { startStub } = await import('../sim/stub.mjs');
+  const stub = await startStub({ port: 0 });
+  const post = (body) =>
+    fetch(`http://127.0.0.1:${stub.port}/sim/report`, { method: 'POST', body, signal: AbortSignal.timeout(2_000) }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  try {
+    const pending = stub.send('look', {}, 5_000);
+    // Reports the page could never send: each is turned away, and none of them stops the stub.
+    for (const bad of ['null', '5', '"text"', '[]', '{"results":5}', '{"results":[null]}', '{"results":[1]}']) {
+      assert.equal((await post(bad)).status, 400, bad);
+    }
+    // Ids that name no waiting command (inherited names, other types, a command never sent) resolve nothing.
+    const stray = await post(JSON.stringify({ results: [{ id: 'constructor' }, { id: '__proto__' }, { id: 'hasOwnProperty' }, { id: '1' }, { id: 999 }] }));
+    assert.equal(stray.status, 200);
+    assert.deepEqual(stray.body.commands.map((c) => c.cmd), ['look']);
+    const answered = await post(JSON.stringify({ results: [{ id: stray.body.commands[0].id, ok: true, value: 'seen' }] }));
+    assert.equal(answered.status, 200);
+    assert.deepEqual(await pending, { id: stray.body.commands[0].id, ok: true, value: 'seen' });
+    assert.equal(stub.reports.length, 2);
+  } finally {
+    await stub.close();
+  }
+});
