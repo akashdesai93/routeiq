@@ -2,12 +2,17 @@
 // index from 1. Every scenario runs in exactly one shard.
 //
 // Why not Playwright's own `--shard`: it splits the list into contiguous blocks, and the long
-// scenarios sit next to each other (in drive.spec.ts, and at the end of sidestreets.spec.ts),
-// so one shard would get most of them. The scenarios are CPU-bound, and a long one is one that
-// drives a trip (`app.drive(`, 20-45 s on a CI runner, against 1-5 s for the others). So each
-// scenario gets a weight (DRIVE_WEIGHT for a drive, 1 otherwise) and the heaviest are dealt
-// first, each to the shard with the least weight so far (ties: the lower shard). The deal
-// depends only on the scenario list and the spec files, so every shard computes the same one.
+// scenarios sit next to each other (in drive.spec.ts, shell.spec.ts and at the end of
+// sidestreets.spec.ts), so one shard would get most of them. The scenarios are CPU-bound,
+// and the ones that drive a trip take 20-45 s on a CI runner against 1-6 s for the rest. So
+// each scenario is weighted by its seconds on CI (e2e/durations.json), and the heaviest are
+// dealt first, each to the shard with the least weight so far (ties: the lower shard). The
+// deal depends only on the scenario list and that file, so every shard computes the same one.
+//
+// A scenario not in durations.json yet gets a guess: GUESS_DRIVE_SEC when its body drives a
+// trip (`app.drive(` or a tap on Start drive), else GUESS_SHORT_SEC, and the shard says so.
+// The guess only moves the balance, never which scenarios run. To refresh the file, take the
+// seconds from a Gate run's e2e-report (each card shows them) or the shards' logs.
 //
 // The shard checks itself before it runs: the scenarios Playwright selects for its locations
 // must be exactly the ones it was dealt. A location that matched another scenario too, or
@@ -19,8 +24,9 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 
-/** A scenario that drives a trip costs about this many short ones (measured on CI: 20-45 s against 1-5 s). */
-const DRIVE_WEIGHT = 10
+/** Seconds on CI for a scenario not in durations.json yet. */
+const GUESS_DRIVE_SEC = 30
+const GUESS_SHORT_SEC = 3
 
 const [indexArg, totalArg, ...rest] = process.argv.slice(2)
 const index = Number(indexArg)
@@ -49,14 +55,16 @@ function list(args) {
     process.exit(1)
   }
   const out = []
-  const walk = (suite) => {
+  const walk = (suite, titles) => {
     for (const spec of suite.specs ?? []) {
       const file = relative(process.cwd(), resolve(report.config.rootDir, spec.file)).replaceAll('\\', '/')
-      for (const t of spec.tests) out.push({ location: `${file}:${spec.line}`, id: `${file}:${spec.line} › ${t.projectName ? `${t.projectName} › ` : ""}${spec.title}` })
+      const name = `${file} › ${[...titles, spec.title].join(' › ')}`
+      for (const t of spec.tests) out.push({ location: `${file}:${spec.line}`, name, id: `${file}:${spec.line} › ${t.projectName ? `${t.projectName} › ` : ''}${spec.title}` })
     }
-    for (const child of suite.suites ?? []) walk(child)
+    for (const child of suite.suites ?? []) walk(child, [...titles, child.title])
   }
-  for (const suite of report.suites ?? []) walk(suite)
+  // The top-level suites are the files; the ones inside are `test.describe` blocks.
+  for (const suite of report.suites ?? []) walk(suite, [])
   return out
 }
 
@@ -68,21 +76,27 @@ if (all.length === 0) {
 // One location can hold several scenarios (a test in a loop): they stay together.
 const locations = [...new Set(all.map((t) => t.location))]
 
-/** Weight of each location: does the test body (from its line to the next test in the file) drive a trip? */
+const durations = JSON.parse(readFileSync('e2e/durations.json', 'utf8'))
+const guessed = []
+
+/** Seconds on CI for each location (the sum when one location holds several scenarios). */
 function weights() {
-  const byFile = new Map()
-  for (const loc of locations) {
-    const [file, line] = loc.split(':')
-    byFile.set(file, [...(byFile.get(file) ?? []), Number(line)])
-  }
+  const sources = new Map()
   const out = new Map()
-  for (const [file, lines] of byFile) {
-    const source = readFileSync(file, 'utf8').split('\n')
-    const sorted = [...lines].sort((a, b) => a - b)
-    sorted.forEach((line, i) => {
-      const body = source.slice(line - 1, i + 1 < sorted.length ? sorted[i + 1] - 1 : source.length).join('\n')
-      out.set(`${file}:${line}`, /\.drive\(/.test(body) ? DRIVE_WEIGHT : 1)
-    })
+  for (const t of all) {
+    let sec = durations[t.name]
+    if (typeof sec !== 'number') {
+      const [file, line] = t.location.split(':')
+      if (!sources.has(file)) sources.set(file, readFileSync(file, 'utf8').split('\n'))
+      const lines = sources.get(file)
+      // The body: from the test's line up to the next line that starts another test.
+      let end = Number(line)
+      while (end < lines.length && !/^\s*test(\.\w+)?\(/.test(lines[end])) end++
+      const body = lines.slice(Number(line) - 1, end).join('\n')
+      sec = /\.drive\(|name: 'Start drive'/.test(body) ? GUESS_DRIVE_SEC : GUESS_SHORT_SEC
+      guessed.push(`${t.name} (guessed ${sec} s)`)
+    }
+    out.set(t.location, (out.get(t.location) ?? 0) + sec)
   }
   return out
 }
@@ -97,7 +111,8 @@ for (const { loc, w } of heaviestFirst) {
   dealt[to].push(loc)
 }
 const mine = dealt[index - 1]
-console.log(`weights per shard: ${load.join(', ')} (a drive counts ${DRIVE_WEIGHT})`)
+console.log(`CI seconds per shard (run two at a time): ${load.map((l) => l.toFixed(0)).join(', ')}`)
+if (guessed.length > 0) console.log(`not in e2e/durations.json yet, so guessed:\n  ${guessed.join('\n  ')}`)
 if (mine.length === 0) {
   console.error(`shard ${index} of ${total} got no scenarios: there are only ${locations.length} locations. Use fewer shards.`)
   process.exit(1)
