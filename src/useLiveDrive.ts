@@ -157,7 +157,18 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           signal: query.signal,
           whatIf: query.driving !== null && whatIfDelaySec > 0 ? { ...query.driving, delaySec: whatIfDelaySec } : null,
           baseline: query.driving !== null && query.baseline ? { ...query.driving, rerouteOptions } : null,
-          probes: query.driving !== null && query.probes.allowed > 0 ? { ...query.driving, ...query.probes, rerouteOptions } : null,
+          probes:
+            query.driving !== null && query.probes.allowed > 0
+              ? {
+                  ...query.driving,
+                  allowed: query.probes.allowed,
+                  memory: query.probes.memory,
+                  rerouteOptions,
+                  timeoutMs: query.probes.budget.timeoutSec * 1000,
+                  minDelaySec: query.probes.budget.minDelaySec,
+                }
+              : null,
+          onRequest: query.onRequest,
         })
         if (!result.ok) return { routes: null, message: result.message }
         whatIfInPlay.current = result.simulated

@@ -4,6 +4,7 @@ import {
   checkProbeAllowance,
   INITIAL_CHECK_PROBES,
   rememberCheckProbes,
+  resolveDriveProbeBudget,
   type CheckProbeMemory,
   type DriveProbeBudget,
 } from './probe.ts'
@@ -174,6 +175,10 @@ export interface LiveState {
     /** Where along the route the car was when it was sent: the engine is asked about that place. */
     readonly alongM: number
     readonly distanceFromRouteM: number
+    /** Requests made for it after the first (its path check, its probes), counted as the shell sent them. */
+    readonly extraSent?: number
+    /** How many of those were side-street probes. */
+    readonly probesSent?: number
   } | null
   readonly nextRequestId: number
   /** Route requests made so far on this drive (side-street probes included). */
@@ -277,6 +282,13 @@ export type LiveEvent =
       readonly requests?: number
       readonly probes?: number
     }
+  /**
+   * The shell is sending one more request for the check `requestId` (its path
+   * check, or a side-street probe, or the path check a probe needs). Counted
+   * at once, so a check that is cancelled afterwards still counts every request
+   * it made, whether or not its answer is ever used.
+   */
+  | { readonly type: 'request-sent'; readonly requestId: number; readonly probe: boolean }
   /** About once a second. */
   | { readonly type: 'tick'; readonly nowMs: number }
   | { readonly type: 'visibility'; readonly nowMs: number; readonly hidden: boolean }
@@ -314,7 +326,7 @@ export type LiveEffect =
        * with its via. `allowed` is 0 for anything but a check, and when the
        * budget has no room (checkProbeAllowance).
        */
-      readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory }
+      readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory; readonly budget: DriveProbeBudget }
     }
   | { readonly type: 'cancel-request' }
   | { readonly type: 'speak'; readonly line: SpokenLine }
@@ -494,6 +506,7 @@ function request(state: LiveState, purpose: RequestPurpose, nowMs: number, opts:
               ? checkProbeAllowance({ requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used }, opts.maxRequests, opts.probes)
               : 0,
           memory: state.probes,
+          budget: resolveDriveProbeBudget(opts.probes),
         },
       },
     ],
@@ -616,6 +629,7 @@ function checked(
   message: string | undefined,
   baseline: readonly RouteCandidate[] | null | undefined,
   probes: number,
+  probesCounted: number,
   nowMs: number,
   opts: LiveOptions,
 ): LiveStep {
@@ -637,6 +651,8 @@ function checked(
       // the car is back on, it goes through the usual rules like any check.
       offRouteM: sent.purpose === 'replan' && tracking.offFixes > 0 ? Math.max(sent.distanceFromRouteM, rerouteOffRouteM + 1) : 0,
       baseline,
+      // The answer is used where the car is now, not where it was asked from (a slow answer, a probe).
+      drivenSinceM: Math.max(0, tracking.alongRouteM - sent.alongM),
     },
     opts.reroute,
   )
@@ -645,7 +661,7 @@ function checked(
     ...state,
     request: null,
     engine: decision.nextState,
-    probes: rememberCheckProbes(state.probes, probes, decision, routes),
+    probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted),
     lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs },
   }
   if (routes === null) return { state: next, effects: [] }
@@ -786,11 +802,34 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       if (state.request === null || state.request.id !== event.requestId) return { state, effects: [] }
       if (state.request.purpose === 'plan') return planned(state, event.routes, event.message, event.nowMs, opts)
       if (state.status !== 'driving' || state.route === null || state.tracking === null) return { state: { ...state, request: null }, effects: [] }
-      // More requests made for this answer (the current path's own travel time, side-street probes) count too.
-      const extra = Math.max(0, Math.round((event.requests ?? 1) - 1))
+      // More requests made for this answer (the current path's own travel time, side-street probes) count
+      // too: those the shell reported as it sent them already are, the rest are counted now.
+      const sentExtra = state.request.extraSent ?? 0
+      const sentProbes = state.request.probesSent ?? 0
+      const extra = Math.max(0, Math.round((event.requests ?? 1) - 1) - sentExtra)
       const counted = extra === 0 ? state : { ...state, requestsUsed: state.requestsUsed + extra }
       const probes = Math.max(0, Math.round(event.probes ?? 0))
-      return checked(counted, event.routes, event.message, event.baseline, probes, event.nowMs, opts)
+      return checked(counted, event.routes, event.message, event.baseline, probes, sentProbes, event.nowMs, opts)
+    }
+    case 'request-sent': {
+      if (!active) return { state, effects: [] }
+      const ours = state.request !== null && state.request.id === event.requestId
+      return {
+        state: {
+          ...state,
+          requestsUsed: state.requestsUsed + 1,
+          probes: event.probe ? { ...state.probes, used: state.probes.used + 1 } : state.probes,
+          request:
+            ours && state.request !== null
+              ? {
+                  ...state.request,
+                  extraSent: (state.request.extraSent ?? 0) + 1,
+                  probesSent: (state.request.probesSent ?? 0) + (event.probe ? 1 : 0),
+                }
+              : state.request,
+        },
+        effects: [],
+      }
     }
     case 'keep-previous': {
       const { undo, route, tracking, switchBanner } = state

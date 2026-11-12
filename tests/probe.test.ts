@@ -407,12 +407,13 @@ describe('selectViaPoints with live traffic (segmentTraffic)', () => {
 describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
   /** The car on A, 1 km along: what a check from there returns. */
   const here = at(1000, 0)
-  const freshA = () => candidate('A', here, 1500)!
+  /** Held up: 5 minutes over its typical time, so a check probes. */
+  const freshA = () => candidate('A', here, 1500, { typicalDurationSec: 1200 })!
   const freshB = () => candidate('B', here, 1600)!
   const route = world('A', 1700)
 
   it('has one documented budget', () => {
-    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20 })
+    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8 })
   })
 
   describe('checkProbeAllowance: probes share the drive request budget', () => {
@@ -457,7 +458,7 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
     })
 
     it('beside the route being driven even when another fresh route is faster', () => {
-      const fresh = [candidate('A', here, 1600)!, candidate('B', here, 1400)!]
+      const fresh = [candidate('A', here, 1600, { typicalDurationSec: 1300 })!, candidate('B', here, 1400)!]
       const vias = checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1 })
       // Beside A (y = 0), not beside B (1 km north): 500 m to the south, where there is more room.
       const [, y] = localProjector(at(0, 0))(vias[0]!)
@@ -503,8 +504,24 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
       expect(checkProbes({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 0 })).toEqual([])
       expect(checkProbes({ route, alongM: 1000, fresh: [], memory: INITIAL_CHECK_PROBES, allowed: 1 })).toEqual([])
       // 2.5 km from the end: under the 3 km a probe needs, and a kept via is not asked either.
-      const near = candidate('A', at(17500, 0), 120)!
+      const near = candidate('A', at(17500, 0), 400, { typicalDurationSec: 100 })!
       expect(checkProbes({ route, alongM: 17500, fresh: [near], memory: { ...INITIAL_CHECK_PROBES, keep: at(19000, -500) }, allowed: 1 })).toEqual([])
+    })
+
+    it('only when the route being driven is held up: a jam reported ahead, or 2 minutes over its typical time', () => {
+      const plain = (a: RouteCandidate) => checkProbes({ route, alongM: 1000, fresh: [a, freshB()], memory: INITIAL_CHECK_PROBES, allowed: 1 })
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1500 })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: null })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1381 })!)).toEqual([])
+      expect(plain(candidate('A', here, 1500, { typicalDurationSec: 1380 })!)).toHaveLength(1)
+      // A jam Mapbox reports on it ahead, with no delay over the typical time: probed, beside the jam.
+      const a = candidate('A', here, 1500, { typicalDurationSec: 1500 })!
+      const congestion = a.geometry.slice(1).map((_, i) => (i >= 20 && i < 30 ? 'severe' : 'low') as CongestionLevel)
+      expect(plain({ ...a, segmentTraffic: { congestion, durationSec: null } })).toHaveLength(1)
+      // The threshold is the budget's.
+      expect(
+        checkProbes({ route, alongM: 1000, fresh: [candidate('A', here, 1500, { typicalDurationSec: 1450 })!, freshB()], memory: INITIAL_CHECK_PROBES, allowed: 1, budget: { minDelaySec: 30 } }),
+      ).toHaveLength(1)
     })
 
     it('keeps clear of the answer for the current path too', () => {

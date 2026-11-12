@@ -1,6 +1,7 @@
 import {
   LIVE_IDLE,
   type CheckProbeMemory,
+  type DriveProbeBudget,
   liveStep,
   type LiveEffect,
   type LiveEvent,
@@ -47,7 +48,13 @@ export interface RoutesQuery {
   /** True when one more request may be spent on the current path's own travel time (see LiveEffect 'request-routes'). */
   readonly baseline: boolean
   /** The side-street probes this check may make (see LiveEffect 'request-routes'). */
-  readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory }
+  readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory; readonly budget: DriveProbeBudget }
+  /**
+   * To be called just before each request made for this query after the first
+   * (`probe` true for a side-street probe), so it is counted even if the query
+   * is cancelled before it answers.
+   */
+  readonly onRequest: (probe: boolean) => void
   readonly signal: AbortSignal
 }
 
@@ -148,7 +155,17 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
         const driving =
           state.route !== null && state.request !== null ? { route: state.route, alongM: state.request.alongM } : null
         void deps
-          .routes({ purpose, origin, destination, headingDeg, driving, baseline, probes, signal: controller.signal })
+          .routes({
+            purpose,
+            origin,
+            destination,
+            headingDeg,
+            driving,
+            baseline,
+            probes,
+            onRequest: (probe) => dispatch({ type: 'request-sent', requestId, probe }),
+            signal: controller.signal,
+          })
           .catch((): RoutesAnswer => ({ routes: null, message: 'The route request failed.' }))
           .then((answer) => {
             if (inFlight !== controller || controller.signal.aborted) return

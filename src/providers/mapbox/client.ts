@@ -141,6 +141,28 @@ export type DirectionsTransport = (
 let transport: DirectionsTransport | null = null
 
 /**
+ * What a Directions request is for, read off its URL so a log can tell them
+ * apart without keeping the URL: 'probe', a side-street probe (one via point
+ * with a `radiuses` entry of its own, see fetchProbeRoute); 'path', a request
+ * for one path through via points (the drive's path check, baselineProbe);
+ * 'routes', anything else (the plan, a drive's check). A word from this list,
+ * never anything from the URL itself.
+ */
+export type DirectionsRequestKind = 'routes' | 'path' | 'probe'
+
+export function directionsRequestKind(url: string): DirectionsRequestKind {
+  let query: URLSearchParams
+  try {
+    query = new URL(url).searchParams
+  } catch {
+    return 'routes'
+  }
+  const radiuses = query.get('radiuses')?.split(';') ?? []
+  if (query.get('waypoints') === '0;2' && radiuses.length === 3 && Number.isFinite(Number(radiuses[1]))) return 'probe'
+  return query.has('waypoints') ? 'path' : 'routes'
+}
+
+/**
  * Sets how Directions requests are sent from now on. Null (the default) is
  * the browser's `fetch`. Called once at startup, and only inside the iPhone
  * shell, where the request is handed to native networking so that it goes

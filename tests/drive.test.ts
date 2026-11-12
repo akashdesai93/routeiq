@@ -402,7 +402,7 @@ describe('fetchFreshRoutes: one check, and the current path asked for when it is
   /** A Directions body for routes of the made-up network. */
   const body = (routes: readonly RouteCandidate[]) => ({
     code: 'Ok',
-    routes: routes.map((r) => ({ duration: r.durationSec, duration_typical: r.durationSec, distance: r.distanceM, geometry: { type: 'LineString', coordinates: r.geometry } })),
+    routes: routes.map((r) => ({ duration: r.durationSec, duration_typical: r.typicalDurationSec ?? r.durationSec, distance: r.distanceM, geometry: { type: 'LineString', coordinates: r.geometry } })),
   })
   /** Stands in for fetch: answers the calls in order with the given bodies (a number is an HTTP error). */
   function server(...answers: (object | number)[]) {
@@ -480,13 +480,17 @@ describe('fetchFreshRoutes: one check, and the current path asked for when it is
     }
   })
   describe('side-street probes (#5)', () => {
-    const probes = (allowed = 1) => ({ route: driven, alongM: 3000, allowed, memory: INITIAL_CHECK_PROBES })
-    const offered = () => body([candidate('A', here, 1500)!, candidate('B', here, 1450)!])
+    const probes = (allowed = 1, extra: { timeoutMs?: number } = {}) => ({ route: driven, alongM: 3000, allowed, memory: INITIAL_CHECK_PROBES, ...extra })
+    /** A is held up (5 minutes over its typical time), so the check probes. */
+    const heldUpA = () => candidate('A', here, 1500, { typicalDurationSec: 1200 })!
+    const offered = () => body([heldUpA(), candidate('B', here, 1450)!])
+    const viaKind = (url: URL) => (url.searchParams.get('radiuses') !== null ? 'probe' : url.searchParams.has('waypoints') ? 'path' : 'routes')
 
-    it('one more request per allowed probe, from the car with its heading, through the via with its radius; a new path joins the fresh routes', async () => {
-      const { fetchImpl, urls } = server(offered(), body([candidate('S', here, 1300)!]))
-      const result = await ask(fetchImpl, { probes: probes() })
-      expect(urls).toHaveLength(2)
+    it('a probe from the car with its heading, through the via with its radius; a new path joins the fresh routes, with the current path asked the same way', async () => {
+      const { fetchImpl, urls } = server(offered(), body([candidate('S', here, 1300)!]), body([heldUpA()]))
+      const sent: boolean[] = []
+      const result = await ask(fetchImpl, { probes: probes(), onRequest: (probe) => sent.push(probe) })
+      expect(urls.map(viaKind)).toEqual(['routes', 'probe', 'path'])
       const probe = urls[1]!
       const points = decodeURIComponent(probe.pathname.split('/').at(-1)!).split(';')
       expect(points).toHaveLength(3)
@@ -494,40 +498,65 @@ describe('fetchFreshRoutes: one check, and the current path asked for when it is
       expect(probe.searchParams.get('radiuses')).toBe('unlimited;250;unlimited')
       expect(probe.searchParams.get('bearings')).toBe('90,45;;')
       expect(probe.searchParams.get('alternatives')).toBe('false')
+      // The path check for the probe: through points of the current path where S leaves it, with the heading.
+      expect(urls[2]!.searchParams.get('radiuses')).toBeNull()
+      expect(urls[2]!.searchParams.get('bearings')).toMatch(/^90,45;(90,45;)+$/)
+      // Each request after the first was reported as it went out.
+      expect(sent).toEqual([true, false])
       if (!result.ok) throw new Error('expected routes')
-      expect(result).toMatchObject({ requests: 2, probeRequests: 1, baseline: null })
+      expect(result).toMatchObject({ requests: 3, probeRequests: 1, probesTimedOut: false })
       expect(result.fresh.map((r) => r.source ?? 'provider')).toEqual(['provider', 'provider', 'probe'])
+      expect(result.baseline).toHaveLength(1)
       // The via it was asked through goes with it, for the next check.
       const via = points[1]!.split(',').map(Number)
       expect(result.fresh[2]!.via![0]).toBeCloseTo(via[0]!, 6)
       expect(result.fresh[2]!.via![1]).toBeCloseTo(via[1]!, 6)
-      expect(result.candidates).toHaveLength(3)
+      // The engine then measures S against the current path asked the same way.
+      const decision = decideReroute(INITIAL_REROUTE_STATE, { nowSec: 0, route: driven, positionAlongM: 3000, speedMps: 15, candidates: result.candidates, baseline: result.baseline })
+      expect(decision).toMatchObject({ code: 'confirming', considered: { savingSec: 200 } })
     })
 
-    it('a probe that comes back as a known road, fails or finds no road adds nothing, but still counts', async () => {
+    it('a probe that comes back as a known road, fails or finds no road adds nothing and asks nothing more, but still counts', async () => {
       for (const answer of [body([candidate('A', here, 1490)!]), 503, { code: 'NoSegment', routes: [] }, { code: 'NoRoute', routes: [] }]) {
-        const result = await ask(server(offered(), answer).fetchImpl, { probes: probes() })
-        expect(result).toMatchObject({ ok: true, requests: 2, probeRequests: 1 })
+        const { fetchImpl, urls } = server(offered(), answer)
+        const result = await ask(fetchImpl, { probes: probes() })
+        expect(result).toMatchObject({ ok: true, requests: 2, probeRequests: 1, baseline: null })
+        expect(urls).toHaveLength(2)
         if (result.ok) expect(result.fresh).toHaveLength(2)
       }
     })
 
-    it('after the path check when one is needed, and kept clear of its answer', async () => {
-      const { fetchImpl, urls } = server(body([candidate('B', here, 1450)!]), body([candidate('A', here, 1500)!]), body([candidate('A', here, 1500)!]))
+    it('after a path check already made, the probe uses its answer: no second one', async () => {
+      const onlyB = body([candidate('B', here, 1450)!])
+      const { fetchImpl, urls } = server(onlyB, body([heldUpA()]), body([candidate('S', here, 1300)!]))
       const result = await ask(fetchImpl, { probes: probes() })
-      expect(urls).toHaveLength(3)
-      expect(urls[1]!.searchParams.get('waypoints')).toBe('0;5')
-      expect(urls[2]!.searchParams.get('radiuses')).toBe('unlimited;250;unlimited')
-      // The probe found the current path again: it is not added (the path check already answered for it).
+      expect(urls.map(viaKind)).toEqual(['routes', 'path', 'probe'])
       expect(result).toMatchObject({ ok: true, requests: 3, probeRequests: 1 })
-      if (result.ok) expect(result.fresh).toHaveLength(1)
+      if (result.ok) expect(result.fresh.map((r) => r.source ?? 'provider')).toEqual(['provider', 'probe'])
     })
 
-    it('without leave, or with nothing to probe, nothing more is asked; an abort while probing is an abort', async () => {
+    it('the probe and its path check have a time limit: past it they are cancelled and the check answers without them', async () => {
+      const urls: string[] = []
+      const neverAnswers = ((input: RequestInfo | URL, init?: { signal?: AbortSignal }) => {
+        urls.push(String(input))
+        if (urls.length === 1) return Promise.resolve(new Response(JSON.stringify(offered()), { status: 200 }))
+        return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+      }) as typeof fetch
+      const started = Date.now()
+      const result = await ask(neverAnswers, { probes: probes(1, { timeoutMs: 30 }) })
+      expect(Date.now() - started).toBeLessThan(2000)
+      expect(result).toMatchObject({ ok: true, requests: 2, probeRequests: 1, probesTimedOut: true, baseline: null })
+      if (result.ok) expect(result.fresh).toHaveLength(2)
+      expect(urls).toHaveLength(2)
+    })
+
+    it('without leave, nothing to probe, or a route that is not held up, nothing more is asked; an abort while probing is an abort', async () => {
       const none = server(offered())
       expect(await ask(none.fetchImpl, { probes: probes(0) })).toMatchObject({ ok: true, requests: 1, probeRequests: 0 })
       expect(none.urls).toHaveLength(1)
-      const near = server(body([candidate('A', at(18_000, 0), 90)!]))
+      const free = server(body([candidate('A', here, 1500)!, candidate('B', here, 1450)!]))
+      expect(await ask(free.fetchImpl, { probes: probes() })).toMatchObject({ ok: true, requests: 1, probeRequests: 0 })
+      const near = server(body([candidate('A', at(18_000, 0), 400, { typicalDurationSec: 100 })!]))
       expect(await ask(near.fetchImpl, { origin: at(18_000, 0), probes: { ...probes(), alongM: 18_000 } })).toMatchObject({ ok: true, requests: 1, probeRequests: 0 })
       const controller = new AbortController()
       const slow = ((input: RequestInfo | URL) => {

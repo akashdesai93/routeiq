@@ -241,16 +241,23 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       (`DEFAULT_DRIVE_PROBE_BUDGET`), at most 20 a drive, inside the drive's 60 requests
       and never taking the path check's request (`checkProbeAllowance`). The points take
       turns check by check, and the via of a probed route being confirmed is asked again
-      first, so a confirmation can happen. No reroute threshold changed. Tests:
+      first, so a confirmation can happen. After review (#82): a probed route is compared
+      only with the current path asked the same way, through via points (the path check,
+      made after the probe when the check had none), and cannot count without it
+      (`probe-unconfirmed`); probes have an 8 s limit of their own; the lead is judged
+      from where the car is when the answer is used (`drivenSinceM`); only a held-up route
+      is probed (a jam reported ahead, or 2 minutes over its typical time); requests are
+      counted as they are sent; the shell's diagnostics mark probes. No reroute threshold
+      changed. Tests:
       `tests/reroute.test.ts` ("side streets found by probes during a drive": 3 minutes
       saved switches on the second check, 60 s never does, the 5 % share, a missed
       check restarts the count, confirmPolls, the lead), `tests/probe.test.ts`,
       `tests/live.test.ts`, `tests/drive.test.ts`; e2e: "when a jam builds during the
       drive, a side street found mid-drive takes me round it" and "when a side street
       found mid-drive saves only about a minute, it stays on my route". Open for later:
-      the via-asked ETA may run below the ordinary one (measured 3 to 13 % with 2 to 10
-      vias, one via not measured), which favours a probed route a little; a second
-      probe per check, or probes only while a jam is reported, if one turns out to miss
+      whether the via-asked bias depends on the number of vias (a probe has one, its
+      path check one to six) is not measured (#81); a second probe per check, if one
+      turns out to miss
       side streets on real trips; probes from inside the side street's own stretch see
       only what Mapbox offers from there.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing

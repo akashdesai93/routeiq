@@ -194,6 +194,7 @@ export {
   mergeProbeRoutes,
   planProbes,
   rememberCheckProbes,
+  resolveDriveProbeBudget,
   selectViaPoints,
   sideStreetNotice,
   type CheckProbeInput,

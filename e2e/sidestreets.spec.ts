@@ -300,10 +300,9 @@ test('when I start on the side-street route, it drives the side street', async (
   expect(app.answers.filter((a) => a.n > plannedRequests && a.routes.length > 1).every((a) => a.routes.every((r) => r.name !== 'S'))).toBe(true)
   expect(app.pathChecks.length).toBeGreaterThan(0)
   expect(app.pathChecks.every((c) => c.road === 'S')).toBe(true)
-  // The drive's checks probed too (#5): whatever they found, nothing beat the side street it was on.
-  const driveProbes = app.probes.slice(probesBefore)
-  expect(driveProbes.length).toBeGreaterThan(0)
-  expect(driveProbes.every((p) => p.duringDrive)).toBe(true)
+  // Parallel Street is not held up (the jam is on Main Corridor), so the drive's checks made no
+  // side-street probes (#5): a probe is only worth a request on a route that is losing time.
+  expect(app.probes.slice(probesBefore)).toEqual([])
   await expect(page.getByLabel('Drive summary')).toBeVisible()
 })
 

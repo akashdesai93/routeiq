@@ -495,11 +495,39 @@ export interface DriveProbeBudget {
   readonly requestsPerCheck: number
   /** Most probe requests per drive, so that most of the request budget stays for the checks themselves. */
   readonly requestsPerDrive: number
+  /**
+   * A check probes only when the route being driven is held up: Mapbox reports
+   * a jam on it ahead (a via point aimed at one, see ViaPoint.congestedSpanM),
+   * or its travel time is at least this many seconds over its typical time.
+   * A side street cannot save what the traffic is not costing, and a probe
+   * costs a request.
+   */
+  readonly minDelaySec: number
+  /**
+   * How long a check's probes (and the path check they need to be compared
+   * like for like) may take in all, in seconds. Then they are cancelled and
+   * the check answers without them.
+   */
+  readonly timeoutSec: number
 }
 
 export const DEFAULT_DRIVE_PROBE_BUDGET: DriveProbeBudget = {
   requestsPerCheck: 1,
   requestsPerDrive: 20,
+  minDelaySec: 120,
+  timeoutSec: 8,
+}
+
+/** The budget with every field filled in: a value that is not a number of 0 or more falls back to its default. */
+export function resolveDriveProbeBudget(budget: Partial<DriveProbeBudget> = {}): DriveProbeBudget {
+  const d = DEFAULT_DRIVE_PROBE_BUDGET
+  const n = (v: number | undefined, fallback: number) => (v !== undefined && Number.isFinite(v) && v >= 0 ? v : fallback)
+  return {
+    requestsPerCheck: budget.requestsPerCheck ?? d.requestsPerCheck,
+    requestsPerDrive: budget.requestsPerDrive ?? d.requestsPerDrive,
+    minDelaySec: n(budget.minDelaySec, d.minDelaySec),
+    timeoutSec: n(budget.timeoutSec, d.timeoutSec),
+  }
 }
 
 const whole = (v: number | undefined, fallback: number) =>
@@ -554,6 +582,8 @@ export interface CheckProbeInput {
   readonly allowed: number
   /** The engine's thresholds in use, so the current route is found among the fresh ones as the engine finds it. */
   readonly rerouteOptions?: Partial<RerouteOptions>
+  /** For minDelaySec; left out, the defaults. */
+  readonly budget?: Partial<DriveProbeBudget>
 }
 
 /** Where along a line the point nearest `p` is, in meters from the line's start. */
@@ -587,7 +617,9 @@ function nearestAlongM(line: readonly LngLat[], p: LngLat): number {
  *   budget tries every side of every stretch in time. A point within
  *   clearOfRoutesM of the kept via is the same probe and is skipped.
  *
- * Empty when nothing may be asked, the current route was not found, or there is
+ * Empty when the route being driven is not held up (no jam reported on it
+ * ahead, and under minDelaySec over its typical time), when nothing may be
+ * asked, the current route was not found, or there is
  * nothing to probe (under minTripM left, or freeway only). Pure: the same
  * input gives the same points in the same order.
  */
@@ -601,7 +633,13 @@ export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFA
   // back onto the current path and stand in for it. So no probe then.
   const base = findCurrentRoute(input.route, input.alongM, known, input.rerouteOptions)
   if (base === null) return []
-  const points = selectViaPoints(known, options, base).map((p) => p.position)
+  const selected = selectViaPoints(known, options, base)
+  // Only a route that is held up is worth a probe: a jam ahead on it, or a real delay over its typical time.
+  const { minDelaySec } = resolveDriveProbeBudget(input.budget)
+  const delaySec = base.typicalDurationSec === null ? null : base.durationSec - base.typicalDurationSec
+  const heldUp = selected.some((p) => p.congestedSpanM !== null) || (delaySec !== null && Number.isFinite(delaySec) && delaySec >= minDelaySec)
+  if (!heldUp) return []
+  const points = selected.map((p) => p.position)
 
   const out: LngLat[] = []
   const keep = input.memory.keep
@@ -646,7 +684,8 @@ export function mergeCheckProbes(
 
 /**
  * The probe memory after a check has been decided. `asked`: the probe
- * requests the check made; `routes`: the routes the engine was given (null
+ * requests the check made (those not counted yet, as they were sent, are
+ * added to `used`); `routes`: the routes the engine was given (null
  * for a failed check). The kept via is the one of the probed route the engine
  * is now confirming or holding (a 'stay' with a pending alternative that is a
  * probed route carrying its via); a failed check keeps it, as the engine
@@ -658,9 +697,12 @@ export function rememberCheckProbes(
   asked: number,
   decision: Pick<RerouteDecision, 'action' | 'considered' | 'nextState'>,
   routes: readonly RouteCandidate[] | null,
+  /** How many of `asked` are counted in memory.used already (counted as they were sent). */
+  alreadyCounted = 0,
 ): CheckProbeMemory {
   const made = whole(asked, 0)
-  const counted: CheckProbeMemory = { ...memory, used: memory.used + made, round: made > 0 ? memory.round + 1 : memory.round }
+  const uncounted = Math.max(0, made - whole(alreadyCounted, 0))
+  const counted: CheckProbeMemory = { ...memory, used: memory.used + uncounted, round: made > 0 ? memory.round + 1 : memory.round }
   if (routes === null) return counted
   const pending = decision.action === 'stay' && decision.nextState.pending !== null ? decision.considered : null
   const route = pending === null ? undefined : routes.find((r) => r.id === pending.routeId)

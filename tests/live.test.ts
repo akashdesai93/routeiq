@@ -974,36 +974,50 @@ describe('side-street probes on the checks (#5)', () => {
   /** S, the side street the provider never offers (500 m south of A from 6 to 14 km), as a check's probe found it. */
   const probed = (xM: number, eta: number) => ({ ...candidate('S', at(xM, 0), eta)!, source: 'probe' as const, via: at(10_000, -500) as LngLat })
 
-  /** Answers the check that is out with the provider's routes, a probe's route, and the requests they took. */
-  function answerWithProbe(s: ReturnType<typeof session>, xM: number, sEta: number) {
+  /**
+   * Answers the check that is out with the provider's routes and a probe's route, the current path
+   * asked through via points as the probe was (the path check a probe needs), and the requests they
+   * took. With `sent`, the shell reported the path check and the probe as it sent them.
+   */
+  function answerWithProbe(s: ReturnType<typeof session>, xM: number, sEta: number, { sent = false, pathCheck = true } = {}) {
+    const requestId = s.state.request!.id
+    if (sent) {
+      s.send({ type: 'request-sent', requestId, probe: true })
+      if (pathCheck) s.send({ type: 'request-sent', requestId, probe: false })
+    }
     return s.send({
       type: 'routes',
       nowMs: s.nowMs(),
-      requestId: s.state.request!.id,
+      requestId,
       routes: [...routesAt(xM, { A: 1300 }), probed(xM, sEta)],
-      requests: 2,
+      baseline: pathCheck ? [candidate('A', at(xM, 0), 1300)!] : null,
+      requests: pathCheck ? 3 : 2,
       probes: 1,
     })
   }
 
   /** Drives on A at 15 m/s to `untilSec`, answering every check with a probe that found S. */
-  function cruiseWithProbes(s: ReturnType<typeof session>, untilSec: number, sEta: number) {
+  function cruiseWithProbes(s: ReturnType<typeof session>, untilSec: number, sEta: number, how: { sent?: boolean; pathCheck?: boolean } = {}) {
     for (let t = s.nowSec + 1; t <= untilSec; t++) {
       s.setTime(t)
       s.fix(15 * t)
       s.tick()
-      if (s.state.request !== null) answerWithProbe(s, 15 * t, sEta)
+      if (s.state.request !== null) answerWithProbe(s, 15 * t, sEta, how)
     }
   }
 
-  it('each check may make one probe, and says what to ask through; a search for the first route or a new one may not', () => {
+  it('each check may make one probe, and says what to ask through and within what time; a search for the first route or a new one may not', () => {
     const s = session()
     s.start()
     s.fix(0)
     expect(s.requests()[0]!.effect).toMatchObject({ purpose: 'plan', probes: { allowed: 0 } })
     s.answer([candidate('A', at(0, 0), 1300)!])
     cruise(s, 60)
-    expect(s.requests()[1]!.effect).toMatchObject({ purpose: 'poll', baseline: true, probes: { allowed: 1, memory: INITIAL_CHECK_PROBES } })
+    expect(s.requests()[1]!.effect).toMatchObject({
+      purpose: 'poll',
+      baseline: true,
+      probes: { allowed: 1, memory: INITIAL_CHECK_PROBES, budget: { timeoutSec: 8, minDelaySec: 120 } },
+    })
     // Off the route: a new route at once, with no probe.
     for (let k = 1; k <= 4; k++) {
       s.setTime(60 + k)
@@ -1031,8 +1045,8 @@ describe('side-street probes on the checks (#5)', () => {
     const s = driving()
     cruiseWithProbes(s, 60, 1000)
     expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'confirming' })
-    // The probe counts against the budget, and its via is asked first next time.
-    expect(s.state.requestsUsed).toBe(3)
+    // The probe and its path check count against the budget, and its via is asked first next time.
+    expect(s.state.requestsUsed).toBe(4)
     expect(s.state.probes).toEqual({ used: 1, round: 1, keep: at(10_000, -500) })
 
     cruiseWithProbes(s, 120, 1000)
@@ -1045,6 +1059,14 @@ describe('side-street probes on the checks (#5)', () => {
     expect(s.state.probes).toEqual({ used: 2, round: 2, keep: null })
   })
 
+  it('without the path check a probe needs, a side street never counts', () => {
+    const s = driving()
+    cruiseWithProbes(s, 300, 1000, { pathCheck: false })
+    expect(s.state.switches).toEqual([])
+    expect(s.state.lastDecision).toMatchObject({ code: 'probe-unconfirmed' })
+    expect(s.state.probes.keep).toBeNull()
+  })
+
   it('a side street that saves only 60 s is found every check and never switched to', () => {
     const s = driving()
     // Six checks, all before S leaves A at 6 km.
@@ -1053,5 +1075,67 @@ describe('side-street probes on the checks (#5)', () => {
     expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'saving-too-small', reason: 'Staying: faster route saves only 60 seconds' })
     expect(s.state.probes.keep).toBeNull()
     expect(s.spoken()).toEqual([])
+  })
+
+  it('requests are counted as the shell sends them, once, and those of a check cancelled before its answer still count', () => {
+    const s = driving()
+    cruiseWithProbes(s, 60, 1000, { sent: true })
+    // The check, its probe and the probe's path check: 1 + 3, each counted once.
+    expect(s.state.requestsUsed).toBe(4)
+    expect(s.state.probes.used).toBe(1)
+    // The next check sends a probe, then the car leaves the route: the check is cancelled, its answer never comes.
+    cruise(s, 119)
+    s.setTime(120)
+    s.fix(1800)
+    s.tick()
+    const id = s.state.request!.id
+    s.send({ type: 'request-sent', requestId: id, probe: true })
+    for (let k = 1; k <= 4; k++) {
+      s.setTime(120 + k)
+      s.fix(1800 + 15 * k, 400)
+    }
+    expect(s.state.request!.purpose).toBe('replan')
+    // 4, the cancelled check and its probe, and the search for a new route.
+    expect(s.state.requestsUsed).toBe(7)
+    expect(s.state.probes.used).toBe(2)
+  })
+})
+
+describe('a slow answer (#5 review)', () => {
+  /** B saves five minutes; it leaves A at 5 km. */
+  const faster = (xM: number) => routesAt(xM, { A: 1300, B: 1000 })
+
+  it('a check whose probes ran out of time answers without them, and the checks keep their cadence', () => {
+    const s = driving()
+    const sentAt: number[] = []
+    for (let t = 1; t <= 300; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+      if (s.state.request !== null && !sentAt.includes(s.state.request.sentAtMs)) sentAt.push(s.state.request.sentAtMs)
+      // The shell answers 8 s after sending (the probe never did; its time limit cancelled it).
+      if (s.state.request !== null && s.nowMs() - s.state.request.sentAtMs >= 8000) {
+        s.send({ type: 'request-sent', requestId: s.state.request.id, probe: true })
+        s.answer(routesAt(15 * t, { A: 1300 }))
+      }
+    }
+    expect(sentAt.map((ms) => (ms - T0) / 1000)).toEqual([60, 120, 180, 240, 300])
+  })
+
+  it('the turn-off is judged from where the car is when the answer comes, not where it was asked from', () => {
+    // Asked at 4.2 km (B turns off 800 m ahead), answered 30 s later with the car 450 m on: 350 m left, too late.
+    const s = driving({ pollIntervalSec: 280 })
+    cruise(s, 279, faster)
+    s.setTime(280)
+    s.fix(15 * 280)
+    s.tick()
+    expect(s.state.request!.alongM).toBeCloseTo(4200, -1)
+    for (let t = 281; t <= 310; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+    }
+    s.answer(faster(4200))
+    expect(s.state.lastDecision).toMatchObject({ code: 'too-late' })
+    expect(s.state.switches).toEqual([])
   })
 })

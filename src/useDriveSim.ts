@@ -173,6 +173,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
     // One more request, for the current path's own travel time, only with room for it in the budget.
     const roomForBaseline = run.clock.requestsUsed < settings.maxRequests
     // Side-street probes share the same budget, and never take the baseline's room.
+    let probesSent = 0
     const probesAllowed = checkProbeAllowance({ requestsUsed: run.clock.requestsUsed, probesUsed: run.probes.used }, settings.maxRequests)
     const result = await fetchFreshRoutes({
       token,
@@ -183,6 +184,14 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       whatIf: { route: run.route, alongM: run.clock.alongM, delaySec },
       baseline: roomForBaseline ? { route: run.route, alongM: run.clock.alongM, rerouteOptions } : null,
       probes: probesAllowed > 0 ? { route: run.route, alongM: run.clock.alongM, allowed: probesAllowed, memory: run.probes, rerouteOptions } : null,
+      // Every request is counted as it goes out, so a check that is stopped still counts what it made.
+      onRequest: (probe) => {
+        run.clock = { ...run.clock, requestsUsed: run.clock.requestsUsed + 1 }
+        if (probe) {
+          probesSent++
+          run.probes = { ...run.probes, used: run.probes.used + 1 }
+        }
+      },
     })
     // Stopped, or replaced by a new drive, while the request was out. (The clock waits
     // for the signal counts too: the engine must be asked about the place the routes
@@ -196,7 +205,6 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
     const candidates = result.ok ? result.candidates : null
     const signalsById: ReadonlyMap<string, readonly RouteSignal[]> = result.ok ? result.signalsByRouteId : new Map()
     run.inFlight = null
-    if (result.ok && result.requests > 1) run.clock = { ...run.clock, requestsUsed: run.clock.requestsUsed + result.requests - 1 }
     const simulated = result.ok && result.simulated
     const decision = decideReroute(
       run.engine,
@@ -211,7 +219,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       latest.current.rerouteOptions,
     )
     run.engine = decision.nextState
-    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates)
+    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates, probesSent)
     const viaSideStreets = decision.action === 'switch' && fresh?.find((c) => c.id === decision.toRouteId)?.source === 'probe'
     const reason = viaSideStreets ? `${decision.reason} (via side streets)` : decision.reason
     const said = result.ok ? reason : `${reason} (${result.message})`
