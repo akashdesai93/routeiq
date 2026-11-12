@@ -3,7 +3,8 @@
 
 const fmtTime = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : 'never')
 const ago = (h) => (h == null ? '' : h < 1 ? `${Math.round(h * 60)} min ago` : `${Math.round(h * 10) / 10} h ago`)
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim() || '—'
+// Table cells: escape backslashes first, then pipes, so text from a status can't end a cell early.
+const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim() || '—'
 const hoursSince = (iso, now) => (new Date(now).getTime() - new Date(iso).getTime()) / 3600e3
 const prRef = (p) => `#${p.number}`
 
