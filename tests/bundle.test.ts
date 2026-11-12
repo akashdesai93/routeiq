@@ -20,7 +20,7 @@ import {
   osmBundleUrl,
   tileRowsHas,
 } from '../src/providers/osm/bundle.ts'
-import { createBundleLayer, memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
+import { createBundleLayer, DEFAULT_BUNDLE_RETRY, memoryBundleLayer } from '../src/providers/osm/bundleLayer.ts'
 import { boxFullyInside, fullyCoveredTiles, parsePoly, pointInPoly, type BoundaryPoly } from '../src/providers/osm/coverage.ts'
 import { createTileSource, memoryTileStore, type TileLayer } from '../src/providers/osm/tileSource.ts'
 import { loadSignalData, type SignalSources } from '../src/signalData.ts'
@@ -340,15 +340,83 @@ describe('the bundle layer', () => {
     expect(files.requested).toEqual([`${BASE}/index.json`, `${BASE}/${WEST}.json`, `${BASE}/${EDGE}.json`])
   })
 
-  it('covers nothing without an index, and looks for one again next time', async () => {
-    // What a dev server answers for a file that is not there: a web page with status 200.
-    const files = staticFiles({ [`${BASE}/index.json`]: '<!doctype html><div id="root"></div>' })
-    const layer = createBundleLayer({ baseUrl: BASE, fetchImpl: files.fetchImpl })
+  it('covers nothing when the server says there is no index (404), and looks for one again after the wait', async () => {
+    let nowMs = NOW
+    const files = staticFiles({})
+    const layer = createBundleLayer({ baseUrl: BASE, fetchImpl: files.fetchImpl, now: () => nowMs })
+    // No bundle was built: that is an answer, and tiles may go on to the cache and the network.
     expect(await layer.coverage(WEST)).toBe('none')
     expect(await layer.get(WEST)).toBeNull()
+    expect(files.requested).toEqual([`${BASE}/index.json`])
     Object.assign(files.files, bundleFiles())
+    nowMs += DEFAULT_BUNDLE_RETRY.retryMs
     expect(await layer.coverage(WEST)).toBe('covered')
     expect((await layer.get(WEST))!.nodes).toHaveLength(1)
+  })
+
+  it('does not know what it covers when the index cannot be read: unknown, never "not covered" (#72)', async () => {
+    const index = bundleFiles()[`${BASE}/index.json`]
+    // Each way a read fails without the server saying "no such file".
+    const failures: Record<string, () => Promise<Response>> = {
+      'a dropped request': () => Promise.reject(new TypeError('Failed to fetch')),
+      'a busy server': () => Promise.resolve(new Response('Service Unavailable', { status: 503 })),
+      // What a dev server or a captive portal answers: a web page with status 200.
+      'a page that is not the index': () => Promise.resolve(new Response('<!doctype html><div id="root"></div>')),
+      'JSON that is not an index': () => Promise.resolve(new Response(JSON.stringify({ version: 99 }))),
+    }
+    for (const [what, fail] of Object.entries(failures)) {
+      let nowMs = NOW
+      let down = true
+      const layer = createBundleLayer({
+        baseUrl: BASE,
+        fetchImpl: (() => (down ? fail() : Promise.resolve(new Response(JSON.stringify(index))))) as typeof fetch,
+        now: () => nowMs,
+      })
+      expect(await layer.coverage(WEST), what).toBe('unknown')
+      // Also for a tile the bundle would not have: nobody knows yet.
+      expect(await layer.coverage('-827_355'), what).toBe('unknown')
+      expect(await layer.get(WEST), what).toBeNull()
+      down = false
+      nowMs += DEFAULT_BUNDLE_RETRY.retryMs
+      expect(await layer.coverage(WEST), what).toBe('covered')
+      expect(await layer.coverage('-827_355'), what).toBe('none')
+    }
+  })
+
+  it('reads a failed index again only after a wait that doubles, up to a minute; a retry the user asked for skips it', async () => {
+    expect(DEFAULT_BUNDLE_RETRY).toEqual({ retryMs: 5_000, maxRetryMs: 60_000 })
+    let nowMs = NOW
+    let reads = 0
+    const layer = createBundleLayer({
+      baseUrl: BASE,
+      fetchImpl: (() => {
+        reads++
+        return Promise.reject(new TypeError('Failed to fetch'))
+      }) as typeof fetch,
+      now: () => nowMs,
+    })
+    const readsAfter = async (advanceMs: number) => {
+      nowMs += advanceMs
+      expect(await layer.coverage(WEST)).toBe('unknown')
+      return reads
+    }
+    // Tiles asked about at the same moment share one read.
+    await Promise.all([WEST, EAST, EMPTY].map((id) => layer.coverage(id)))
+    expect(reads).toBe(1)
+    expect(await readsAfter(4_999)).toBe(1)
+    expect(await readsAfter(1)).toBe(2)
+    // Failed again: 10 s now, then 20, 40, and never more than 60.
+    expect(await readsAfter(9_999)).toBe(2)
+    expect(await readsAfter(1)).toBe(3)
+    expect(await readsAfter(20_000)).toBe(4)
+    expect(await readsAfter(40_000)).toBe(5)
+    expect(await readsAfter(59_999)).toBe(5)
+    expect(await readsAfter(1)).toBe(6)
+    expect(await readsAfter(59_999)).toBe(6)
+    expect(await readsAfter(1)).toBe(7)
+    // "Retry signals": read at once.
+    expect(await layer.coverage(WEST, { retryFailed: true })).toBe('unknown')
+    expect(reads).toBe(8)
   })
 
   it('treats a damaged or mislabelled tile file as missing, and never rejects', async () => {
@@ -361,7 +429,7 @@ describe('the bundle layer', () => {
     expect(await layer.get(WEST)).toBeNull()
     expect(await layer.get(EAST)).toBeNull()
     const broken = createBundleLayer({ baseUrl: BASE, fetchImpl: () => Promise.reject(new Error('offline')) })
-    expect(await broken.coverage(WEST)).toBe('none')
+    expect(await broken.coverage(WEST)).toBe('unknown')
     expect(await broken.get(WEST)).toBeNull()
   })
 
@@ -465,6 +533,116 @@ describe('createTileSource with a bundle: bundle, then cache, then network', () 
     const bundle = { coverage: () => Promise.resolve('covered' as const), get: () => Promise.resolve(null) }
     const source = createTileSource({ bundle, cache: memoryTileStore(), network: network.layer, now: () => NOW })
     expect((await source.load([WEST])).missing).toEqual([WEST])
+    expect(network.asked).toEqual([])
+  })
+
+  it('a covered tile never reaches the network or the cache when the index read fails once (#72)', async () => {
+    // The repro of #72: one dropped request for index.json, then the server is fine again.
+    const index = buildBundleIndex([], [WEST], [{ name: 'north-carolina', dataDate: DATA_DATE }])
+    let indexReads = 0
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      if (!String(input).endsWith('/index.json')) return Promise.resolve(new Response('null', { status: 404 }))
+      indexReads++
+      if (indexReads === 1) return Promise.reject(new TypeError('Failed to fetch'))
+      return Promise.resolve(new Response(JSON.stringify(index)))
+    }) as typeof fetch
+    let nowMs = NOW
+    const network = recordingNetwork((tileId) => tileAt(tileId, NOW, node(99)))
+    // An old copy of the tile in the device cache, from before the bundle covered it: not to be used either.
+    const puts: string[] = []
+    const stale = memoryTileStore([tileAt(WEST, NOW - DAY_MS, node(98))])
+    const cache = { get: stale.get, put: (tile: OsmSignalTile) => (puts.push(tile.tileId), stale.put(tile)) }
+    const sources: SignalSources = {
+      tiles: createTileSource({
+        bundle: createBundleLayer({ baseUrl: `/${OSM_BUNDLE_PATH}`, fetchImpl, now: () => nowMs }),
+        cache,
+        network: network.layer,
+        now: () => nowMs,
+      }),
+    }
+    const first = await sources.tiles.load([WEST])
+    expect(first.missing).toEqual([WEST])
+    expect(first.awaitingBundle).toEqual([WEST])
+    expect(first.partial.size).toBe(0)
+    // Unknown is never zero: the route is partial, not "0 signals".
+    const road = route('A', [
+      [-80.83, 35.25],
+      [-80.81, 35.25],
+    ])
+    const counted = withSignalCounts([road], (await loadSignalData([road], sources)).data).routes[0]
+    expect(counted.signalCoverage).not.toBe('full')
+    // The next load after the wait reads the index again, and the tile is there: covered, without signals.
+    nowMs += DEFAULT_BUNDLE_RETRY.retryMs
+    const second = await sources.tiles.load([WEST])
+    expect(second.missing).toEqual([])
+    expect(second.awaitingBundle).toEqual([])
+    expect(second.tiles.get(WEST)).toEqual({ tileId: WEST, fetchedAt: DATA_DATE, nodes: [] })
+    expect(indexReads).toBe(2)
+    await settle()
+    expect(network.asked).toEqual([])
+    expect(puts).toEqual([])
+  })
+
+  it('asks Overpass nothing while the index cannot be read, however long that lasts, then only for the uncovered tile', async () => {
+    const OUTSIDE = '-827_355'
+    const index = buildBundleIndex([], [WEST], [{ name: 'north-carolina', dataDate: DATA_DATE }])
+    let online = false
+    const fetchImpl = (() =>
+      online ? Promise.resolve(new Response(JSON.stringify(index))) : Promise.resolve(new Response('busy', { status: 502 }))) as typeof fetch
+    let nowMs = NOW
+    const network = recordingNetwork((tileId) => tileAt(tileId, NOW, node(99)))
+    const puts: string[] = []
+    const inner = memoryTileStore()
+    const cache = { get: inner.get, put: (tile: OsmSignalTile) => (puts.push(tile.tileId), inner.put(tile)) }
+    const source = createTileSource({
+      bundle: createBundleLayer({ baseUrl: `/${OSM_BUNDLE_PATH}`, fetchImpl, now: () => nowMs }),
+      cache,
+      network: network.layer,
+      now: () => nowMs,
+    })
+    // A dead zone of twenty minutes, a check every 30 s, and "Retry signals" pressed now and then.
+    for (let check = 0; check < 40; check++) {
+      const loaded = await source.load([WEST, OUTSIDE], { retryFailed: check % 7 === 0 })
+      expect(loaded.missing).toEqual([WEST, OUTSIDE])
+      expect(loaded.awaitingBundle).toEqual([WEST, OUTSIDE])
+      nowMs += 30_000
+    }
+    expect(network.asked).toEqual([])
+    expect(puts).toEqual([])
+    online = true
+    nowMs += DEFAULT_BUNDLE_RETRY.maxRetryMs
+    const loaded = await source.load([WEST, OUTSIDE])
+    expect(loaded.missing).toEqual([])
+    // Now the index says which is which: only the tile outside the bundle went to the network and the cache.
+    expect(network.asked).toEqual([OUTSIDE])
+    expect(puts).toEqual([OUTSIDE])
+  })
+
+  it('a bundled tile whose file could not be read is tried again after 5 s, doubling to a minute: not the Overpass waits', async () => {
+    let nowMs = NOW
+    let reads = 0
+    const bundle = {
+      coverage: () => Promise.resolve('covered' as const),
+      get: () => (reads++, Promise.resolve(null)),
+    }
+    const network = recordingNetwork()
+    const source = createTileSource({ bundle, cache: memoryTileStore(), network: network.layer, now: () => nowMs })
+    const readsAfter = async (advanceMs: number) => {
+      nowMs += advanceMs
+      const loaded = await source.load([WEST])
+      expect(loaded.missing).toEqual([WEST])
+      expect(loaded.awaitingBundle).toEqual([WEST])
+      return reads
+    }
+    expect(await readsAfter(0)).toBe(1)
+    expect(await readsAfter(4_999)).toBe(1)
+    expect(await readsAfter(1)).toBe(2)
+    expect(await readsAfter(10_000)).toBe(3)
+    expect(await readsAfter(20_000)).toBe(4)
+    expect(await readsAfter(40_000)).toBe(5)
+    for (let i = 0; i < 5; i++) await readsAfter(60_000)
+    expect(reads).toBe(10)
+    expect(await readsAfter(59_999)).toBe(10)
     expect(network.asked).toEqual([])
   })
 

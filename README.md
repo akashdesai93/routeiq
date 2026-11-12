@@ -177,6 +177,12 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
   tokens on localhost unless localhost is on the list, and it does not accept IP
   addresses, so use `localhost`, not `127.0.0.1`.
 - `.env.local` is git-ignored. Only `.env.example` (a placeholder) is meant for git.
+- **The iPhone app** (`native/shell`, below) has no token built in, because its build is a
+  public download. It asks for a `pk.` token on first launch, keeps it on the phone only
+  (the app's localStorage, key `routeiq.shell.mapboxToken`) and has a "Change token"
+  button. It refuses `sk.` tokens and never stores one. A URL-restricted token does not
+  work there (the app's pages come from `capacitor://localhost`), so use a separate
+  unrestricted public token for the phone.
 - The GitHub Pages build (`.github/workflows/pages.yml`) uses its own public token, the
   repo secret `VITE_MAPBOX_TOKEN_PAGES`, URL-restricted to `https://akashdesai93.github.io`.
   It is passed to the build step only and never printed; the build stops if it is missing
@@ -263,10 +269,12 @@ src/providers/osm/
                 (.poly) and finds the tiles that lie entirely inside the boundaries.
                 bundleLayer.ts: reads index.json once and then only the tile files it
                 lists, from this site itself; a covered tile without signals is answered
-                from the index alone.
+                from the index alone. An index that could not be read makes coverage
+                'unknown', never "not covered", and is read again after a short wait.
                 tileSource.ts: loads tiles through the chain bundled tiles -> device
                 cache -> network. A tile the bundle covers in full never reaches the
-                cache or the network; other tiles are cached, refreshed after 30 days,
+                cache or the network, and neither does any tile while the bundle's
+                index cannot be read; other tiles are cached, refreshed after 30 days,
                 and left alone for a while after a failure.
 src/storage/    kv.ts: the tiny key-value store the signal data on the device goes
                 through: IndexedDB, or memory where IndexedDB is not available.
@@ -278,7 +286,8 @@ src/signalData.ts  Loads the signal data a set of routes needs (the tiles they t
                 and wires up the sources the app uses, the bundled tiles ahead of the
                 device cache and the network. askOnce wraps them for a drive that
                 polls: a tile outside the bundle is asked for at most once per
-                session. forgetOldSignalData deletes the database of the removed
+                session, while a bundled tile that could not be read is tried again
+                on a later check. forgetOldSignalData deletes the database of the removed
                 City of Charlotte list (#13) when the app starts.
 src/drive/      simulation.ts: the pure parts of the simulated drive: the simulated
                 clock, when a poll is due, the budget of real Directions requests
@@ -420,6 +429,22 @@ to look at are in `design/exports/merged/`.
      nothing is ever asked of Overpass or copied into the device cache. Freshness comes
      from rebuilding, not from per-tile refreshes. The panel shows the data's date
      ("Signal data: OpenStreetMap, Nov 2026").
+
+     The index and the tile files are requests to the app's own server, and on a phone
+     they can fail like any other (a dropped request, a 5xx, a dead zone). A failed
+     read is never taken for "not covered". While the index cannot be read, coverage
+     is unknown for every tile: no tile is asked of Overpass, looked up in or written
+     to the device cache, and the count is partial (never 0). A covered tile whose
+     file cannot be read is likewise missing, not sent on. Nothing retries on a
+     timer: the next time routes are counted (a new plan, a check during a drive),
+     the file is read again if its wait is over. The wait is 5 seconds, doubling to
+     at most a minute while the read keeps failing (`DEFAULT_BUNDLE_RETRY` in
+     `src/providers/osm/bundleLayer.ts`), and it is kept for the index and for each
+     tile separately, so after a long outage a tile can stay partial for up to about
+     two minutes after the server is back. "Retry signals" skips the waits. On the
+     plan screen the count therefore stays partial until "Retry signals" is pressed
+     or the routes change. Only the server answering 404 or 410 for `index.json`
+     means there is no bundle (see below).
   2. **Overpass (backup).** A tile the bundle does not cover in full is loaded from the
      public Overpass API (https://overpass-api.de/api/interpreter, run by FOSSGIS
      volunteers; no key) with the query
@@ -470,8 +495,11 @@ to look at are in `design/exports/merged/`.
   `.poly` boundaries, and writes through temporary files, the index last. Any other
   Geofabrik extract dropped into the folder with its `.poly` is picked up the same way.
   Exit codes: 0 written, 1 bad arguments, 2 an input is missing, damaged or fails its
-  checksum (nothing is written then). Without the bundle the app still works: every
-  tile is then loaded from Overpass on demand.
+  checksum (nothing is written then). Without the bundle (the server answers 404 or 410
+  for `index.json`) the app still works: every tile is then loaded from Overpass on
+  demand. A server that answers something else for a missing file, such as the Vite dev
+  server's page with status 200, leaves coverage unknown instead: counts stay partial
+  and Overpass is not asked.
 - **Traffic signals, fallback:** the `traffic_signal` flags Mapbox puts on the
   intersections of a route, used only on stretches whose OpenStreetMap tile could not be
   loaded (outside the bundle, with Overpass failing).
@@ -664,7 +692,10 @@ against the budget and is made only when a check leaves room for it.
 other route. A check never passes `retryFailed`. Outside the bundle the plain tile
 source would ask Overpass again for a failed tile every 30 seconds to 8 minutes; a
 drive goes through `askOnce` (`src/signalData.ts`), which asks for such a tile at most
-once per page session.
+once per page session. That rule is for Overpass tiles only. A bundled tile that could
+not be read (its file, or the bundle's index, in a dead zone) is not given up on: it
+never reaches Overpass, and it is read again on a later check or drive once its short
+wait is over (5 seconds, doubling to a minute). Until then its routes stay partial.
 
 **What-if (development builds only).** There is rarely a faster route to be had on
 demand, so `npm run dev` shows a boxed control, labelled as simulated: it adds a delay
@@ -975,6 +1006,43 @@ rechecks the routes at once; it cannot do more than that. Driving with a locked 
 needs the native app (PLAN.md). It also needs HTTPS (or localhost) to be given a
 position at all.
 
+**The iPhone shell app (`native/shell`).** The same web app inside an installable
+Capacitor shell, so a drive continues with the phone locked or another app in front.
+Install steps and the pre-drive check: [docs/phone-install.md](docs/phone-install.md).
+Nobody has run it on a device yet; that document lists what is unverified. What changes
+inside the shell, and only there (the web app picks this at run time when the shell's
+plugin `RouteIQNative` is present, `src/device/native`):
+
+- **Position:** `CLLocationManager` with background updates (navigation accuracy,
+  automotive activity, never paused by iOS, blue indicator shown) in place of
+  `watchPosition`. "Use my location" asks the same plugin once.
+- **Voice:** `AVSpeechSynthesizer` behind the same queue rules, with an audio session
+  that lowers music while a line plays and releases it after.
+- **Screen:** `isIdleTimerDisabled` in place of the Wake Lock API.
+- **A hidden page is not a pause.** In a browser the session stops asking for routes
+  while the page is hidden; in the shell it is never told the page was hidden, so the
+  checks go on. The rule in `core/live.ts` is unchanged.
+- **The clock's ticks.** iOS may hold back a web page's timers while locked, so the
+  session's once-a-second tick is driven by each native position fix and by a native
+  one-second timer event, as well as by `setInterval`; whichever comes first counts, at
+  most one tick per second (`src/device/native/pulse.ts`).
+- **Route requests** (Mapbox Directions: the plan, the checks during a drive, the
+  side-street probes) are made by iOS (`URLSession`, the plugin's `httpGet`) instead of
+  the web view's `fetch`, which iOS may hold back while the phone is locked. The
+  Directions client has one injectable transport (`setDirectionsTransport` in
+  `src/providers/mapbox/client.ts`, `fetch` by default); the shell sets the native one
+  at startup (`src/main.tsx`, `src/device/native/http.ts`). Same URL, same error
+  messages, an abort cancels the native request. The native side takes
+  `https://api.mapbox.com/` addresses only, follows no redirect, gives up after 20 s
+  and never logs an address. Search and map tiles stay on the web view.
+- **Drive diagnostics** (top bar, shell only): an in-memory log with a Copy button of
+  what iOS let the app do: fixes and ticks received and the longest wait between them,
+  route requests with their times, spoken lines started and finished, and when the app
+  went to the background. Counts and timings only (`src/device/native/diagnostics.ts`).
+
+The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
+Mapbox token is found anywhere in the app.
+
 **The drive view** replaces the planning layout, full screen: the next turn (arrow,
 distance, road) on top; the map following the car, heading up, with the route being
 driven, the car and the turn-off of a switch; below it the arrival time, the minutes
@@ -1114,6 +1182,20 @@ made on the device by the browser's own
 speech engine; RouteIQ sends it nowhere. The development replay uses a made-up position
 that starts at the origin pin, not the device's.
 
+**In the iPhone shell app** the same holds, with one difference: the position is read
+for the whole drive, also while the phone is locked or another app is in front (that is
+what the app is for; iOS shows its blue location indicator meanwhile). The native code
+hands each position to the app's memory and keeps none: it writes no log and no file.
+The shell adds no network call: route requests are the same requests to Mapbox as in a
+browser, only sent by the app's native code (so they go out with the phone locked),
+which accepts `https://api.mapbox.com/` addresses and nothing else, follows no redirect
+and never logs or stores an address or an answer. Search and map tiles are the web
+app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
+Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
+and timings in memory (fixes, ticks, route requests, spoken lines, app in front or
+not): no position, no address, no token. It leaves the phone only if you copy it and
+send it yourself.
+
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for
 Google, the route's start and end and up to nine points along it; for Waze, the
@@ -1153,10 +1235,16 @@ except tiles on the states' outer edge) sends nothing to any signal server: the 
 are static files of the app itself, fetched from the same server as the page, and what
 is fetched is a whole 0.1 degree tile (a square about 9 by 11 km), never a route or a
 position. The bundled files hold public map data only; nothing in them describes a user
-or a trip. The built-in test places are public intersections and landmarks, never a
+or a trip. This also holds when those files cannot be read: a failed read of the bundle's
+index or of a tile file is retried against the app's own server later, and is never a
+reason to ask Overpass. Until the index has been read, no tile is sent to Overpass or
+written to the device cache at all, with one exception: when the app's server answers
+that there is no index (HTTP 404 or 410), the app was built without the bundle, and
+every tile is then treated as outside it. The built-in test places are public intersections and landmarks, never a
 private address.
 
-Only for tiles outside that area, the Overpass server (OpenStreetMap data) is sent the
+Only for tiles the bundle's index says are outside that area (or for every tile of
+an app built without the bundle), the Overpass server (OpenStreetMap data) is sent the
 bounding boxes of the tiles a route touches, one request per tile. Nothing else about
 the trip is sent: no route line, no pin position, no coordinate finer than a tenth of a
 degree, and no cookies. The server sees which tiles were asked for, the page's origin

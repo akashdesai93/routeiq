@@ -1,0 +1,7 @@
+{
+  "name": "routeiq-shell-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Capacitor plugin: native location, speech and screen lock for the RouteIQ iPhone shell.",
+  "capacitor": { "ios": { "src": "ios" } }
+}

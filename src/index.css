@@ -149,3 +149,15 @@ button.link:hover { background: none; color: #0550ae; }
 .live-summary-switches { padding-left: 20px; }
 .app.live .map .mapboxgl-ctrl-top-right { display: none; }
 .side-street-notice:empty { margin: 0; }
+/* The iPhone shell: the "paste your token" screen and the "Change token" button in the bar (ShellRoot.tsx). */
+.token-screen input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; padding: 8px 10px; font: inherit; border: 1px solid #8c959f; border-radius: 6px; }
+.token-screen p { margin: 8px 0; }
+.token-actions { display: flex; gap: 8px; }
+.shell-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* The iPhone shell's "Drive diagnostics" (DriveDiagnosticsPanel.tsx): a sheet over the lower part of the screen. */
+.diagnostics { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: 80%; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #ffffff; border-top: 1px solid #8c959f; box-shadow: 0 -4px 12px rgba(31, 35, 40, 0.15); font-size: 14px; }
+.diagnostics-head { display: flex; gap: 8px; align-items: center; }
+.diagnostics-head strong { margin-right: auto; }
+.diagnostics-head button { min-height: 36px; }
+.diagnostics-note { margin: 0; color: #57606a; font-size: 13px; }
+.diagnostics-text { flex: 1; width: 100%; min-height: 200px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; resize: none; white-space: pre; overflow: auto; }

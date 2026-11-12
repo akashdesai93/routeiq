@@ -123,8 +123,31 @@ export interface FetchDirectionsOptions {
   via?: readonly ViaPoint[]
   /** Aborting resolves with kind 'aborted'; the caller should ignore that result. */
   signal?: AbortSignal
-  /** Swapped out in tests so they never touch the network. */
-  fetchImpl?: typeof fetch
+  /** Swapped out in tests so they never touch the network. Left out: the transport in use (see setDirectionsTransport). */
+  fetchImpl?: DirectionsTransport
+}
+
+/**
+ * How a Directions request reaches Mapbox: the part of `fetch` this client
+ * uses. It resolves with the status and the body for any HTTP answer, rejects
+ * when there is none, and rejects when `signal` is aborted. The browser's
+ * `fetch` is one; the iPhone shell supplies another (src/device/native/http.ts).
+ */
+export type DirectionsTransport = (
+  url: string,
+  init?: { signal?: AbortSignal },
+) => Promise<{ readonly status: number; json(): Promise<unknown> }>
+
+let transport: DirectionsTransport | null = null
+
+/**
+ * Sets how Directions requests are sent from now on. Null (the default) is
+ * the browser's `fetch`. Called once at startup, and only inside the iPhone
+ * shell, where the request is handed to native networking so that it goes
+ * out with the phone locked (src/main.tsx).
+ */
+export function setDirectionsTransport(next: DirectionsTransport | null): void {
+  transport = next
 }
 
 /**
@@ -132,7 +155,7 @@ export interface FetchDirectionsOptions {
  * come back as a typed result with a message fit to show the user.
  */
 export async function fetchDirections(options: FetchDirectionsOptions): Promise<DirectionsResult> {
-  const { origin, destination, token, originHeadingDeg, via, signal, fetchImpl = fetch } = options
+  const { origin, destination, token, originHeadingDeg, via, signal, fetchImpl = transport ?? fetch } = options
   const url = buildDirectionsUrl(origin, destination, token, { originHeadingDeg, via })
   if (url === null)
     return { ok: false, kind: 'malformed', message: 'A pin is not at a valid map coordinate.' }
@@ -195,7 +218,7 @@ export interface FetchProbeRouteOptions {
   /** The vehicle's heading at the origin, for a probe made during a drive (see DirectionsUrlOptions.originHeadingDeg). */
   originHeadingDeg?: number
   signal?: AbortSignal
-  fetchImpl?: typeof fetch
+  fetchImpl?: DirectionsTransport
 }
 
 /**

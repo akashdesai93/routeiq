@@ -11,6 +11,7 @@ import {
   type RouteCandidate,
 } from './core/index.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
+import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
 import { pageVisibility } from './device/visibility.ts'
 import { createWakeLock } from './device/wakeLock.ts'
@@ -110,20 +111,25 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const { token, destination, route, replay } = latest.current
     if (token === null) return
     runnerRef.current?.runner.dispose()
-    const speaker = (speakerRef.current ??= createSpeaker())
+    // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
+    // and go on with the phone locked (src/device/native). In a browser: the browser's own.
+    const native = nativeDevice()
+    const speaker = (speakerRef.current ??= native?.speaker ?? createSpeaker())
     const replaySource = replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
-    const source: PositionSource = replaySource ?? geolocationSource()
+    const source: PositionSource = replaySource ?? native?.source ?? geolocationSource()
     const now = replaySource === null ? Date.now : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
-    const wakeLock = createWakeLock({ onReleased: () => runner.wakeLockReleased() })
+    const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
       speaker,
       wakeLock,
-      visibility: pageVisibility(),
+      // A replay has no GPS to lose, but it runs on the page's timers: it keeps the browser's rule.
+      visibility: replaySource === null && native !== null ? native.visibility : pageVisibility(),
       now,
       every: (ms, fn) => {
+        if (replaySource === null && native !== null) return native.every(ms, fn)
         // A replay at 20x needs the session asked more often than once a real second.
         const id = setInterval(fn, replaySource === null ? ms : 200)
         return () => clearInterval(id)

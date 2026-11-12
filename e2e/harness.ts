@@ -15,7 +15,7 @@
 
 import { readFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
-import { installBrowserStubs, type E2EWindow } from './browserStubs.ts'
+import { installBrowserStubs, installShellStubs, type E2EWindow } from './browserStubs.ts'
 import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
 
 export { expect }
@@ -71,6 +71,8 @@ export interface DriveOptions {
   wrongTurnAtSec?: number
   /** GPS error, up to this many meters to either side of the road (deterministic). Default 0. */
   gpsNoiseM?: number
+  /** At this simulated second the page goes hidden and stays hidden: the phone was locked, or another app is in front. */
+  hideAtSec?: number
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
 }
@@ -134,7 +136,8 @@ export class App {
     return this.worlds.get(destination.join(','))
   }
 
-  async open(options: { fakeClock?: boolean; storage?: Record<string, string>; path?: string } = {}) {
+  /** `shell`: the page runs inside the iPhone shell, with a stand-in for its native plugin (browserStubs.ts). */
+  async open(options: { fakeClock?: boolean; storage?: Record<string, string>; path?: string; shell?: boolean } = {}) {
     const { page } = this
     await page.context().route('**/*', (route) => this.answer(route))
     page.on('requestfailed', (request) => {
@@ -142,6 +145,7 @@ export class App {
       if (index !== undefined) this.abortedProbes.push(index)
     })
     await page.addInitScript(installBrowserStubs)
+    if (options.shell === true) await page.addInitScript(installShellStubs)
     if (options.storage !== undefined) {
       await page.addInitScript((items) => {
         for (const [k, v] of Object.entries(items)) if (localStorage.getItem(k) === null) localStorage.setItem(k, v)
@@ -228,7 +232,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
     await page.getByRole('button', { name: 'Start drive' }).click()
@@ -247,6 +251,12 @@ export class App {
     let lastBanner = ''
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
+      if (hideAtSec !== undefined && sec >= hideAtSec && sec < hideAtSec + STEP_SEC) {
+        await page.evaluate(() => {
+          Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+          document.dispatchEvent(new Event('visibilitychange'))
+        })
+      }
       if (route !== null && astray === null && wrongTurnAtSec !== undefined && sec === wrongTurnAtSec) {
         const here = along(route, alongM)
         // Turn right, square to the road.

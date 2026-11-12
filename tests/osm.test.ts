@@ -562,7 +562,7 @@ describe('createTileSource without a bundle: cache, then network', () => {
     const [a, b] = await Promise.all([source.load([UPTOWN, SOUTH]), source.load([SOUTH, UPTOWN])])
     expect(server.calls).toHaveLength(2)
     expect(a.tiles.get(UPTOWN)).toBe(b.tiles.get(UPTOWN))
-    expect(await source.load([])).toEqual({ tiles: new Map(), missing: [], partial: new Map() })
+    expect(await source.load([])).toEqual({ tiles: new Map(), missing: [], partial: new Map(), awaitingBundle: [] })
   })
 
   it('does not trust a layer that answers with the wrong tile, with junk, or by throwing', async () => {
@@ -577,7 +577,8 @@ describe('createTileSource without a bundle: cache, then network', () => {
       expect((await source.load([UPTOWN])).tiles.get(UPTOWN)!.nodes.map((n) => n.id)).toEqual([11])
       expect(server.calls).toHaveLength(1)
       // The same from a bundle: what it hands back is not taken for the tile, and a bundle that
-      // cannot even say what it covers is treated as covering nothing.
+      // cannot even say what it covers has not said "not covered": the tile is missing, and the
+      // network is not asked for it (#72).
       const bundled = createTileSource({
         bundle: { coverage: () => Promise.resolve('covered'), get: untrusted.get },
         cache: memoryTileStore(),
@@ -591,7 +592,8 @@ describe('createTileSource without a bundle: cache, then network', () => {
         network: layer,
         now: clock.now,
       })
-      expect((await lost.load([UPTOWN])).tiles.get(UPTOWN)!.nodes.map((n) => n.id)).toEqual([11])
+      expect((await lost.load([UPTOWN])).missing).toEqual([UPTOWN])
+      expect(server.calls).toHaveLength(1)
     }
     // A cache that cannot store loses nothing but the saving.
     const readOnly = { get: () => Promise.resolve(null), put: () => Promise.reject(new Error('full')) }

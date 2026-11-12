@@ -311,10 +311,93 @@ describe('askOnce: signal sources for a drive that polls', () => {
   })
 })
 
+describe('askOnce: a bundled tile that could not be read is not given up on (#73)', () => {
+  const WEST = '-809_352'
+  const EAST = '-808_352'
+  const westTile = { tileId: WEST, fetchedAt: 1, nodes: [{ id: 1, lng: -80.805, lat: 35.25 }] }
+
+  it('a covered tile whose file read failed once is read again on a later check', async () => {
+    // The repro of #73: the first read of the file fails (a dead zone), later ones work.
+    const clock = fakeClock()
+    let reads = 0
+    const bundle = {
+      coverage: () => Promise.resolve('covered' as const),
+      get: () => Promise.resolve(++reads === 1 ? null : westTile),
+    }
+    const asked: string[] = []
+    const network = { get: (id: string) => (asked.push(id), Promise.resolve(null)) }
+    const drive = askOnce({ tiles: createTileSource({ bundle, cache: memoryTileStore(), network, now: clock.now }) })
+    const first = await drive.tiles.load([WEST])
+    expect(first.missing).toEqual([WEST])
+    expect(first.awaitingBundle).toEqual([WEST])
+    // A check a second later is inside the small wait: no read, still missing, still not given up.
+    clock.advance(1_000)
+    expect((await drive.tiles.load([WEST])).missing).toEqual([WEST])
+    expect(reads).toBe(1)
+    clock.advance(60_000)
+    const later = await drive.tiles.load([WEST])
+    expect(later.missing).toEqual([])
+    expect(later.tiles.get(WEST)).toEqual(westTile)
+    expect(reads).toBe(2)
+    expect(asked).toEqual([])
+  })
+
+  it('keeps trying a bundled tile through a long dead zone, while a tile outside the bundle is still asked of Overpass once', async () => {
+    const clock = fakeClock()
+    let online = false
+    let reads = 0
+    const bundle = {
+      coverage: (id: string) => Promise.resolve(id === WEST ? ('covered' as const) : ('none' as const)),
+      get: () => (reads++, Promise.resolve(online ? westTile : null)),
+    }
+    const asked: string[] = []
+    const network = { get: (id: string) => (asked.push(id), Promise.resolve(null)) }
+    const drive = askOnce({ tiles: createTileSource({ bundle, cache: memoryTileStore(), network, now: clock.now }) })
+    for (let check = 0; check < 30; check++) {
+      const loaded = await drive.tiles.load([WEST, EAST])
+      expect(loaded.missing).toEqual([WEST, EAST])
+      expect(loaded.awaitingBundle).toEqual([WEST])
+      clock.advance(60_000)
+    }
+    expect(reads).toBeGreaterThan(1)
+    online = true
+    const loaded = await drive.tiles.load([WEST, EAST])
+    expect(loaded.missing).toEqual([EAST])
+    expect([...loaded.tiles.keys()]).toEqual([WEST])
+    // The once-per-session rule is for Overpass tiles only, and it still holds.
+    expect(asked).toEqual([EAST])
+  })
+
+  it('a tile that waited on an unreadable index is asked of Overpass at most once after the index says it is outside', async () => {
+    const clock = fakeClock()
+    let indexKnown = false
+    const bundle = {
+      coverage: () => Promise.resolve(indexKnown ? ('none' as const) : ('unknown' as const)),
+      get: () => Promise.resolve(null),
+    }
+    const asked: string[] = []
+    const network = { get: (id: string) => (asked.push(id), Promise.resolve(null)) }
+    const drive = askOnce({ tiles: createTileSource({ bundle, cache: memoryTileStore(), network, now: clock.now }) })
+    for (let check = 0; check < 5; check++) {
+      expect((await drive.tiles.load([EAST])).awaitingBundle).toEqual([EAST])
+      clock.advance(60_000)
+    }
+    expect(asked).toEqual([])
+    indexKnown = true
+    for (let check = 0; check < 30; check++) {
+      const loaded = await drive.tiles.load([EAST])
+      expect(loaded.missing).toEqual([EAST])
+      expect(loaded.awaitingBundle).toEqual([])
+      clock.advance(60_000)
+    }
+    expect(asked).toEqual([EAST])
+  })
+})
+
 describe('fetchFreshRoutes: one check, and the current path asked for when it is missing', () => {
   /** No signal data at all: this is about the Directions requests. */
   const signalSources: SignalSources = {
-    tiles: { load: (ids) => Promise.resolve({ tiles: new Map(), missing: [...ids], partial: new Map() }) },
+    tiles: { load: (ids) => Promise.resolve({ tiles: new Map(), missing: [...ids], partial: new Map(), awaitingBundle: [] }) },
   }
   /** A Directions body for routes of the made-up network. */
   const body = (routes: readonly RouteCandidate[]) => ({

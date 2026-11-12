@@ -1,0 +1,178 @@
+name: Shell iOS (unsigned ipa)
+
+# Builds native/shell (the web app in a Capacitor shell with native location
+# and speech) into an UNSIGNED .ipa for sideloading: docs/phone-install.md.
+# Nothing here signs, uploads to Apple, or uses a secret.
+#
+# This repository and its artifacts are public, so the build has NO Mapbox
+# token in it: the app asks for one on the phone. The build fails if a token
+# is found in the web bundle or in the finished app.
+#
+# Push runs only on main; a branch is built through its pull request, so each
+# change builds once.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/shell/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/shell-ios.yml'
+  pull_request:
+    paths:
+      - 'native/shell/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/shell-ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned ipa
+    # Capacitor 8 needs Xcode 26 or newer.
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: native/shell
+    env:
+      # Never a token in this build, whatever the repository's settings hold.
+      VITE_MAPBOX_TOKEN: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          node --version
+          npm --version
+
+      - name: Install the web app's dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Install the shell's dependencies
+        run: npm ci
+
+      - name: Unit tests (Info.plist patch, bridge script, token search)
+        run: npm test
+
+      - name: Build the web app into www/ (no token) and add the bridge script
+        run: npm run build
+
+      - name: Generate and patch the Xcode project
+        run: npm run ios:generate
+
+      - name: Build for a generic iOS device, unsigned
+        run: |
+          mkdir -p build
+          status=0
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build > build/xcodebuild.log 2>&1 || status=$?
+          # The full log is long; show compiler diagnostics and the ending.
+          grep -E "(error|warning): " build/xcodebuild.log | sort -u | head -100 || true
+          tail -30 build/xcodebuild.log
+          if [ "$status" -ne 0 ]; then
+            echo "::error::xcodebuild failed with status $status"
+            exit "$status"
+          fi
+
+      - name: Check the built app
+        run: |
+          APP=build/derived/Build/Products/Release-iphoneos/App.app
+          test -d "$APP"
+          # Background modes and the location texts iOS shows.
+          plutil -p "$APP/Info.plist" | grep -A3 UIBackgroundModes
+          plutil -extract UIBackgroundModes json -o - "$APP/Info.plist" | grep -q location
+          plutil -extract UIBackgroundModes json -o - "$APP/Info.plist" | grep -q audio
+          plutil -extract NSLocationWhenInUseUsageDescription raw "$APP/Info.plist" > /dev/null
+          plutil -extract NSLocationAlwaysAndWhenInUseUsageDescription raw "$APP/Info.plist" > /dev/null
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")" = "dev.routeiq.shell"
+          test "$(plutil -extract CFBundleDisplayName raw "$APP/Info.plist")" = "RouteIQ"
+          plutil -extract MinimumOSVersion raw "$APP/Info.plist"
+          lipo -info "$APP/App"
+          # The web app, the bridge script and the bundled signal tiles.
+          test -f "$APP/public/index.html"
+          grep -q 'routeiq-native.js' "$APP/public/index.html"
+          test -f "$APP/public/routeiq-native.js"
+          test -f "$APP/public/seed/osm-signals/index.json"
+          grep -q RouteIQNativePlugin "$APP/capacitor.config.json"
+          # The Swift plugin must really be in the binary: Capacitor finds it by
+          # class name at run time, so a build can succeed without it.
+          echo "RouteIQEngine.swift mentioned in build log: $(grep -c 'RouteIQEngine.swift' build/xcodebuild.log) times"
+          missing=0
+          # (the last two: the native route requests, RouteIQHttp.swift and the plugin's httpGet)
+          for needle in RouteIQNativePlugin routeiq.askedAlwaysLocation https://api.mapbox.com/ httpGet; do
+            hits=$(LC_ALL=C grep -a -c "$needle" "$APP/App" || true)
+            echo "binary lines containing $needle: $hits"
+            if [ "$hits" -eq 0 ]; then missing=1; fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::plugin code is missing from the app binary"
+            exit 1
+          fi
+          # No Mapbox token anywhere in what ships (public or secret).
+          if LC_ALL=C grep -r -a -l -E '[ps]k\.eyJ[A-Za-z0-9_-]{8,}' "$APP"; then
+            echo "::error::a Mapbox token was found in the app (files listed above)"
+            exit 1
+          fi
+          echo "no Mapbox token in the app"
+
+      - name: Package Payload/App.app as an ipa
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/derived/Build/Products/Release-iphoneos/App.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../RouteIQ-unsigned.ipa Payload)
+          ls -lh build/RouteIQ-unsigned.ipa
+          echo "ipa size: $(du -h build/RouteIQ-unsigned.ipa | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: RouteIQ-unsigned
+          path: native/shell/build/RouteIQ-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xcodebuild-log
+          path: native/shell/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
