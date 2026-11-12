@@ -90,6 +90,12 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   expect(diagnostics).toMatch(/fixes: \d+ \([1-9]\d* while not active\)/)
   expect(diagnostics).toMatch(/request \d+ answered, HTTP 200, \d+ ms, native \d+ ms \[background\]/)
   expect(diagnostics).toContain('app background')
+  // What the drive's checks concluded, so "was there a faster way?" has an answer afterwards.
+  // This drive switched once, after one check to confirm it: the tally says so, and how much faster it was.
+  const checks = diagnostics.split('\n').find((l) => l.startsWith('checks: ')) ?? ''
+  expect(checks).toContain('a faster one, waiting for the next check to confirm it 1')
+  expect(checks).toContain('switched to a faster one 1')
+  expect(diagnostics).toMatch(/best saving another route offered: [1-9]\d* s/)
   expect(diagnostics).not.toMatch(/\d\.\d|pk\.|https?:/)
   await page.getByRole('button', { name: 'Copy' }).click()
   await expect(page.getByText('Copied. Paste it into a message.')).toBeVisible()
