@@ -7,7 +7,9 @@ export const USAGE: string
 
 export interface LabRunOptions {
   scenario: string
+  fix: string | null
   lock: boolean
+  ownerUnlocksAfter: boolean
   inApp: boolean
   gps: boolean
   awaySec: number
@@ -28,6 +30,7 @@ export function summaryMarkdown(run: {
   app: string
   steps: readonly string[]
   checks: readonly Verdict[]
+  metrics?: readonly (readonly [string, string | number])[]
   samples: readonly Record<string, unknown>[]
   simulated: { from: string; to: string; cleared: boolean } | null
   files: readonly string[]

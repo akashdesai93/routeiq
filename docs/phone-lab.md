@@ -29,7 +29,8 @@ Each time, before leaving the phone alone:
 1. Leave it **plugged in and unlocked, with RouteIQ or the home screen showing**. A phone with a
    passcode that has locked cannot be opened from the PC, and every scenario starts with the app
    in front. Settings → Display & Brightness → Auto-Lock → **Never** keeps it open while it is on
-   the cable. (The phone the lab was built on has no passcode, so it can be woken from the PC.)
+   the cable. **The owner's phone has a passcode.** Once it is locked, the lab can install builds
+   and nothing else until the owner unlocks it.
 2. Leave **Sideloadly open** on the PC if a build is to be installed.
 
 Optional, for a person who wants to poke at the running app from the PC: Settings → Apps → Safari
@@ -72,8 +73,18 @@ Things learned on the phone that the design rests on:
     needs no connection, so the phone can really sleep. The phone's position is not used or
     changed. This is the test of the web code, the route requests and the voice going on with
     the screen off; its fixes come from the app's timer, not from the GPS.
-  After the time away the runner connects again and starts RouteIQ, which wakes a phone that
-  has no passcode.
+  After the time away the runner connects again and starts RouteIQ. **That does not turn the
+  screen back on.** On 2026-11-11 the app started and its screen could be read as text, but
+  every screenshot after a `--lock` run was black until the screen was woken by something else.
+  So `--lock` is the last thing to run in a session, and the runner refuses it without
+  `--owner-unlocks-after`.
+- **Do not press the side button from the PC.** With the developer disk image mounted
+  (`pymobiledevice3 mounter auto-mount`, what Xcode does when a phone is plugged in; it lasts
+  until the phone restarts), `developer core-device hid button lock` presses it. That wakes the
+  screen, on the lock screen, and the phone then locks with its passcode: apps can no longer be
+  started from the PC. This is how the first night's session ended. The same service can send
+  touches (`universal-hid-service tap`); it has not been used, and a tap on an unlocked phone
+  would be the way to press Start drive on a build without the lab.
 
 ### The hook, for a person at a Web Inspector console
 
@@ -90,15 +101,18 @@ place names; it is for the person at the console and is never written to the rep
 | `starts-and-plans` | Starts the app, waits for the plan screen, takes a screenshot. No simulated position. | 30 s |
 | `locked-wrong-turn` | Stands 4.4 km into the Uptown → SouthPark drive, starts the app in lab mode (it starts the drive), sends it to the background, replays the `wrong-turn` track for 170 s (the turn comes about 70 s in), waits 15 s, brings the app back. | 5 min |
 | `background-soak` | The same with the track that stays on the route, from its start, for `--minutes` (default 10). One CPU, memory and battery sample a minute. | 12 min |
+| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots 3, 9, 18 and 30 s into the drive. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 45 s |
 
-Options: `--lock` (put the phone to sleep while away; the car is then the in-app test drive),
+Options: `--lock --owner-unlocks-after` (put the phone to sleep while away; the car is then the
+in-app test drive; the screen stays off afterwards, so nothing visual can be checked after it),
 `--in-app` (the in-app test drive with the screen on), `--no-gps` (over USB only: do not replay
 the drive, the phone stands still, and the off-route check must then fail), `--away-sec`,
 `--minutes`, `--from-m`, `--speed`, `--push-web` and `--web` (below), `--out`.
 
 ```powershell
 node scripts/phone/lab/run.mjs --scenario locked-wrong-turn            # background, GPS over USB
-node scripts/phone/lab/run.mjs --scenario locked-wrong-turn --lock     # phone asleep, in-app test drive
+node scripts/phone/lab/run.mjs --scenario drive-screen                 # is the driving screen drawn? 45 s
+node scripts/phone/lab/run.mjs --scenario locked-wrong-turn --lock --owner-unlocks-after   # phone asleep; LAST run of a session
 node scripts/phone/lab/run.mjs --scenario locked-wrong-turn --no-gps   # must FAIL the off-route check
 node scripts/phone/lab/run.mjs --scenario background-soak --minutes 10
 ```
@@ -118,8 +132,22 @@ which and why; that is never counted as a pass).
 | Off the route, then a new route | the screen showed "New route from here" (shown only for a route taken because the car left the route), a route request (not a side-street probe) went out in the 15 s before it and was answered, and at the end the screen shows a drive going on | The wrong turn was noticed and recovered from, end to end, while away. |
 | Every spoken line that started also finished | at least one line started, as many finished, none cut off | The voice was not cut off by the app being away. |
 
+Two more, in both drive scenarios:
+
+| Check | Passes when | What it proves |
+| --- | --- | --- |
+| The screen is drawn 8 s after the drive started, and after the app came back | under 97 % of the screenshot below the status bar is one flat colour | The driving screen is on the glass, not only in the page. Added after #136: the new driving screen was all black on the phone while the page had the turn card and the drive ran and spoke. |
+| The app stayed in the background until the lab brought it back | one stretch in the background of at least 90 % of the time meant | The other checks cover the time they claim. In three runs the app logged "active" again after 97 to 243 s without the lab asking; why is not known yet. |
+
+Every run's summary also has a **Numbers** table for comparing builds: seconds in the background,
+fixes and ticks while not active, the longest stop while away (limit 5 s; 39 s on the first
+`--lock` run), the longest wait between fixes, route requests sent while away, requests sent,
+answered and failed, spoken lines, and new routes after leaving the route.
+
 `background-soak`: fixes and ticks at 30 a minute or more for the whole time away, the same tick
 and request checks, no failed route request, and the speech check.
+
+`drive-screen`: the screen is drawn at each of the four moments.
 
 `starts-and-plans`: at least one route is listed and Start drive is there.
 
@@ -162,8 +190,8 @@ scripts\phone\lab\install-ipa.ps1 -Ipa $HOME\dev\routeiq-builds\candidate-<run i
 ```
 
 `install-ipa.ps1` presses the buttons of the Sideloadly window that is open: it chooses the file,
-presses Start and waits for "Done." (about 4 minutes; the status line sits at "Installing… 88%"
-for most of it). It never types or reads an Apple ID, a password or a code. If Sideloadly opens a
+presses Start and waits for "Done." (4 seconds to 10 minutes on the first night; when it sat at
+"Installing… 88%" for minutes, it finished soon after the lab next started an app on the phone). It never types or reads an Apple ID, a password or a code. If Sideloadly opens a
 window of its own, the script stops and names the window; a person has to answer it. Installing
 over the app keeps its data, the Mapbox token included, because Sideloadly gives the same bundle
 id every time. A free Apple ID's signature lasts 7 days; Sideloadly's own refresh covers that.
@@ -187,8 +215,9 @@ The phone is the owner's. It must never be left without a RouteIQ that works.
 
 ## Limits, said plainly
 
-- A locked phone with a passcode cannot be opened from the PC. `--lock` on such a phone ends
-  unattended testing until someone unlocks it.
+- A locked phone with a passcode cannot be opened from the PC: no app can be started on it. Builds
+  can still be installed. The lockdown value `PasswordProtected` reads false while the phone is
+  unlocked and true once it is locked; it does not say whether a passcode is set.
 - `--lock` forces the phone to sleep, which is harsher than pressing the side button during a
   drive. On the first run (2026-11-11) the app stood still for 39 s right after it (no fix, no
   tick) and carried on when the PC next asked the phone for the report; from then on it ran

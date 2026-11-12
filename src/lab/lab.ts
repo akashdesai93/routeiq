@@ -34,6 +34,8 @@ export const LAB_REPORT_MS = 3_000
 export const LAB_ROUTES_WAIT_MS = 90_000
 /** A drive is started only when the phone reports a position this close to the simulated start, in meters. */
 export const LAB_START_RADIUS_M = 250
+/** A `testdrive-fix-…` scenario tries its fix this long after the driving screen came up, in milliseconds. */
+export const LAB_FIX_AFTER_MS = 12_000
 /** How often the position is asked for while waiting for the simulated one, in milliseconds. */
 export const LAB_POSITION_RETRY_MS = 3_000
 /** How many history lines are kept. */
@@ -90,6 +92,8 @@ export interface RouteIQLab {
   read(): LabScreen
   diagnostics(): string
   report(): string
+  /** Adds a line to the history that goes into the report. Fixed words only. */
+  note(what: string): void
 }
 
 /**
@@ -156,9 +160,11 @@ export interface LabDeps {
   readonly doc: LabDocument
   readonly diagnostics: Pick<DriveDiagnostics, 'text'>
   readonly now?: () => number
+  /** How the page is laid out, as one line (probe.ts). Left out of the report when not given. */
+  readonly layout?: () => string
 }
 
-export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDeps): RouteIQLab & { sample(): void; note(what: string): void } {
+export function createLab({ scenario, doc, diagnostics, now = Date.now, layout }: LabDeps): RouteIQLab & { sample(): void; note(what: string): void } {
   const history: string[] = []
   let dropped = 0
   let lastWord: string | null = null
@@ -269,6 +275,7 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDep
         'RouteIQ lab report',
         `scenario ${scenario}, written ${clock(now())}, number ${++reports}`,
         `screen ${screen.screen}, status ${statusWord(screen)}, routes ${screen.routes}, turn card ${screen.turn !== null ? 'shown' : 'none'}, arrival time ${screen.eta !== null ? 'shown' : 'none'}, warnings ${screen.warnings.length}`,
+        ...(layout === undefined ? [] : [`layout ${layout()}`]),
         `history (oldest first${dropped > 0 ? `, ${dropped} earlier ones dropped` : ''}):`,
         ...history,
         '--- diagnostics ---',
@@ -283,6 +290,8 @@ export interface StartLabOptions {
   readonly diagnostics: Pick<DriveDiagnostics, 'text'>
   /** Where the hook is put: `window`. */
   readonly target: { __routeiqLab?: RouteIQLab; document?: LabDocument }
+  /** The page's layout as one line, and things to try on a screen that will not paint (probe.ts). */
+  readonly probe?: { layout: () => string; fixes: Readonly<Record<string, () => string>> }
   readonly now?: () => number
   readonly every?: (ms: number, fn: () => void) => unknown
 }
@@ -303,12 +312,15 @@ export interface StartLabOptions {
  *   the drive follows the app's made-up car and never the phone's GPS. This
  *   is the one that works with the phone asleep: it needs no connection to
  *   the PC.
+ * - `testdrive-fix-<name>`: the same, and 12 s into the drive it tries one
+ *   thing on the page (a resize event, a reflow …: `LAYOUT_FIXES` in
+ *   probe.ts) and notes it, for finding out why a screen does not paint.
  */
-export async function startLab({ plugin, diagnostics, target, now = Date.now, every = (ms, fn) => setInterval(fn, ms) }: StartLabOptions): Promise<RouteIQLab | null> {
+export async function startLab({ plugin, diagnostics, target, probe, now = Date.now, every = (ms, fn) => setInterval(fn, ms) }: StartLabOptions): Promise<RouteIQLab | null> {
   const scenario = await labScenario(plugin)
   const doc = target.document
   if (scenario === null || plugin === null || doc === undefined) return null
-  const lab = createLab({ scenario, doc, diagnostics, now })
+  const lab = createLab({ scenario, doc, diagnostics, now, layout: probe?.layout })
   target.__routeiqLab = lab
   lab.note(`lab started, scenario ${scenario}`)
 
@@ -316,7 +328,10 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
   let lastSample = -Infinity
   let lastReport = -Infinity
   const start = driveStart(scenario)
-  const testDrive = scenario === 'testdrive'
+  // `testdrive-fix-<name>`: the same drive, and LAB_FIX_AFTER_MS into it one thing is tried on the page (probe.ts).
+  const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-')
+  const fix = scenario.startsWith('testdrive-fix-') ? probe?.fixes[scenario.slice('testdrive-fix-'.length)] : undefined
+  let drivingSince: number | null = null
   let autopilot: 'waiting' | 'asking' | 'done' = start !== null || testDrive ? 'waiting' : 'done'
   let lastAsked = -Infinity
   /** Asks the phone where it is and starts the drive only at the simulated start. Says yes or no, never where. */
@@ -356,6 +371,14 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
             if (!lab.testDriveOn()) lab.startTestDrive()
             else if (lab.startDrive()) autopilot = 'done'
           } else if (at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
+        }
+      }
+      if (fix !== undefined && drivingSince !== -1) {
+        if (drivingSince === null) {
+          if (lab.read().screen === 'drive') drivingSince = at
+        } else if (at - drivingSince >= LAB_FIX_AFTER_MS) {
+          lab.note(`tried: ${fix()}`)
+          drivingSince = -1
         }
       }
       if (at - lastReport >= LAB_REPORT_MS) {

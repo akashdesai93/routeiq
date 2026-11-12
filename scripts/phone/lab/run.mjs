@@ -13,7 +13,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { buildTrack, pathFrom } from '../make-gpx.mjs'
 import { PRESETS } from '../presets.mjs'
-import { checkLockedWrongTurn, checkPlanShowsRoutes, checkSoak, notRun, parseLabReport, planFromCaptions, redact } from './assertions.mjs'
+import { checkLockedWrongTurn, checkPlanShowsRoutes, checkScreenDrawn, checkSoak, notRun, parseLabReport, planFromCaptions, redact, runMetrics } from './assertions.mjs'
 import { BACKGROUND_APP, connectPhone, sleep } from './phone.mjs'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -22,38 +22,43 @@ export const SCENARIOS = Object.freeze({
   'starts-and-plans': 'Starts the app and checks that the plan screen lists routes.',
   'locked-wrong-turn': 'Starts a drive, puts the app in the background (and the phone to sleep with --lock), replays a drive with a wrong turn, and checks what the app did meanwhile.',
   'background-soak': 'The same with a drive that stays on the route, for --minutes (default 10), with CPU and battery samples.',
+  'drive-screen': 'Starts the in-app test drive, leaves the app in front and takes screenshots for 30 s: is the driving screen drawn? With --fix <name>, tries that on the page 12 s in.',
 })
 
 export const USAGE = [
   'Usage: node scripts/phone/lab/run.mjs --scenario <name> [options]',
   ...Object.entries(SCENARIOS).map(([name, about]) => `  ${name.padEnd(18)} ${about}`),
   'Options:',
-  '  --lock           put the phone to sleep (screen off) while away; the car is then the in-app test drive',
+  '  --lock           put the phone to sleep (screen off) while away; the car is then the in-app test drive.',
+  '                   The screen stays off afterwards: needs --owner-unlocks-after, and is the last run of a session',
   '  --in-app         move the car with the in-app test drive instead of the phone\'s position over USB',
   '  --no-gps         do not replay the drive (the phone stands still): the off-route check must then fail',
   '  --away-sec <n>   locked-wrong-turn: seconds in the background (default 170)',
   '  --minutes <n>    background-soak: minutes in the background (default 10)',
   '  --from-m <n>     skip this much of the preset drive (default 4400 for locked-wrong-turn, 0 for the soak)',
   '  --speed <m/s>    driving speed of the replay (default 13)',
+  '  --fix <name>     drive-screen: resize | reflow | layer | nomap | scroll (src/lab/probe.ts)',
   '  --push-web       build the web app (native/shell) and copy it into the app first; the app then runs that build',
   '  --web            run the web build that was pushed earlier instead of the one in the app',
   '  --out <dir>      where reports go (default phone-lab/)',
 ].join('\n')
 
 export function parseArgs(argv) {
-  const options = { scenario: null, lock: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
+  const options = { scenario: null, fix: null, lock: false, ownerUnlocksAfter: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
   const numbers = { '--away-sec': 'awaySec', '--minutes': 'minutes', '--from-m': 'fromM', '--speed': 'speed' }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--lock') options.lock = options.inApp = true
+    else if (arg === '--owner-unlocks-after') options.ownerUnlocksAfter = true
     else if (arg === '--in-app') options.inApp = true
     else if (arg === '--no-gps') options.gps = false
     else if (arg === '--push-web') options.pushWeb = options.web = true
     else if (arg === '--web') options.web = true
-    else if (arg === '--scenario' || arg === '--out' || arg in numbers) {
+    else if (arg === '--scenario' || arg === '--out' || arg === '--fix' || arg in numbers) {
       const value = argv[++i]
       if (value === undefined) return { error: `${arg} needs a value` }
       if (arg === '--scenario') options.scenario = value
+      else if (arg === '--fix') options.fix = value
       else if (arg === '--out') options.out = path.resolve(value)
       else {
         const n = Number(value)
@@ -63,7 +68,9 @@ export function parseArgs(argv) {
     } else return { error: `Unknown option ${arg}` }
   }
   if (options.scenario === null || !(options.scenario in SCENARIOS)) return { error: `Give --scenario: ${Object.keys(SCENARIOS).join(' | ')}` }
+  if (options.fix !== null && (options.scenario !== 'drive-screen' || !/^[a-z]{2,12}$/.test(options.fix))) return { error: '--fix <name> goes with --scenario drive-screen' }
   if (options.speed < 1 || options.speed > 40) return { error: '--speed must be between 1 and 40 m/s' }
+  if (options.lock && !options.ownerUnlocksAfter) return { error: '--lock leaves the phone with its screen off, and nothing can be looked at after it until someone wakes the phone. Add --owner-unlocks-after to say that is understood, and make it the last run.' }
   if (options.inApp && !options.gps) return { error: '--no-gps goes with the USB position, not with --lock or --in-app' }
   if (options.inApp && options.scenario === 'background-soak') return { error: 'the soak replays its drive over USB: it cannot be combined with --lock or --in-app' }
   return options
@@ -73,7 +80,7 @@ const two = (n) => String(n).padStart(2, '0')
 const clock = (d = new Date()) => `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`
 const stamp = (d = new Date()) => `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`
 
-export function summaryMarkdown({ scenario, options, device, app, steps, checks, samples, simulated, files, result }) {
+export function summaryMarkdown({ scenario, options, device, app, steps, checks, metrics = [], samples, simulated, files, result }) {
   const mark = (c) => (c.notRun ? 'NOT RUN' : c.pass ? 'pass' : 'FAIL')
   return [
     `# Phone lab: ${scenario}`,
@@ -90,6 +97,7 @@ export function summaryMarkdown({ scenario, options, device, app, steps, checks,
     '| --- | --- | --- |',
     ...checks.map((c) => `| ${c.name} | ${mark(c)} | ${c.detail} |`),
     '',
+    ...(metrics.length === 0 ? [] : ['## Numbers', '', '| What | Value |', '| --- | --- |', ...metrics.map(([what, value]) => `| ${what} | ${value} |`), '']),
     '## What happened',
     '',
     ...steps.map((s) => `- ${s}`),
@@ -126,16 +134,19 @@ async function main(argv) {
   const files = []
   const samples = []
   let checks = []
+  let finalReport = null
   const say = (line) => {
     const text = `${clock()} ${line}`
     steps.push(text)
     console.log(text)
   }
   let phone = null
+  /** Takes a screenshot. Returns how it looks ({ flat, shade }), or null. */
   const shot = async (name) => {
-    const ok = await phone.screenshot(path.join(dir, name))
-    if (ok) files.push(name)
-    say(ok ? `screenshot ${name}` : `screenshot ${name} could not be taken`)
+    const taken = await phone.screenshot(path.join(dir, name))
+    if (taken !== null) files.push(name)
+    say(taken === null ? `screenshot ${name} could not be taken` : `screenshot ${name}${taken.look === null ? '' : `: ${Math.round(taken.look.flat * 100)} % one flat colour (shade ${taken.look.shade} of 255)`}`)
+    return taken?.look ?? null
   }
   /** The app's lab report, parsed; null when the app wrote none. Keeps the text as `name` when given. */
   const report = (name) => {
@@ -209,6 +220,30 @@ async function main(argv) {
         say(`read through ${seen.via}`)
         checks = [checkPlanShowsRoutes(seen)]
       }
+    } else if (scenario === 'drive-screen') {
+      const name = options.fix === null ? 'testdrive' : `testdrive-fix-${options.fix}`
+      if ((await phone.launch(bundle, { args: labArgs(name) })) === null) throw new Error('the app did not start')
+      say(`app started in lab mode (${name}): it switches the in-app test drive on and presses Start drive; the phone's position is not used`)
+      let lab = null
+      for (let waited = 0; waited < 60_000 && !(lab !== null && lab.screen === 'drive'); waited += 3000) {
+        await pause(3000)
+        lab = report()
+      }
+      if (lab === null || lab.screen !== 'drive') {
+        await shot('no-drive.png')
+        checks = [notRun('the driving screen', lab === null ? 'this build has no lab hook' : `the drive did not start: screen ${lab.screen}, ${lab.routes} routes`)]
+      } else {
+        say('driving')
+        const began = Date.now()
+        const looks = []
+        // 12 s in, a --fix is tried by the app; the screenshots on both sides of it show what it did.
+        for (const atSec of [3, 9, 18, 30]) {
+          await pause(Math.max(0, began + atSec * 1000 - Date.now()))
+          looks.push([atSec, await shot(`drive-${String(atSec).padStart(2, '0')}s.png`)])
+        }
+        finalReport = report('lab-report.txt')
+        checks = looks.map(([atSec, look]) => checkScreenDrawn(look, `${atSec} s after the drive started${options.fix !== null && atSec > 12 ? ` (after trying "${options.fix}")` : ''}`))
+      }
     } else {
       const soak = scenario === 'background-soak'
       const preset = soak ? 'uptown-to-southpark' : 'wrong-turn'
@@ -266,7 +301,7 @@ async function main(argv) {
         say(`driving: status ${lab.status}`)
         await shot('drive-started.png')
         await pause(8000)
-        await shot('drive-after-8s.png')
+        const lookAtStart = await shot('drive-after-8s.png')
         const stopSyslog = phone.startSyslog()
         cleanups.push(() => stopSyslog())
         await sample()
@@ -310,7 +345,7 @@ async function main(argv) {
         await phone.launch(bundle, { keep: true })
         say(options.lock ? 'phone woken and app brought back to the front' : 'app brought back to the front')
         await pause(5000)
-        await shot('back-in-front.png')
+        const lookAfter = await shot('back-in-front.png')
         const captions = await phone.captions()
         if (captions !== null) {
           writeFileSync(path.join(dir, 'screen-text.txt'), captions.map(redact).join('\n'))
@@ -335,7 +370,12 @@ async function main(argv) {
           writeFileSync(path.join(dir, 'diagnostics.txt'), text.slice(text.indexOf('RouteIQ drive diagnostics')))
           files.push('diagnostics.txt')
         }
-        checks = soak ? checkSoak(final, awaySec / 60) : checkLockedWrongTurn(final, awaySec)
+        finalReport = final
+        checks = [
+          checkScreenDrawn(lookAtStart, '8 s after the drive started'),
+          ...(soak ? checkSoak(final, awaySec / 60) : checkLockedWrongTurn(final, awaySec)),
+          checkScreenDrawn(lookAfter, 'after the app came back to the front'),
+        ]
       }
     }
   } catch (error) {
@@ -369,9 +409,11 @@ async function main(argv) {
   const skipped = checks.filter((c) => c.notRun)
   const result = failed.length > 0 ? `FAILED (${failed.length} of ${checks.length} checks)` : skipped.length > 0 || failure !== null ? 'INCOMPLETE (a check could not be made)' : `passed (${checks.length} checks)`
   const optionText = [options.lock ? 'phone put to sleep' : 'app in the background, screen on', options.inApp ? 'in-app test drive (positions made up by the app)' : options.gps ? 'drive replayed as the phone\'s position over USB' : 'drive NOT replayed (--no-gps)', options.web ? 'web build pushed from the PC' : 'web build inside the app'].join('; ')
-  writeFileSync(path.join(dir, 'summary.md'), summaryMarkdown({ scenario, options: optionText, device, app, steps, checks, samples, simulated, files, result }))
+  const metrics = runMetrics(finalReport)
+  writeFileSync(path.join(dir, 'summary.md'), summaryMarkdown({ scenario, options: optionText, device, app, steps, checks, metrics, samples, simulated, files, result }))
   console.log('')
   for (const c of checks) console.log(`${c.notRun ? 'NOT RUN' : c.pass ? 'pass   ' : 'FAIL   '} ${c.name}: ${c.detail}`)
+  if (metrics.length > 0) console.log(`\n${metrics.map(([what, value]) => `${what}: ${value}`).join('\n')}`)
   console.log(`\n${result}\nReport: ${path.join(dir, 'summary.md')}`)
   return failed.length > 0 ? 1 : skipped.length > 0 || failure !== null ? 2 : 0
 }

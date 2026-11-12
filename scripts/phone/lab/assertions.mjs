@@ -12,6 +12,10 @@ export const DEFAULT_LAB_CHECKS = Object.freeze({
   minTicksAway: 30,
   /** For the soak: fixes and ticks per minute spent away, at least. */
   minBeatsPerAwayMinute: 30,
+  /** A screenshot with this share of its pixels in one flat colour, or more, is a screen that was not drawn. */
+  maxFlatShare: 0.97,
+  /** The longest the drive may stand still (no tick) while the app is away, in seconds. The app logs waits from 5 s up. */
+  maxStallSec: 5,
 })
 
 const count = (text, pattern) => {
@@ -190,6 +194,43 @@ export function checkStayedAway(d, expectedSec) {
   const longest = windows.reduce((best, w) => Math.max(best, w.to - w.from), 0)
   const need = Math.round(expectedSec * 0.9)
   return verdict(name, longest >= need, windows.length === 0 ? 'the app never went to the background' : `in the background for ${longest} s in one stretch (${need} s needed, ${windows.length} stretch(es))`)
+}
+
+/**
+ * The screen was drawn: a screenshot is not (nearly) all one flat colour. `look` is what
+ * device.py measured on the screenshot: { flat, shade }, or null when it could not.
+ */
+export function checkScreenDrawn(look, when, max = DEFAULT_LAB_CHECKS.maxFlatShare) {
+  const name = `the screen is drawn ${when}`
+  if (look === null || look === undefined) return notRun(name, 'the screenshot could not be taken or measured')
+  const percent = Math.round(look.flat * 1000) / 10
+  const colour = look.shade < 40 ? 'black' : look.shade > 215 ? 'white' : `grey ${look.shade}`
+  return verdict(name, look.flat < max, look.flat < max ? `${percent} % of the screen is one flat colour (under ${max * 100} %)` : `${percent} % of the screen is ${colour}: nothing was painted`)
+}
+
+/** The longest the drive stood still while the app was away, in seconds (0: never 5 s or more). */
+export function longestStallSec(d) {
+  const left = d.events.findIndex((e) => /^app (inactive|background)$/.test(e.what))
+  if (left === -1) return 0
+  return d.events.slice(left).reduce((longest, e) => Math.max(longest, Number((e.what.match(/^no tick for (\d+) s$/) ?? [0, 0])[1])), 0)
+}
+
+/** The numbers of a run, for the summary and for comparing one build with another. */
+export function runMetrics(report) {
+  const d = report?.diagnostics ?? null
+  if (d === null) return []
+  const away = awayWindows(d).reduce((sum, w) => sum + (w.to - w.from), 0)
+  return [
+    ['seconds in the background', away],
+    ['fixes while not active', d.fixes.away],
+    ['ticks while not active', d.ticks.away],
+    [`longest stop while away, seconds (limit ${DEFAULT_LAB_CHECKS.maxStallSec})`, longestStallSec(d)],
+    ['longest wait between fixes in the whole drive, seconds', d.fixes.longestGapSec],
+    ['route requests sent while not active', d.requests.away],
+    ['route requests: sent / answered / failed', `${d.requests.sent} / ${d.requests.answered} / ${d.requests.failed}`],
+    ['spoken lines: started / finished / cut off', `${d.speech.started} / ${d.speech.finished} / ${d.speech.cutOff}`],
+    ['new routes after leaving the route', report.history.filter((h) => h.what === 'banner new-route-after-off-route').length],
+  ]
 }
 
 /** Every line the app started saying, it finished. */

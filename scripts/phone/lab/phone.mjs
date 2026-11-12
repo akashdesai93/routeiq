@@ -148,10 +148,14 @@ export async function connectPhone({ log = () => {} } = {}) {
       return answer.ok ? answer.pid : null
     },
 
-    /** A PNG of the screen. False when it could not be taken. */
+    /**
+     * A PNG of the screen. Null when it could not be taken; otherwise `{ look }`, where look is
+     * `{ flat, shade }` (how much of the screen is one flat colour, and which) or null when
+     * that could not be worked out.
+     */
     async screenshot(file) {
       const answer = await agent.send({ cmd: 'screenshot', file })
-      return answer.ok && existsSync(file)
+      return answer.ok && existsSync(file) ? { look: answer.look ?? null } : null
     },
 
     /** What a screen reader finds on the screen: one caption per element. Null when it could not be read; [] when the phone is locked. */

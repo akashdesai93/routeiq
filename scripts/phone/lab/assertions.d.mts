@@ -1,6 +1,6 @@
 // Types for assertions.mjs, so the tests can import it. The script itself is plain JavaScript.
 
-export const DEFAULT_LAB_CHECKS: Readonly<{ minFixesAway: number; minTicksAway: number; minBeatsPerAwayMinute: number }>
+export const DEFAULT_LAB_CHECKS: Readonly<{ minFixesAway: number; minTicksAway: number; minBeatsPerAwayMinute: number; maxFlatShare: number; maxStallSec: number }>
 
 export interface DiagnosticsEvent {
   time: string
@@ -58,4 +58,11 @@ export function awayWindows(d: ParsedDiagnostics): { from: number; to: number }[
 export function checkStayedAway(d: ParsedDiagnostics, expectedSec: number): Verdict
 export function checkLockedWrongTurn(report: ParsedLabReport | null, awaySec?: number): Verdict[]
 export function checkSoak(report: ParsedLabReport | null, awayMinutes: number): Verdict[]
+export interface ScreenLook {
+  flat: number
+  shade: number
+}
+export function checkScreenDrawn(look: ScreenLook | null | undefined, when: string, max?: number): Verdict
+export function longestStallSec(d: ParsedDiagnostics): number
+export function runMetrics(report: ParsedLabReport | null): [string, string | number][]
 export function redact(line: unknown): string

@@ -9,15 +9,18 @@ import {
   checkOffRouteThenNewRoute,
   checkPlanShowsRoutes,
   checkRequestAnsweredWhileAway,
+  checkScreenDrawn,
   checkSoak,
   checkSpeechFinished,
   checkStayedAway,
   checkSteadyWhileAway,
   checkTicksWhileAway,
+  longestStallSec,
   parseDiagnostics,
   parseLabReport,
   planFromCaptions,
   redact,
+  runMetrics,
 } from '../scripts/phone/lab/assertions.mjs'
 import { parseArgs, summaryMarkdown } from '../scripts/phone/lab/run.mjs'
 
@@ -263,6 +266,37 @@ describe('"drives locked with a wrong turn": each check passes on a good drive a
   })
 })
 
+describe('is the screen drawn, and how long did the drive stand still', () => {
+  it('a screenshot that is all black fails; a drawn screen passes; no screenshot is "not run"', () => {
+    const black = checkScreenDrawn({ flat: 1, shade: 0 }, '8 s after the drive started')
+    expect(black.pass).toBe(false)
+    expect(black.detail).toBe('100 % of the screen is black: nothing was painted')
+    expect(checkScreenDrawn({ flat: 0.981, shade: 250 }, 'x').detail).toBe('98.1 % of the screen is white: nothing was painted')
+    // The driving screen as drawn on the phone: the map takes most of it, in many shades.
+    expect(checkScreenDrawn({ flat: 0.42, shade: 236 }, 'x').pass).toBe(true)
+    expect(checkScreenDrawn({ flat: 0.969, shade: 5 }, 'x').pass).toBe(true)
+    expect(checkScreenDrawn({ flat: 0.97, shade: 5 }, 'x').pass).toBe(false)
+    expect(checkScreenDrawn(null, 'x')).toMatchObject({ pass: false, notRun: true })
+  })
+
+  it('the longest stop while away is the longest logged wait after leaving the front, and 0 when there was none', () => {
+    expect(longestStallSec(report().diagnostics)).toBe(0)
+    expect(longestStallSec(report({ tickGapSec: 38 }).diagnostics)).toBe(39)
+    expect(longestStallSec(report({ neverAway: true, tickGapSec: 38 }).diagnostics)).toBe(0)
+  })
+
+  it('the numbers of a run are read off the report', () => {
+    const numbers = Object.fromEntries(runMetrics(report({ tickGapSec: 38 })))
+    expect(numbers['seconds in the background']).toBe(159)
+    expect(numbers['fixes while not active']).toBe(121)
+    expect(numbers['longest stop while away, seconds (limit 5)']).toBe(39)
+    expect(numbers['route requests: sent / answered / failed']).toBe('2 / 2 / 0')
+    expect(numbers['spoken lines: started / finished / cut off']).toBe('3 / 3 / 0')
+    expect(numbers['new routes after leaving the route']).toBe(1)
+    expect(runMetrics(null)).toEqual([])
+  })
+})
+
 describe('the soak', () => {
   it('passes on a steady 10 minutes away, and fails when fixes come at half the rate', () => {
     const good = report({ awaySec: 600 })
@@ -330,8 +364,12 @@ describe('what goes into a report folder', () => {
     expect(parseArgs(['--scenario', 'nope'])).toHaveProperty('error')
     expect(parseArgs(['--scenario', 'locked-wrong-turn', '--no-gps', '--away-sec', '90'])).toMatchObject({ scenario: 'locked-wrong-turn', gps: false, lock: false, inApp: false, awaySec: 90 })
     // Sleep ends the PC's connection, so a locked run moves the car inside the app.
-    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock'])).toMatchObject({ lock: true, inApp: true })
-    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock', '--no-gps'])).toHaveProperty('error')
-    expect(parseArgs(['--scenario', 'background-soak', '--lock'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock', '--owner-unlocks-after'])).toMatchObject({ lock: true, inApp: true })
+    // It leaves the phone dark, so it has to be asked for in so many words.
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock', '--owner-unlocks-after', '--no-gps'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'background-soak', '--lock', '--owner-unlocks-after'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'drive-screen', '--fix', 'resize'])).toMatchObject({ scenario: 'drive-screen', fix: 'resize' })
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--fix', 'resize'])).toHaveProperty('error')
   })
 })

@@ -25,6 +25,27 @@ from pymobiledevice3.services.dvt.instruments.sysmontap import Sysmontap
 CAPTION_LIMIT = 400
 
 
+def look(png: bytes):
+    """
+    How much of the screen below the status bar is one flat colour: the share of pixels within
+    a few shades of the commonest brightness, and that brightness (0 black, 255 white). A screen
+    that was never painted is all one colour. None when Pillow is not installed.
+    """
+    try:
+        import io
+
+        from PIL import Image
+    except ImportError:
+        return None
+    image = Image.open(io.BytesIO(png)).convert("L")
+    width, height = image.size
+    body = image.crop((0, int(height * 0.07), width, height)).resize((90, 180))
+    histogram = body.histogram()
+    commonest = max(range(256), key=lambda shade: histogram[shade])
+    near = sum(histogram[max(0, commonest - 6) : commonest + 7])
+    return {"flat": round(near / (90 * 180), 4), "shade": commonest}
+
+
 async def captions(rsd) -> list[str]:
     """One caption per element of the app in front, as a screen reader finds them. Empty when the phone is locked."""
     found: list[str] = []
@@ -77,9 +98,10 @@ async def handle(command: dict, rsd, dvt, location, control, screenshot) -> dict
         )
         return {"pid": int(pid)}
     if what == "screenshot":
+        png = await screenshot.get_screenshot()
         with open(command["file"], "wb") as out:
-            out.write(await screenshot.get_screenshot())
-        return {}
+            out.write(png)
+        return {"look": look(png)}
     if what == "captions":
         return {"captions": await captions(rsd)}
     if what == "processes":
