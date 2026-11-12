@@ -13,6 +13,7 @@ import {
   type RouteCandidate,
   type RouteSignal,
 } from './core/index.ts'
+import { sessionNow } from './device/clock.ts'
 import type { DirectionsResult } from './providers/mapbox/adapter.ts'
 import { fetchDirections, fetchProbeRoute } from './providers/mapbox/client.ts'
 import { loadSignalData, signalSources, type LoadedSignalData } from './signalData.ts'
@@ -57,6 +58,12 @@ export interface RoutesState {
    */
   sideStreetNotice: string | null
   retry: () => void
+  /**
+   * When Mapbox answered for the routes shown, on the session clock
+   * (device/clock.ts). A live drive started on one of them counts it as its
+   * last check. Null while there is no answer.
+   */
+  fetchedAtMs: number | null
   /** Signals on the selected route, in driving order, for the map. */
   selectedSignals: readonly RouteSignal[]
   signalsStatus: SignalsStatus
@@ -195,7 +202,7 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
   // Names the request the current inputs call for. Results made for another
   // key are stale and ignored, so nothing has to be reset in an effect.
   const key = `${oLng},${oLat};${dLng},${dLat}#${attempt}`
-  const [settled, setSettled] = useState<{ key: string; result: DirectionsResult } | null>(null)
+  const [settled, setSettled] = useState<{ key: string; result: DirectionsResult; atMs: number } | null>(null)
   // The picked route itself, not just its id: a refetch that returns the same
   // path keeps it selected (see resolveSelectedId), and it simply stops
   // matching when the routes change.
@@ -211,7 +218,7 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
       signal: controller.signal,
     }).then((result) => {
       if (controller.signal.aborted || (!result.ok && result.kind === 'aborted')) return
-      setSettled({ key, result })
+      setSettled({ key, result, atMs: sessionNow() })
     })
     return () => controller.abort()
   }, [token, oLng, oLat, dLng, dLat, key])
@@ -275,6 +282,7 @@ export function useRoutes(token: string | null, origin: LngLat, destination: Lng
     keepSelection,
     sideStreetNotice: notice,
     retry,
+    fetchedAtMs: result !== null && result.ok ? settled!.atMs : null,
     selectedSignals: (selectedId !== null && counted.signalsByRouteId.get(selectedId)) || NO_SIGNALS,
     signalsStatus: shownData === null ? 'loading' : missingSignalData ? 'partial' : 'ready',
     countingRouteIds,
