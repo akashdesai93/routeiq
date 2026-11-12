@@ -45,12 +45,13 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   expect(log.arrived).toBe(true)
   // One switch, after the jam held up for two checks in a row (requests 3 and 4), shown with a way to undo it.
   expect(log.banners).toHaveLength(1)
-  expect(log.banners[0]!.text).toContain('Switched to a faster route')
-  expect(log.banners[0]!.text).toContain('Keep previous route')
+  expect(log.banners[0]!.text).toContain('Keep my route')
   const spoken = await app.spoken()
   const switches = spoken.filter((line) => line.startsWith('Switching'))
   expect(switches).toHaveLength(1)
   expect(switches[0]).toMatch(/^Switching to a faster route\. Saves \d+ minutes\. Turn in [\d.]+ miles\.$/)
+  // The banner says what was said (#22).
+  expect(log.banners[0]!.text).toContain(switches[0])
   // The driver then takes the East Loop, and the turns are spoken for it.
   expect(spoken).toContain('Turn left onto East Loop.')
   expect(spoken).not.toContain(OFF_ROUTE)

@@ -77,11 +77,23 @@ export interface DriveOptions {
   snapAtSec?: readonly number[]
   /** Looks at the screen mid-drive: each runs once, at its simulated second, with the drive standing still. */
   lookAtSec?: readonly { atSec: number; look: () => Promise<void> }[]
+  /**
+   * Looks at the screen each time the switch moment's banner (#84) appears or changes, with the
+   * drive standing still: `stage` is its data-stage (pending, confirmed, kept), `text` its words.
+   */
+  onMoment?: (moment: { atSec: number; stage: string; text: string }) => Promise<void>
+  /**
+   * The driver presses "Keep my route" the first time the switch moment reaches this stage, and
+   * stays on the road they are on.
+   */
+  keepMyRoute?: 'pending' | 'confirmed'
 }
 
 export interface DriveLog {
   /** Every switch banner, in the order they appeared, with the second they appeared at. */
   banners: { atSec: number; text: string }[]
+  /** The switch moment's banner (pending, confirmed, kept), each time it appeared or changed. */
+  moments: { atSec: number; stage: string; text: string }[]
   /** The drive view's quiet line (the engine's latest reason), each time it changed, with the second it showed. */
   statusLines: { atSec: number; text: string }[]
   arrived: boolean
@@ -234,7 +246,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, lookAtSec = [] } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, lookAtSec = [], onMoment, keepMyRoute } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
     await page.getByRole('button', { name: 'Start drive' }).click()
@@ -249,8 +261,10 @@ export class App {
     let position: LngLat = UPTOWN
     let heading = 180
     let speed = 0
-    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0 }
+    const log: DriveLog = { banners: [], moments: [], statusLines: [], arrived: false, seconds: 0 }
     let lastBanner = ''
+    let lastMoment = ''
+    let kept = false
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
       if (hideAtSec !== undefined && sec >= hideAtSec && sec < hideAtSec + STEP_SEC) {
@@ -287,11 +301,31 @@ export class App {
       await page.clock.fastForward(STEP_SEC * 1000)
       const state = await this.settle()
       if (state.status !== '' && state.status !== log.statusLines.at(-1)?.text) log.statusLines.push({ atSec: sec, text: state.status })
+      const momentKey = `${state.moment.stage}|${state.moment.text}`
+      if (state.moment.stage !== '' && momentKey !== lastMoment) {
+        const moment = { atSec: sec, ...state.moment }
+        log.moments.push(moment)
+        if (onMoment !== undefined) {
+          await page.clock.runFor(20)
+          await onMoment(moment)
+        }
+      }
+      lastMoment = momentKey
+      let keptNow = false
+      if (!kept && keepMyRoute !== undefined && state.moment.stage === keepMyRoute) {
+        await page.clock.runFor(20)
+        await this.snap(`minute ${Math.floor(sec / 60)}: ${state.moment.text}, before Keep my route`)
+        await page.getByRole('button', { name: 'Keep my route' }).click()
+        kept = true
+        keptNow = true
+      }
       if (state.banner !== '' && state.banner !== lastBanner) {
         log.banners.push({ atSec: sec, text: state.banner })
         // The banner made the sheet taller and the map shorter: one frame for the map to draw at its new size.
         await page.clock.runFor(20)
-        await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
+        if (!keptNow) await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
+      }
+      if (state.banner !== '' && state.banner !== lastBanner && !keptNow) {
         // The driver follows the app onto the route it switched to: a side street a probe
         // found during the drive, or else the fastest of what Mapbox offered.
         const probed = this.probes.filter((p) => p.duringDrive && p.road !== null && p.road !== 'off-route').at(-1)?.road as RoadName | undefined
@@ -321,12 +355,16 @@ export class App {
    * Waits until no request is in flight in the page (two looks in a row), and
    * says what the drive view shows then.
    */
-  async settle(): Promise<{ banner: string; status: string; arrived: boolean }> {
+  async settle(): Promise<{ banner: string; moment: { stage: string; text: string }; status: string; arrived: boolean }> {
     let quiet = 0
     for (let i = 0; i < 4000; i++) {
       const look = await this.page.evaluate(() => ({
         inflight: (window as unknown as E2EWindow).__e2e.inflight,
         banner: document.querySelector('.live-banner')?.textContent ?? '',
+        moment: {
+          stage: document.querySelector('.live-news')?.getAttribute('data-stage') ?? '',
+          text: document.querySelector('.live-news')?.textContent ?? '',
+        },
         // The engine's reason only, without "checked N s ago" and the request count after it.
         status: (document.querySelector('.live-status')?.textContent ?? '').split(' · ')[0]!,
         arrived: document.querySelector('[aria-label="Drive summary"]') !== null,

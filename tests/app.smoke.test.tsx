@@ -410,19 +410,30 @@ describe('Start drive and the live drive view', () => {
   it('shows a switch with one large way to undo it, and warnings in one line each', () => {
     const switched: LiveState = {
       ...driving,
-      switchBanner: { untilMs: T0 + 30_000, text: 'Switched to a faster route: saves 3 minutes', canKeep: true },
+      switchBanner: {
+        untilMs: T0 + 30_000,
+        text: 'Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles.',
+        canKeep: true,
+        atMs: T0 + 18_000,
+        beforeSec: 1500,
+        afterSec: 1320,
+        turnInM: 1300,
+      },
       wakeLock: 'unavailable',
       pausedNote: { seconds: 42, untilMs: T0 + 30_000 },
     }
     const html = render(switched, T0 + 20_000)
-    expect(html).toContain('<strong>Switched to a faster route: saves 3 minutes</strong>')
-    expect(html).toContain('class="live-button live-keep">Keep previous route</button>')
+    expect(html).toContain('<strong>Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles.</strong>')
+    expect(html).toContain('class="live-button live-keep">Keep my route</button>')
     expect(html).toContain('RouteIQ was paused for 42 s while in the background.')
     expect(html).toContain('Keep the screen on yourself')
     // After leaving the route there is nothing to keep.
-    const replanned = render({ ...switched, switchBanner: { untilMs: T0 + 30_000, text: 'New route from here', canKeep: false } }, T0 + 20_000)
-    expect(replanned).toContain('New route from here')
-    expect(replanned).not.toContain('Keep previous route')
+    const replanned = render(
+      { ...switched, switchBanner: { ...switched.switchBanner!, text: 'New route. 22 minutes to your destination.', canKeep: false, beforeSec: null, turnInM: null } },
+      T0 + 20_000,
+    )
+    expect(replanned).toContain('New route. 22 minutes to your destination.')
+    expect(replanned).not.toContain('Keep my route')
     expect(render(driving, T0, { speechSupported: false })).toContain('This browser cannot speak')
   })
 

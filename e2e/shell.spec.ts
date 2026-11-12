@@ -60,7 +60,7 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   expect(log.arrived).toBe(true)
   // The checks for a faster route went on while locked: the switch needs two of them in a row, after the lock.
   expect(log.banners).toHaveLength(1)
-  expect(log.banners[0]!.text).toContain('Switched to a faster route')
+  expect(log.banners[0]!.text).toContain('Switching to a faster route')
   const spoken = await app.spoken()
   expect(spoken[0]).toBe('RouteIQ started')
   expect(spoken.filter((line) => line.startsWith('Switching to a faster route.'))).toHaveLength(1)
