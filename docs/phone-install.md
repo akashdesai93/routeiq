@@ -120,6 +120,51 @@ happened (which step, how long until silence, whether the blue indicator was sho
 the phone unlocked on a mount with the screen on instead: RouteIQ keeps the screen awake during a
 drive, and with the app in front it behaves like the browser version.
 
+## Test at home: a simulated drive (Test drive)
+
+You can try a whole drive, a wrong turn included, on the couch with the phone locked. The app
+drives a **made-up car** along the route you selected instead of using the phone's GPS. The car is
+moved by the app's native code, so it keeps going while the phone is locked, like a real drive.
+
+1. Open **RouteIQ**, set the destination and wait for the routes. Tap the route you want to drive.
+2. Scroll to just under the **Start drive** button and tick **Test drive (simulated GPS)**.
+3. Tap what the car should do:
+   - **Follow the route**: it drives the route to the end.
+   - **Wrong turn after 1 min**: after a minute it turns off onto a made-up side street and keeps
+     going. This is the one to start with.
+   - **Turn around after 1 min**: after a minute it makes a U-turn and drives back the way it came
+     for a while, then stops.
+4. Tap **1× speed** or **3× speed**. At 3× the car covers the road three times as fast, so the
+   "1 min" comes after 20 seconds. The clock, and the once-a-minute checks for a faster route,
+   stay in real time.
+5. Tap **Start drive**. You hear "RouteIQ started". The drive view shows a yellow **SIMULATED GPS**
+   badge over the map, on the right, for the whole drive. iOS may ask for location: allow it, as for a real drive (see below).
+6. **Lock the phone.** With **Wrong turn** you should hear, about 10 seconds after the turn,
+   "You are off the route. Finding a new one." and then "New route. N minutes to your
+   destination." The car then follows the new route, and you hear its turns.
+7. To look at the diagnostics without ending the drive: unlock, tap **More**, then **Drive
+   diagnostics**, read or **Share**, then **Close**.
+8. Tap **End** when you have heard enough. A test drive does not end by itself unless the car
+   reaches the destination. Untick **Test drive (simulated GPS)** before a real drive; it is also
+   off again every time the app is opened.
+
+Things to know:
+
+- **The route requests are real.** Each new route and each check for a faster one is a real
+  request to Mapbox with your token, and counts against the drive's request budget ("N of 60
+  requests", behind More in the drive view) and your Mapbox account, the same as on a real drive.
+- **The traffic is real too**, for wherever the made-up car is. The side street of the wrong turn
+  is not a real road: it is a straight line off the route, and Mapbox answers from the nearest
+  real road.
+- **The phone's GPS is switched on during a test drive, and its positions are thrown away.** It is
+  on only because that is what makes iOS keep the app running while locked; the blue location
+  indicator shows, as on a real drive. Where the phone really is never reaches the drive, the
+  map or Mapbox. If you refused the location permission, the test drive cannot start either.
+- **Turn around** stays on the same road, so the app does not call it "off the route". Use it to
+  see what the app says and does when you drive the wrong way along the route; note what you
+  hear.
+- The diagnostics of a test drive say so: `SIMULATED GPS test drive: wrong-turn, 3x speed`.
+
 ## 5. On the drive
 
 - Phone charged or on power; GPS at navigation accuracy uses the battery.
@@ -140,12 +185,19 @@ drive, and with the app in front it behaves like the browser version.
 The app keeps a small log of what iOS let it do. It is the only way to tell from here what
 happened while the phone was locked, so please send it after every test drive, good or bad.
 
-1. **Do not close the app** (do not swipe it away): the log is in memory only and is gone when
-   the app is closed. Locking the phone is fine.
-2. When parked, end the drive (**End**, or **Done** after arriving). The top bar comes back.
-3. Tap **Drive diagnostics** in the top bar, then **Copy**. It says "Copied."
-   If it says it could not copy: press and hold the text, **Select All**, **Copy**.
-4. Paste it into a message or an email and send it, with a line about what you heard and saw.
+1. When parked, end the drive (**End**, or **Done** after arriving). The top bar comes back.
+2. Tap **Drive diagnostics** in the top bar, then **Share**. The iPhone's share sheet opens: pick
+   Messages, Mail, Notes or AirDrop. Or tap **Copy** (it says "Copied.") and paste it yourself.
+   If Copy says it could not copy: press and hold the text, **Select All**, **Copy**.
+3. Send it with a line about what you heard and saw.
+
+During a drive the same log is behind **More**, then **Drive diagnostics**, in the drive view.
+
+**If the app was closed in between** (swiped away, or iOS ended it), the last drive is still
+there: the app writes the log to its own storage when a drive ends and about every 30 seconds
+during one. Open **Drive diagnostics** and it shows **Last drive (saved ...)**; **Since the app
+opened** next to it is the log of the current launch. Only the one last drive is kept; the next
+drive replaces it.
 
 What it holds: how many GPS fixes and clock ticks arrived (and how many of them while the app was
 not in front), the longest wait between them, each route request with how long it took, how many
@@ -193,5 +245,8 @@ and to Mapbox as the start of a route request, nowhere else. The native code doe
 positions (a test in `native/shell/tests` checks the Swift for logging and file calls). Route
 requests are sent by the app's native code, to `api.mapbox.com` only; the address of a request
 (which holds the token and the position) is never logged. The token stays on the phone. The spoken
-text is made on the phone by iOS. Drive diagnostics holds counts and timings only, stays in memory,
-and leaves the phone only when you copy and send it.
+text is made on the phone by iOS. Drive diagnostics holds counts and timings only. The last
+drive's diagnostics are also kept in the app's storage on the phone (the same text: no position,
+no address, no token; a text that looked like it held one would not be written). They leave the
+phone only when you share or copy and send them. A test drive uses made-up positions; the phone's
+own position is discarded during one.

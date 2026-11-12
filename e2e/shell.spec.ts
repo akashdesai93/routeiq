@@ -96,6 +96,112 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   await expect(page.getByLabel('Diagnostics text')).toHaveCount(0)
 })
 
+test('at home, a test drive with a wrong turn says I am off the route and finds a new one with the phone locked, and its diagnostics are still there after the app was closed', async ({ app, page }) => {
+  // The token is on the phone already (the scenario above covers pasting it).
+  await app.open({ fakeClock: true, shell: true, path: SHELL, storage: { 'routeiq.shell.mapboxToken': 'pk.test' } })
+  await app.routesReady()
+
+  // On the trip screen: a clearly labelled test drive, with what it does and how fast.
+  await page.getByLabel('Test drive (simulated GPS)').check()
+  await expect(page.getByText('The route requests to Mapbox are real and count against the request budget.')).toBeVisible()
+  await page.getByRole('button', { name: 'Wrong turn after 1 min' }).click()
+  await page.getByRole('button', { name: '3× speed' }).click()
+  await app.snap('the test drive, set to a wrong turn at 3x speed')
+
+  const now = await page.evaluate(() => Date.now())
+  await page.clock.pauseAt(now + 1000)
+  await page.getByRole('button', { name: 'Start drive' }).click()
+  await app.settle()
+
+  const banners: { atSec: number; text: string }[] = []
+  let lastBanner = ''
+  let arrived = false
+  for (let sec = 1; sec <= 1500 && !arrived; sec++) {
+    if (sec === 5) {
+      // The phone is locked, and stays locked.
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    if (sec === 8) {
+      // The drive view says the position is made up, and has a way to the diagnostics without ending the drive.
+      await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'More' }).click()
+      await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+      await expect(page.getByLabel('Diagnostics text')).toHaveValue(/SIMULATED GPS test drive: wrong-turn, 3x speed/)
+      await app.snap('during the test drive: SIMULATED GPS, and the diagnostics on top')
+      await page.getByRole('button', { name: 'Close' }).click()
+      await page.getByRole('button', { name: 'Less' }).click()
+      await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
+      await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
+    }
+    // The phone's real GPS (it is at home, far from the route) keeps reporting; none of it reaches the drive.
+    if (sec % 10 === 0) await page.evaluate(() => (window as unknown as { __e2e: { fix: (...a: number[]) => void } }).__e2e.fix(-80.9, 35.3, 0, 0))
+    await page.clock.fastForward(1000)
+    const state = await app.settle()
+    if (state.banner !== '' && state.banner !== lastBanner) {
+      banners.push({ atSec: sec, text: state.banner })
+      await app.snap(`second ${sec}: ${state.banner}`)
+    }
+    lastBanner = state.banner
+    arrived = state.arrived
+  }
+  await app.snap('arrived, after the test drive')
+
+  // The wrong turn came 20 s in (a minute of road at 3x), was called, and a new route was found; then the car followed it there.
+  expect(arrived).toBe(true)
+  expect(banners).toHaveLength(1)
+  expect(banners[0]!.text).toContain('New route')
+  expect(banners[0]!.atSec).toBeGreaterThan(20)
+  expect(banners[0]!.atSec).toBeLessThan(45)
+  const spoken = await app.spoken()
+  expect(spoken.slice(0, 3)).toEqual([
+    'RouteIQ started',
+    'You are off the route. Finding a new one.',
+    expect.stringMatching(/^New route\. \d+ minutes to your destination\.$/),
+  ])
+  expect(spoken.filter((line) => line === 'You are off the route. Finding a new one.')).toHaveLength(1)
+  expect(spoken.at(-1)).toMatch(/^You have arrived\./)
+
+  // The made-up car was moved by the plugin (twice: the route, then the new route, after standing at the start),
+  // with the real GPS switched on as on a real drive, and both were let go at the end.
+  const calls = await page.evaluate(() => (window as unknown as ShellWindow).__shell.calls)
+  expect(calls.filter((c) => c === 'startSimulatedRoute')).toHaveLength(3)
+  expect(calls.indexOf('startSimulatedRoute')).toBeLessThan(calls.indexOf('startLocation'))
+  expect(calls).toContain('stopSimulatedRoute')
+  expect(calls).toContain('stopLocation')
+  expect(calls.filter((c) => c.startsWith('BROWSER'))).toEqual([])
+  // The route request for the new route was a real one, through the plugin.
+  expect(calls.filter((c) => c === 'httpGet').length).toBeGreaterThanOrEqual(2)
+
+  // The app is closed and opened again: the drive's diagnostics are still there, as "Last drive", and can be shared.
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.clock.fastForward(5000)
+  await page.reload()
+  await app.routesReady()
+  await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+  await expect(page.getByRole('button', { name: /^Last drive \(saved / })).toHaveAttribute('aria-pressed', 'true')
+  const last = await page.getByLabel('Diagnostics text').inputValue()
+  await app.snap('after closing and opening the app: the last drive')
+  expect(last).toContain('SIMULATED GPS test drive: wrong-turn, 3x speed')
+  expect(last).toContain('SIMULATED GPS: 1 test drive')
+  expect(last).toMatch(/fixes: [1-9]\d+ \([1-9]\d* while not active\)/)
+  expect(last).toMatch(/requests: [1-9]\d* sent/)
+  expect(last).toContain('gps off')
+  expect(last).not.toMatch(/\d\.\d|pk\.|https?:/)
+  // What is kept on the phone is that text and nothing about where anything was.
+  const stored = await page.evaluate(() => localStorage.getItem('routeiq.shell.lastDrive.v1') ?? '')
+  expect(stored).toContain('SIMULATED GPS')
+  expect(stored).not.toMatch(/\d\.\d|pk\.|https?:/)
+
+  await page.getByRole('button', { name: 'Share' }).click()
+  expect(await page.evaluate(() => (window as unknown as ShellWindow).__shell.shared)).toEqual([last])
+  // This launch's own log is one tap away, and has no drive in it yet.
+  await page.getByRole('button', { name: 'Since the app opened' }).click()
+  await expect(page.getByLabel('Diagnostics text')).toHaveValue(/fixes: 0 /)
+})
+
 test('in a browser the same lock pauses the checks for a faster route: that rule is unchanged', async ({ app }) => {
   app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
   await app.open({ fakeClock: true })

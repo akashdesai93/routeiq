@@ -11,11 +11,14 @@ import {
   type RouteSignal,
 } from './core/index.ts'
 import { tokenStatus, type TokenStatus } from './config.ts'
+import { isNativeShell } from './device/native/index.ts'
 import { DrivePanel } from './DrivePanel.tsx'
 import { cruiseSpeedMps } from './drive/simulation.ts'
 import { LiveDriveView } from './LiveDriveView.tsx'
 import { DEFAULT_REPLAY_SETUP, replayPlanOf, type ReplaySetup } from './drive/replaySetup.ts'
 import { ReplayPanel } from './ReplayPanel.tsx'
+import { DEFAULT_TEST_DRIVE_SETUP, type TestDriveSetup } from './drive/testDrive.ts'
+import { TestDrivePanel } from './TestDrivePanel.tsx'
 import { useLiveDrive } from './useLiveDrive.ts'
 import type { DriveOverlay } from './map/driveFeatures.ts'
 import { MapView } from './map/MapView.tsx'
@@ -85,6 +88,14 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
         : null,
     [replaySetup, replaySpeedMps, originPosition],
   )
+  // Inside the iPhone shell: a test drive, where a made-up car moved by the app's native code stands in
+  // for the GPS, so reroutes and the voice can be tried at home with the phone locked.
+  const inShell = isNativeShell()
+  const [testDriveSetup, setTestDriveSetup] = useState<TestDriveSetup>(DEFAULT_TEST_DRIVE_SETUP)
+  const testDrive = useMemo(
+    () => (inShell && testDriveSetup.enabled ? { origin: originPosition, preset: testDriveSetup.preset, multiplier: testDriveSetup.multiplier } : null),
+    [inShell, testDriveSetup, originPosition],
+  )
   const setWhatIfDelaySec = sim.setWhatIfDelaySec
   const clearWhatIf = useCallback(() => setWhatIfDelaySec(0), [setWhatIfDelaySec])
   const live = useLiveDrive({
@@ -96,6 +107,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
     whatIfDelaySec: sim.whatIfDelaySec,
     onWhatIfSpent: clearWhatIf,
     replay,
+    testDrive,
   })
   const startLive = () => {
     stopDrive()
@@ -203,6 +215,8 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
             onSelectRoute={driving || live.active ? ignore : routing.select}
             onCenterChange={noteCenter}
           />
+          {/* A test drive (the iPhone shell): the positions are made up, and the screen says so for as long as it runs. */}
+          {live.active && live.simulated && <span className="sim-badge">SIMULATED GPS</span>}
           {live.active && (
             <LiveDriveView
               state={live.state}
@@ -254,7 +268,14 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
             onStartDrive={startLive}
             canStartDrive={live.canStart && !routing.tokenRejected}
             originIsDeviceLocation={pins.origin.id === CURRENT_LOCATION_ID}
-            startDriveExtra={import.meta.env.DEV ? <ReplayPanel setup={replaySetup} onChange={setReplaySetup} /> : null}
+            startDriveExtra={
+              import.meta.env.DEV || inShell ? (
+                <>
+                  {import.meta.env.DEV && <ReplayPanel setup={replaySetup} onChange={setReplaySetup} />}
+                  {inShell && <TestDrivePanel setup={testDriveSetup} onChange={setTestDriveSetup} />}
+                </>
+              ) : null
+            }
           >
               <DrivePanel sim={sim} showWhatIf={import.meta.env.DEV} />
             </RoutePanel>
