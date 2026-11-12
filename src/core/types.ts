@@ -87,6 +87,13 @@ export interface RouteCandidate {
    */
   readonly source?: RouteSource
   /**
+   * For a probed route asked for during a drive: the via point it was asked
+   * through, so the next check can ask through the same point while the
+   * reroute engine confirms it (see checkProbes in probe.ts). Left out
+   * otherwise.
+   */
+  readonly via?: LngLat
+  /**
    * Live traffic along the route, one entry per segment of `geometry` (entry i
    * covers geometry[i] to geometry[i + 1]), from the provider's per-segment
    * annotations. Used to aim side-street probes at the congested part of the

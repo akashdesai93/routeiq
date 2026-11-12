@@ -59,9 +59,17 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`, `npm run pr
 `npm run build:signals` (rebuilds the OpenStreetMap signal tiles shipped with the app from
 extracts on disk); see Data sources.
 
-CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, lint and tests on Node 24
-(Ubuntu) on every push to `main` and every pull request. `.github/workflows/e2e.yml` runs
-the end-to-end scenarios alongside and uploads their report as the `e2e-report` artifact.
+CI runs on every pull request and every push to `main` from one workflow,
+`.github/workflows/gate.yml`. It calls `ci.yml` (`npm ci`, typecheck, lint, tests, the
+production build and its size budget, on Node 24 on Ubuntu) and `e2e.yml` (the end-to-end
+scenarios, report uploaded as the `e2e-report` artifact) every time, and the Swift tests
+and the two macOS builds when their paths change. Its last job, `required`, is the one
+status check `main` requires: `main` is protected and every change arrives through a pull
+request. See [docs/branch-protection.md](docs/branch-protection.md).
+
+`npm run size` (after a build) checks the bundle-size budget in
+`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, and the CSS
+may each grow 10 % before CI fails.
 
 ## End-to-end scenarios
 
@@ -71,7 +79,8 @@ sentence: "I start a drive and it speaks the turns in order, then says I have ar
 faster, it never switches", "a wrong turn: it says I am off the route, finds a new one and
 gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
 and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix",
-"when a side street saves time, it is offered and wins".
+"when a side street saves time, it is offered and wins", "when a jam builds during the
+drive, a side street found mid-drive takes me round it".
 
 ```powershell
 npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
@@ -610,14 +619,20 @@ The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order
 8. Too late: the turn-off (where the alternative leaves the current route, or its
    first maneuver the current route does not share, whichever is sooner) must be at
    least 400 m ahead, at least 20 seconds of driving ahead, and at least 1200 m when
-   it is a freeway exit.
+   it is a freeway exit. Ahead of where the driver is when the answer is used: in a
+   live drive the distance driven while the request was out (`drivenSinceM`) is taken
+   off first (the simulated clock stands still meanwhile).
 9. Confirmation: the same alternative has to pass rules 6 to 8 two checks in a row.
 10. Cooldown: no second switch within 5 minutes of the last one.
 
 Alternatives are tried in ranking order (best ETA, signals only breaking ties of 30
 seconds), so signals can choose between two alternatives that both save enough, but
 never justify a switch on their own. A signal count that is partial or unknown has no
-say. Every decision comes with one short sentence fit to be spoken, such as "Staying:
+say. A side street that a check's own probe found (see Side-street probing, During a
+drive) is one more alternative among the fresh routes and goes through the same rules,
+with one difference in what it is measured against: its time was asked through a via
+point, so the saving is measured against the current path asked the same way, never its
+ordinary time, and without such a time it cannot count. Every decision comes with one short sentence fit to be spoken, such as "Staying:
 faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 miles".
 
 | Threshold (`DEFAULT_REROUTE_OPTIONS`) | Default |
@@ -647,9 +662,11 @@ lifetime; changes apply from the next check.
 **Request budget.** A simulated drive makes real Directions requests, so they are
 rationed: at most one per 5 real seconds whatever the speed (at 20x that stretches the
 check interval to about 100 simulated seconds), and at most 60 per drive, after which
-the car drives on without checking. The panel shows the count. The simulated clock
+the car drives on without checking. The side-street probes of the checks count against
+the same 60 (see Side-street probing, During a drive). The panel shows the count. The simulated clock
 stands still while a check is out, so the answer is always for the place the car is at.
-The default trip took 25 requests at 20x (Nov 2026); at 1x or 5x it takes about 40.
+The default trip took 25 requests at 20x (Nov 2026, before the checks' side-street
+probes, which add up to one a check and 20 a drive); at 1x or 5x it took about 40.
 
 **The request.** A check is the same `driving-traffic` request as the first one, from
 the car's position, plus `bearings=<heading>,45;`: the car's heading with 45 degrees
@@ -838,7 +855,7 @@ is marked "via side streets" in the route list.
   old trip that arrives anyway is ignored.
 - **How many.** At most `requestsPerPlan` (2) probe requests per plan, cut from
   `selectViaPoints`' order. A trip with nothing to probe (freeway-only, or under 3 km)
-  makes none. Probes are not made during a drive yet (the reroute engine, #5).
+  makes none. A drive's checks probe too, on a budget of their own (During a drive, below).
 - **The request.** `fetchProbeRoute` (src/providers/mapbox/client.ts): `driving-traffic`,
   the three coordinates, `waypoints=0;2` and no alternatives. With `waypoints` naming only
   the origin and the destination, the via is a silent waypoint: Mapbox's docs say the
@@ -880,6 +897,88 @@ Planning a trip):
 | Main routes (Mapbox's up to three) | 1 |
 | Side-street probes | 0 to 2 (0 for freeway-only trips, trips under 3 km, or when the pins move again within 800 ms) |
 | A whole plan | at most 3 |
+
+**During a drive** (PLAN step 11c, #5; live and simulated drives alike). A check can
+also find a side street the plan did not, or one that only pays once a jam builds:
+after the check's fresh routes (and its path check, when one is made) are in,
+`checkProbes` (src/core/probe.ts, pure) picks the via points by the rules below, from the
+car: beside the route being driven as the check found it, clear of every fresh route and
+of the path check's answer, none within 1 km of the car or the destination. A check that
+did not find the route being driven (not offered, and its path check failed or brought
+back another road) makes no probe: the engine compares nothing then (route-unconfirmed),
+and a probe could come back as the current path and stand in for it. Nor does a check on a
+route that is not held up: no jam reported on it ahead (a point aimed at one,
+`congestedSpanM`) and less than `minDelaySec` (2 minutes) over its typical time. A side
+street cannot save what the traffic is not costing, and a probe costs a request.
+`fetchFreshRoutes` (src/drive/freshRoutes.ts) asks for each point from the car, with its
+heading as `bearings`, the via with its 250 m radius, to the destination. A probed route
+that is a new path joins the fresh routes (`mergeCheckProbes`: the plan screen's repeat and
+dead-end-spur rules, against the fresh routes and the path check's answer), tagged
+`source: 'probe'` with the via it was asked through, and `decideReroute` judges it by the
+rules every alternative goes through: 2 minutes and 5 % saved, two checks in a row, the
+lead distance, the cooldown, no return. No threshold changed.
+
+- **Like for like (#81).** Mapbox's time for a path asked through via points ran 3 to 13 %
+  below its time for the same path as an ordinary route (Rerouting, The second request). A
+  probed route is asked through a via, so it is never measured against the current route's
+  ordinary time: `decideReroute` compares it only with the current path asked the same way,
+  through via points (`observation.baseline`), and never with more than its ordinary time
+  when the check has both (a path check can read high too; the lower is the safe one).
+  When the check made no path check (the
+  current route was among the fresh routes), one is made after a probe that found a new
+  path: through points of the current path where the probed routes leave it
+  (`baselineProbe`). Without its answer (no room, a failed request, another road back) the
+  probed route cannot count on that check, not even towards confirmation: "a side street
+  may be faster, but its time could not be compared like for like" (`probe-unconfirmed`),
+  and a confirmation in progress starts over. An equal-time side street therefore saves
+  nothing however low both via-asked times come back (`tests/reroute.test.ts`, 3 to 13 %).
+  Probed routes are also never taken as the current route, the off-route pick or the
+  route-lost pick, which have no saving to compare. What is left: the probe goes through
+  one via, the path check through one to six, and whether the bias depends on the count
+  is not measured (#81).
+- **Time limit.** The probes and the path check they need have `timeoutSec` (8 s) in all;
+  then they are cancelled and the check answers with the fresh routes alone, so a slow
+  or hung probe never holds a check up longer than that. Whatever the delay, the engine
+  judges the answer where the car is when it is used: the distance driven since the
+  request was sent (`drivenSinceM`, from the tracker) is taken off every turn-off, for the
+  too-late rule and for what is said (Rerouting, rule 8).
+
+- **Which point.** One probe per check by default, so the points take turns check by
+  check (`round`): one side of a stretch, then the other. While the engine is confirming
+  (or holding through its cooldown) a probed route, the next check asks through that
+  route's own via first (`keep`), since a confirmation needs the same route on
+  consecutive checks and the points move with the car. A failed check keeps it, as the
+  engine keeps its confirmation; anything else that ends the confirmation, a switch or
+  "Keep previous route" included, drops it. The kept via is dropped too once it is within
+  the endpoint clearance of the car or the destination, behind the car, or on a road a
+  check now offers.
+- **Budget.** Probes share the drive's request budget (`maxRequests`, 60) and never take
+  the request a check's path check may need: a probe goes out only while, after the check
+  itself, one request would still be left for that path check (`checkProbeAllowance`). At
+  most `requestsPerDrive` (20) probes a drive, so most of the budget stays for the checks.
+  A search for a new route (off the route) and the first route never probe. Nothing to
+  probe (under 3 km left, freeway only, a route not held up) costs nothing. Every request
+  is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
+  check that is cancelled before it answers (End, off the route, "Keep previous route")
+  count too, and 60 and 20 are exact.
+- **Said as such.** A switch onto a probed route says "Switching to a faster route via side
+  streets. Saves 4 minutes. Turn in 1.1 miles." and the banner "Switched to a faster route
+  via side streets: saves 4 minutes"; the simulated drive's log adds "(via side streets)".
+- **Diagnostics.** In the iPhone shell's drive diagnostics a probe is logged as
+  "request N (probe)" and a path check as "request N (path check)", with a count of each.
+  A probe that finds no road (NoSegment) or no route is a normal answer, not a fault.
+
+| `DEFAULT_DRIVE_PROBE_BUDGET` | Default | Meaning |
+| --- | --- | --- |
+| `requestsPerCheck` | 1 | Most probe requests per check (under 1 turns probing off during a drive) |
+| `requestsPerDrive` | 20 | Most probe requests per drive, out of `maxRequests` (60) |
+| `minDelaySec` | 120 s | A route with no jam reported ahead is probed only when it is this far over its typical time |
+| `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
+
+What a check costs: 1 request, plus 1 for the path check when the route being driven is
+not among the fresh routes, plus 0 or 1 probe, plus 1 path check after a probe that found
+a new path when none was made yet: 3 at most. Only checks on a held-up route probe; the 20
+probes then last about 20 such checks, after which a check costs 1 or 2.
 
 How the points are chosen: the fastest candidate's surface-street stretches (everything
 outside its freeway spans, with the first and last kilometer cut off) are taken slowest
@@ -937,6 +1036,10 @@ request through via points along the route being driven) gives its like-for-like
 and when that cannot be had (no budget, a failed request, another road back) the route
 is unconfirmed, not lost: the drive stays on it, and only "no route along the road
 ahead" `routeLostPolls` times in a row counts against it. No threshold changed.
+Each check may also probe one side street of its own (#5, see Side-street probing, During
+a drive), so a drive can still move onto a side street the plan did not recommend. The
+probes come out of the same 60 requests, so on a long drive the checks run out up to a
+third sooner (20 probes at most).
 
 **The limit of the web version.** A browser only runs a page while it is in front with
 the screen on. Lock the phone or switch to another app and the position, the checks and
@@ -1113,7 +1216,13 @@ the device is what a route needs: the position (snapped to the route when on it)
 the heading go to Mapbox as the origin of each route request, at most 60 times a drive
 plus a few when off the route. When an answer does not contain the route being driven,
 one of those requests also carries up to six points of that route ahead of the car
-(points of a route Mapbox itself returned), to ask for its travel time. Spoken text is
+(points of a route Mapbox itself returned), to ask for its travel time; so does the
+request a side-street probe needs to be compared like for like. A side-street
+probe of a check (at most one per check and 20 per drive, within the same 60, and only on
+a held-up route) sends the
+same origin, heading and destination with one point in between: a point 500 or 800 m
+beside a route Mapbox itself returned, made on the device from that route (or the via of
+an earlier probe of this drive). Spoken text is
 made on the device by the browser's own
 speech engine; RouteIQ sends it nowhere. The development replay uses a made-up position
 that starts at the origin pin, not the device's.
@@ -1163,7 +1272,7 @@ counted for signals like any other route: inside the bundled area its tiles are 
 own files, and outside it a tile the bundle does not cover can be asked of Overpass (the
 tile's bounding box only, as below).
 During a simulated drive the simulated car's position and heading go to Mapbox the same
-way, once per check; that position is a point on the route already on screen, not
+way, once per check (and with a probe's via point, as in a live drive); that position is a point on the route already on screen, not
 anyone's location. The drive, its log and the reroute settings are kept in memory only.
 
 For signal counts, a trip that stays inside the bundled area (North and South Carolina,

@@ -1,0 +1,140 @@
+name: Gate
+
+# The one workflow that runs on every pull request and every push to main. Its last job,
+# `required`, is the single status check that branch protection on main asks for
+# (docs/branch-protection.md), so it has to report on every pull request, whatever the
+# pull request touches.
+#
+# - The cheap checks always run: web (typecheck, lint, unit tests, build, bundle budget)
+#   and the end-to-end scenarios.
+# - The Swift package tests and the two macOS builds run only when their paths change.
+# - `required` passes when every job that had to run succeeded, and fails when one failed,
+#   was cancelled, or was skipped although it had to run.
+#
+# The checks themselves live in the workflows called below; each can also be started by
+# hand (workflow_dispatch). Do not add `paths` or `paths-ignore` to this file: a required
+# check that never reports blocks its pull request for ever.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to a pull request replaces the run before it. Runs on main are never cancelled.
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # lists the files of the pull request
+    outputs:
+      native-core: ${{ steps.filter.outputs.native-core }}
+      native-app: ${{ steps.filter.outputs.native-app }}
+      shell-ios: ${{ steps.filter.outputs.shell-ios }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # A change to this file runs everything, so a change to the gate is tested in full.
+          filters: |
+            native-core:
+              - 'native/RouteIQCore/**'
+              - 'native/scripts/**'
+              - 'public/seed/osm-signals/**'
+              - 'tests/fixtures/**'
+              - '.github/workflows/native-core.yml'
+              - '.github/workflows/gate.yml'
+            native-app:
+              - 'native/RouteIQ/**'
+              - 'native/scripts/**'
+              - 'public/seed/osm-signals/**'
+              - 'native/RouteIQCore/Package.swift'
+              - 'native/RouteIQCore/Sources/**'
+              - '.github/workflows/native-app.yml'
+              - '.github/workflows/gate.yml'
+            shell-ios:
+              - 'native/shell/**'
+              - 'src/**'
+              - 'public/**'
+              - 'index.html'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'vite.config.ts'
+              - 'tsconfig*.json'
+              - '.github/workflows/shell-ios.yml'
+              - '.github/workflows/gate.yml'
+
+  web:
+    uses: ./.github/workflows/ci.yml
+
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+
+  native-core:
+    needs: changes
+    if: needs.changes.outputs.native-core == 'true'
+    uses: ./.github/workflows/native-core.yml
+
+  native-app:
+    needs: changes
+    if: needs.changes.outputs.native-app == 'true'
+    uses: ./.github/workflows/native-app.yml
+    secrets:
+      MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
+      MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+
+  shell-ios:
+    needs: changes
+    if: needs.changes.outputs.shell-ios == 'true'
+    uses: ./.github/workflows/shell-ios.yml
+
+  # The single required status check. `if: always()` matters: without it a failed job above
+  # would skip this one, and GitHub counts a skipped required check as passed.
+  required:
+    name: required
+    needs: [changes, web, e2e, native-core, native-app, shell-ios]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every job that had to run succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          # Which jobs had to run: the three below always, the others when their paths changed.
+          must_run=$(jq -r '
+            ["changes", "web", "e2e"]
+            + [.changes.outputs // {} | to_entries[] | select(.value == "true") | .key]
+            | join(" ")' <<<"$NEEDS")
+
+          {
+            echo "| job | had to run | result |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          failed=0
+          for job in $(jq -r 'keys[]' <<<"$NEEDS"); do
+            result=$(jq -r --arg job "$job" '.[$job].result' <<<"$NEEDS")
+            case " $must_run " in *" $job "*) needed=yes ;; *) needed=no ;; esac
+            echo "| $job | $needed | $result |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$job: $result (had to run: $needed)"
+            if [ "$result" = success ]; then continue; fi
+            if [ "$result" = skipped ] && [ "$needed" = no ]; then continue; fi
+            echo "::error title=Gate::$job: $result"
+            failed=1
+          done
+          exit "$failed"

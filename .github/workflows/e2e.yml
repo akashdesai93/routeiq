@@ -3,23 +3,16 @@ name: E2E
 # The end-to-end scenarios (npm run e2e): the production build in headless
 # Chromium, fully offline. No secrets: the test builds use a dummy pk.test
 # token and every outside request is answered by the test itself.
+#
+# Called by gate.yml on every pull request and every push to main (it has no triggers
+# of its own, so each change runs once); it can also be started by hand.
 
 on:
-  pull_request:
-    paths-ignore:
-      - "native/**"
-  push:
-    branches: [main]
-    paths-ignore:
-      - "native/**"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   e2e:
@@ -27,9 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -41,7 +36,7 @@ jobs:
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Cache the browser
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
@@ -53,7 +48,7 @@ jobs:
 
       - name: Upload the report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-report
           path: e2e-report/

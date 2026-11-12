@@ -223,7 +223,9 @@ export class World {
   /**
    * The answer to a request from `from` through `via` (a side-street probe):
    * one route along the road that passes nearest the via, as Mapbox snaps a
-   * via onto the road network, from the point on it nearest `from`. A via next
+   * via onto the road network, from the point on it nearest `from`. A car
+   * that is not on that road (a probe during a drive) first drives a cross
+   * street straight over to it. A via next
    * to a road Mapbox already offered comes back as that road. NoSegment when
    * no road is within VIA_SNAP_M. S is a road only in a world made with
    * `sideStreet`. Leaves lastOffered alone: a probe is not what the car drives.
@@ -245,9 +247,12 @@ export class World {
     if (best === null || best.offM > Math.min(VIA_SNAP_M, radiusM)) {
       return { answer: { code: 'NoSegment', message: 'Could not find a matching segment for input coordinates', routes: [] }, road: null, durationSec: null }
     }
-    const rest = restOf(best.road, project(this.frame, best.road.corners, from))
-    const body = this.routeJson(rest, traffic, n)
-    return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: rest.name, durationSec: body.duration }
+    const onRoad = project(this.frame, best.road.corners, from)
+    const rest = restOf(best.road, onRoad)
+    const road: Road =
+      onRoad.offM <= ON_ROAD_M ? rest : { name: rest.name, corners: [from, ...rest.corners], legNames: ['Cross Street', ...rest.legNames] }
+    const body = this.routeJson(road, traffic, n)
+    return { answer: { code: 'Ok', uuid: 'e2e-made-up-road-network', waypoints: [], routes: [body] }, road: road.name, durationSec: body.duration }
   }
 
   /**

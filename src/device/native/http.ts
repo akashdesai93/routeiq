@@ -1,4 +1,4 @@
-import type { DirectionsTransport } from '../../providers/mapbox/client.ts'
+import { directionsRequestKind, type DirectionsTransport } from '../../providers/mapbox/client.ts'
 import type { DriveDiagnostics, RequestOutcome } from './diagnostics.ts'
 import type { RouteIQNativePlugin } from './plugin.ts'
 
@@ -55,7 +55,8 @@ export function nativeTransport(plugin: RouteIQNativePlugin, options: NativeTran
         return
       }
       const id = `get-${++count}`
-      const n = log?.requestSent()
+      // Only the kind of request is passed on, read off the URL here: never the URL itself.
+      const n = log?.requestSent(directionsRequestKind(url))
       let settled = false
       const settle = (outcome: RequestOutcome, status?: number, nativeMs?: number): boolean => {
         if (settled) return false

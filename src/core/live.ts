@@ -1,5 +1,13 @@
 import { isValidLngLat, lineFrom } from './geo.ts'
 import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
+import {
+  checkProbeAllowance,
+  INITIAL_CHECK_PROBES,
+  rememberCheckProbes,
+  resolveDriveProbeBudget,
+  type CheckProbeMemory,
+  type DriveProbeBudget,
+} from './probe.ts'
 import { rankRoutes } from './rank.ts'
 import {
   decideReroute,
@@ -78,6 +86,8 @@ export interface LiveOptions {
   readonly minHeadingSpeedMps: number
   readonly tracking: Partial<TrackingOptions>
   readonly reroute: Partial<RerouteOptions>
+  /** Side-street probes during the checks (probe.ts, DEFAULT_DRIVE_PROBE_BUDGET); they share maxRequests. */
+  readonly probes: Partial<DriveProbeBudget>
 }
 
 export const DEFAULT_LIVE_OPTIONS: LiveOptions = {
@@ -94,6 +104,7 @@ export const DEFAULT_LIVE_OPTIONS: LiveOptions = {
   minHeadingSpeedMps: 2,
   tracking: {},
   reroute: {},
+  probes: {},
 }
 
 /** Why a position could not be had. The same kinds as the geolocation wrapper's. */
@@ -164,10 +175,16 @@ export interface LiveState {
     /** Where along the route the car was when it was sent: the engine is asked about that place. */
     readonly alongM: number
     readonly distanceFromRouteM: number
+    /** Requests made for it after the first (its path check, its probes), counted as the shell sent them. */
+    readonly extraSent?: number
+    /** How many of those were side-street probes. */
+    readonly probesSent?: number
   } | null
   readonly nextRequestId: number
-  /** Route requests made so far on this drive. */
+  /** Route requests made so far on this drive (side-street probes included). */
   readonly requestsUsed: number
+  /** The side-street probes of the checks: how many were made, whose turn is next, and the via being confirmed. */
+  readonly probes: CheckProbeMemory
   readonly lastRequestAtMs: number | null
   /** When the last check was answered. Null before the first route. */
   readonly lastCheckedAtMs: number | null
@@ -219,6 +236,7 @@ export const LIVE_IDLE: LiveState = {
   request: null,
   nextRequestId: 1,
   requestsUsed: 0,
+  probes: INITIAL_CHECK_PROBES,
   lastRequestAtMs: null,
   lastCheckedAtMs: null,
   recheck: false,
@@ -252,6 +270,7 @@ export type LiveEvent =
    * `baseline`: what came back when the current path itself was asked for (see the effect's
    * `baseline` and RerouteObservation.baseline); left out or null when it was not asked or failed.
    * `requests`: how many requests the answer took, when more than the one the effect counted.
+   * `probes`: how many of those were side-street probes (see the effect's `probes`); left out, none.
    */
   | {
       readonly type: 'routes'
@@ -261,7 +280,15 @@ export type LiveEvent =
       readonly message?: string
       readonly baseline?: readonly RouteCandidate[] | null
       readonly requests?: number
+      readonly probes?: number
     }
+  /**
+   * The shell is sending one more request for the check `requestId` (its path
+   * check, or a side-street probe, or the path check a probe needs). Counted
+   * at once, so a check that is cancelled afterwards still counts every request
+   * it made, whether or not its answer is ever used.
+   */
+  | { readonly type: 'request-sent'; readonly requestId: number; readonly probe: boolean }
   /** About once a second. */
   | { readonly type: 'tick'; readonly nowMs: number }
   | { readonly type: 'visibility'; readonly nowMs: number; readonly hidden: boolean }
@@ -291,6 +318,15 @@ export type LiveEffect =
        * when the request budget has no room for it, and for anything but a check.
        */
       readonly baseline: boolean
+      /**
+       * The side-street probes the shell may make on this check (PLAN step
+       * 11c): at most `allowed` requests, through the via points core
+       * checkProbes picks from the fresh routes with `memory`. Each probed
+       * route that is new comes back among `routes`, tagged source 'probe'
+       * with its via. `allowed` is 0 for anything but a check, and when the
+       * budget has no room (checkProbeAllowance).
+       */
+      readonly probes: { readonly allowed: number; readonly memory: CheckProbeMemory; readonly budget: DriveProbeBudget }
     }
   | { readonly type: 'cancel-request' }
   | { readonly type: 'speak'; readonly line: SpokenLine }
@@ -317,11 +353,22 @@ function times(n: number): string {
   return n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`
 }
 
-/** "Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles." and its relatives. */
-export function switchLine(code: RerouteCode, savingSec: number | null, turnInM: number | null, newDurationSec: number): string {
+/**
+ * "Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles." and its relatives.
+ * `sideStreet`: the new route was found by a side-street probe, and the line says so.
+ */
+export function switchLine(
+  code: RerouteCode,
+  savingSec: number | null,
+  turnInM: number | null,
+  newDurationSec: number,
+  sideStreet = false,
+): string {
   const turn = turnInM === null ? '' : ` Turn in ${spokenDistance(turnInM)}.`
   if (code === 'off-route') return `New route. ${spokenDuration(newDurationSec)} to your destination.`
-  if (code === 'faster-route' && savingSec !== null) return `Switching to a faster route. Saves ${spokenDuration(savingSec)}.${turn}`
+  if (code === 'faster-route' && savingSec !== null) {
+    return `Switching to a faster route${sideStreet ? ' via side streets' : ''}. Saves ${spokenDuration(savingSec)}.${turn}`
+  }
   // The only other switch (route-lost): asked several times, the provider found no route along the road ahead.
   return `Switching routes. The road ahead on your route looks closed.${turn}`
 }
@@ -350,6 +397,7 @@ function resolve(options: Partial<LiveOptions>): LiveOptions {
     minHeadingSpeedMps: n(options.minHeadingSpeedMps, d.minHeadingSpeedMps),
     tracking: options.tracking ?? d.tracking,
     reroute: options.reroute ?? d.reroute,
+    probes: options.probes ?? d.probes,
   }
 }
 
@@ -452,6 +500,14 @@ function request(state: LiveState, purpose: RequestPurpose, nowMs: number, opts:
         headingDeg,
         // Room for this request and one more within the budget of ordinary checks.
         baseline: purpose === 'poll' && state.requestsUsed + 2 <= opts.maxRequests,
+        probes: {
+          allowed:
+            purpose === 'poll'
+              ? checkProbeAllowance({ requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used }, opts.maxRequests, opts.probes)
+              : 0,
+          memory: state.probes,
+          budget: resolveDriveProbeBudget(opts.probes),
+        },
       },
     ],
   }
@@ -572,6 +628,8 @@ function checked(
   routes: readonly RouteCandidate[] | null,
   message: string | undefined,
   baseline: readonly RouteCandidate[] | null | undefined,
+  probes: number,
+  probesCounted: number,
   nowMs: number,
   opts: LiveOptions,
 ): LiveStep {
@@ -593,6 +651,8 @@ function checked(
       // the car is back on, it goes through the usual rules like any check.
       offRouteM: sent.purpose === 'replan' && tracking.offFixes > 0 ? Math.max(sent.distanceFromRouteM, rerouteOffRouteM + 1) : 0,
       baseline,
+      // The answer is used where the car is now, not where it was asked from (a slow answer, a probe).
+      drivenSinceM: Math.max(0, tracking.alongRouteM - sent.alongM),
     },
     opts.reroute,
   )
@@ -601,6 +661,7 @@ function checked(
     ...state,
     request: null,
     engine: decision.nextState,
+    probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted),
     lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs },
   }
   if (routes === null) return { state: next, effects: [] }
@@ -624,6 +685,7 @@ function checked(
   // A second new route in one excursion (still off the first) is taken without another word.
   const quiet = offRoute && state.offRouteReplans > 1
   const saving = decision.considered?.savingSec ?? null
+  const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
   const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason }
   next = {
@@ -639,7 +701,7 @@ function checked(
       text: offRoute
         ? 'New route from here'
         : saving !== null
-          ? `Switched to a faster route: saves ${spokenDuration(saving)}`
+          ? `Switched to a faster route${sideStreet ? ' via side streets' : ''}: saves ${spokenDuration(saving)}`
           : 'Switched routes: the road ahead looks closed',
       canKeep: !offRoute,
     },
@@ -648,7 +710,7 @@ function checked(
   }
   const say: LiveEffect = {
     type: 'speak',
-    line: { text: switchLine(decision.code, saving, decision.considered?.turnInM ?? null, chosen.durationSec), priority: 'urgent' },
+    line: { text: switchLine(decision.code, saving, decision.considered?.turnInM ?? null, chosen.durationSec, sideStreet), priority: 'urgent' },
   }
   return { state: next, effects: [{ type: 'follow-route', geometry: chosen.geometry }, ...(quiet ? [] : [say])] }
 }
@@ -740,10 +802,34 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       if (state.request === null || state.request.id !== event.requestId) return { state, effects: [] }
       if (state.request.purpose === 'plan') return planned(state, event.routes, event.message, event.nowMs, opts)
       if (state.status !== 'driving' || state.route === null || state.tracking === null) return { state: { ...state, request: null }, effects: [] }
-      // A second request made for this answer (the current path's own travel time) counts too.
-      const extra = Math.max(0, Math.round((event.requests ?? 1) - 1))
+      // More requests made for this answer (the current path's own travel time, side-street probes) count
+      // too: those the shell reported as it sent them already are, the rest are counted now.
+      const sentExtra = state.request.extraSent ?? 0
+      const sentProbes = state.request.probesSent ?? 0
+      const extra = Math.max(0, Math.round((event.requests ?? 1) - 1) - sentExtra)
       const counted = extra === 0 ? state : { ...state, requestsUsed: state.requestsUsed + extra }
-      return checked(counted, event.routes, event.message, event.baseline, event.nowMs, opts)
+      const probes = Math.max(0, Math.round(event.probes ?? 0))
+      return checked(counted, event.routes, event.message, event.baseline, probes, sentProbes, event.nowMs, opts)
+    }
+    case 'request-sent': {
+      if (!active) return { state, effects: [] }
+      const ours = state.request !== null && state.request.id === event.requestId
+      return {
+        state: {
+          ...state,
+          requestsUsed: state.requestsUsed + 1,
+          probes: event.probe ? { ...state.probes, used: state.probes.used + 1 } : state.probes,
+          request:
+            ours && state.request !== null
+              ? {
+                  ...state.request,
+                  extraSent: (state.request.extraSent ?? 0) + 1,
+                  probesSent: (state.request.probesSent ?? 0) + (event.probe ? 1 : 0),
+                }
+              : state.request,
+        },
+        effects: [],
+      }
     }
     case 'keep-previous': {
       const { undo, route, tracking, switchBanner } = state
@@ -757,6 +843,8 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           route: undo.route,
           tracking: back,
           engine: declineRoute(undo.engine, lineFrom(route.geometry, tracking.alongRouteM), nowSec + noReturnSec),
+          // The engine's confirmation is dropped, and with it the probe being confirmed.
+          probes: { ...state.probes, keep: null },
           guidance: armGuidance(undo.route.guidance, back.alongRouteM, false),
           eta: undo.eta,
           turn: null,

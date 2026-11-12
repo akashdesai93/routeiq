@@ -141,6 +141,28 @@ export type DirectionsTransport = (
 let transport: DirectionsTransport | null = null
 
 /**
+ * What a Directions request is for, read off its URL so a log can tell them
+ * apart without keeping the URL: 'probe', a side-street probe (one via point
+ * with a `radiuses` entry of its own, see fetchProbeRoute); 'path', a request
+ * for one path through via points (the drive's path check, baselineProbe);
+ * 'routes', anything else (the plan, a drive's check). A word from this list,
+ * never anything from the URL itself.
+ */
+export type DirectionsRequestKind = 'routes' | 'path' | 'probe'
+
+export function directionsRequestKind(url: string): DirectionsRequestKind {
+  let query: URLSearchParams
+  try {
+    query = new URL(url).searchParams
+  } catch {
+    return 'routes'
+  }
+  const radiuses = query.get('radiuses')?.split(';') ?? []
+  if (query.get('waypoints') === '0;2' && radiuses.length === 3 && Number.isFinite(Number(radiuses[1]))) return 'probe'
+  return query.has('waypoints') ? 'path' : 'routes'
+}
+
+/**
  * Sets how Directions requests are sent from now on. Null (the default) is
  * the browser's `fetch`. Called once at startup, and only inside the iPhone
  * shell, where the request is handed to native networking so that it goes
@@ -215,6 +237,8 @@ export interface FetchProbeRouteOptions {
    * A via with no road this close comes back as NoSegment, so null. Left out: unlimited.
    */
   viaRadiusM?: number
+  /** The vehicle's heading at the origin, for a probe made during a drive (see DirectionsUrlOptions.originHeadingDeg). */
+  originHeadingDeg?: number
   signal?: AbortSignal
   fetchImpl?: DirectionsTransport
 }
@@ -234,9 +258,9 @@ export interface FetchProbeRouteOptions {
  * is extra, so its failure is dropped silently and never reaches the user.
  */
 export async function fetchProbeRoute(options: FetchProbeRouteOptions): Promise<RouteCandidate | null> {
-  const { origin, via, destination, token, viaRadiusM, signal, fetchImpl } = options
+  const { origin, via, destination, token, viaRadiusM, originHeadingDeg, signal, fetchImpl } = options
   // buildDirectionsUrl leaves a bad via out, which would ask for the plain trip instead.
   if (!isValidLngLat(via)) return null
-  const result = await fetchDirections({ origin, destination, token, via: [{ point: via, radiusM: viaRadiusM }], signal, fetchImpl })
+  const result = await fetchDirections({ origin, destination, token, originHeadingDeg, via: [{ point: via, radiusM: viaRadiusM }], signal, fetchImpl })
   return result.ok ? (result.routes[0] ?? null) : null
 }
