@@ -36,6 +36,11 @@ labels by hand before landing (none of tonight's PRs come from forks). The areas
 (`native/shell`), Swift core (`native/RouteIQCore`, `docs/contracts`), native app, design, CI.
 README, PLAN, `docs/` and `.claude/` are in none, so a docs merge never makes a PR stale.
 
+**Open PRs from before the gates.** A re-run uses the `gate.yml` of the run it re-runs, so a PR
+whose last Gate run predates the gate steps has none of them, and its old green `required`
+ignores the labels. When the gates land, update the branch of every open PR (each gets a new
+Gate run), or check its hold and phone labels by hand until it has one.
+
 `main-red.yml` follows the Gate on `main`: when the newest finished run failed or was
 cancelled it opens the issue **main is red** (label `p1`, link to the run), or comments on
 it if it is already open, and it closes it when `main` is green again. It uses the

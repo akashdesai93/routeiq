@@ -7,7 +7,8 @@ name: Gates re-check
 #     is edited (PHONE CHECK NEEDED), and
 #   - main moves on in an area an open PR also changes, so a PR whose checks ran before that
 #     change turns red until its branch is updated (case (d) of the first night).
-# A Gate run still in progress is waited for and then re-run anyway: its `required` finishes
+# A Gate run whose `required` has not started needs nothing: it reads the gates when it does.
+# One whose `required` has started is waited for and then re-run anyway: `required` finishes
 # before e2e-report, so it may already have read the labels (scripts/orch/gates.mjs, rerunRequired).
 # About 15 s per event on ubuntu-latest, up to 4 min when a Gate run is still going.
 on:

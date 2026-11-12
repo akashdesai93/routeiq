@@ -115,7 +115,7 @@ describe('CI area', () => {
 })
 
 // A recording `gh`: Gate runs per call, the required job, and every POST it was asked to make.
-function fakeGh(statuses: string[]) {
+function fakeGh(statuses: string[], requiredStatus = 'completed') {
   const posts: string[] = []
   let i = 0
   const call = (path: string, method = 'GET') => {
@@ -124,7 +124,7 @@ function fakeGh(statuses: string[]) {
       return null
     }
     if (path.includes('/actions/workflows/gate.yml/runs')) return { workflow_runs: [{ id: 7, status: statuses[Math.min(i++, statuses.length - 1)] }] }
-    if (path.includes('/actions/runs/7/jobs')) return { jobs: [{ id: 99, name: 'required' }] }
+    if (path.includes('/actions/runs/7/jobs')) return { jobs: [{ id: 99, name: 'required', status: requiredStatus }] }
     throw new Error(`unexpected ${path}`)
   }
   return { call, posts }
@@ -136,6 +136,20 @@ describe('re-check when a label changes', () => {
     const { call, posts } = fakeGh(['in_progress', 'in_progress', 'completed'])
     expect(await rerunRequired('R', 'abc1234', { ...quiet, gh: call })).toBe('rerun')
     expect(posts).toEqual(['R/actions/jobs/99/rerun'])
+  })
+  it('waits and re-runs when required itself is being re-run (two quick label changes)', async () => {
+    const { call, posts } = fakeGh(['in_progress', 'completed'], 'in_progress')
+    let slept = 0
+    // A job of a running run cannot be re-run: it must wait for the run to complete first.
+    expect(await rerunRequired('R', 'abc1234', { ...quiet, sleep: async () => void slept++, gh: call })).toBe('rerun')
+    expect(slept).toBe(1)
+    expect(posts).toEqual(['R/actions/jobs/99/rerun'])
+  })
+  it.each(['queued', 'waiting'])('neither waits nor fails while required is still %s: it reads the labels when it starts', async (status) => {
+    // A Gate run with the macOS builds goes on for ~8 min, longer than the wait.
+    const { call, posts } = fakeGh(['in_progress'], status)
+    expect(await rerunRequired('R', 'abc1234', { ...quiet, gh: call })).toBe('pending')
+    expect(posts).toEqual([])
   })
   it('re-runs required of a finished run straight away', async () => {
     const { call, posts } = fakeGh(['completed'])
@@ -155,6 +169,19 @@ describe('re-check when a label changes', () => {
 })
 
 describe('re-check after a push to main', () => {
+  it('re-runs a required still running that started before the push (it may have read the old main)', async () => {
+    const reran: string[] = []
+    const call = (path: string) => {
+      if (path.includes('/pulls?state=open')) return [{ number: 3, head: { sha: 'ccc' } }]
+      if (path.includes('/pulls/3/files')) return [{ filename: 'src/App.tsx' }]
+      if (path.includes('/check-runs')) return { check_runs: [{ conclusion: null, status: 'in_progress', started_at: '2026-11-12T10:59:00Z' }] }
+      throw new Error(`unexpected ${path}`)
+    }
+    const errors = await recheckMain('R', { pushed: ['src/core/live.ts'], pushedAt: '2026-11-12T11:00:00Z', gh: call, log: () => {}, rerun: async (_R, sha) => void reran.push(sha) })
+    expect(reran).toEqual(['ccc'])
+    expect(errors).toEqual([])
+  })
+
   it('one PR that errors does not stop the others being re-checked, and is reported', async () => {
     const reran: string[] = []
     const call = (path: string) => {

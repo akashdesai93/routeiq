@@ -26,6 +26,8 @@ export const PHONE_MARKER = /^[ \t>]*(?:(?:[-*+]|\d+\.)[ \t]+)?(?:\*\*|#+[ \t]*)
 export const COMPARE_FILE_LIMIT = 300
 /** How long a re-check waits for a Gate run still in progress before re-running its `required` (gates.yml gives the job 10 min). */
 export const RERUN_WAIT = Object.freeze({ pollMs: 15_000, maxMs: 4 * 60_000 })
+// Job states in which `required` has not read the gates yet.
+const NOT_STARTED = new Set(['queued', 'waiting', 'pending', 'requested'])
 
 // Areas in which two changes can break each other. A path may be in several. Paths in no
 // area (README, PLAN, docs, skills) never make a PR stale; anything not listed is "web".
@@ -136,6 +138,15 @@ export async function rerunRequired(R, sha, { dry = false, why = '', gh: call = 
     log(`  no Gate run for ${sha.slice(0, 7)} yet: its required job will read the gates when it runs`)
     return 'no-run'
   }
+  if (run.status !== 'completed') {
+    // A required job that has not started reads the gates when it does: nothing to wait for (and
+    // a Gate run with the macOS builds outlasts the wait, so waiting would only fail this check).
+    const job = (call(`${R}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []).find((j) => j.name === 'required')
+    if (!job || NOT_STARTED.has(job.status)) {
+      log(`  Gate run ${run.id} is ${run.status} and its required job has not started: it will read the gates`)
+      return 'pending'
+    }
+  }
   for (let waited = 0; run.status !== 'completed'; waited += wait.pollMs) {
     if (waited >= wait.maxMs) throw new Error(`Gate run ${run.id} still ${run.status} after ${Math.round(wait.maxMs / 1000)} s; re-run this check once it finishes`)
     log(`  Gate run ${run.id} is ${run.status}: waiting for it, then re-running required`)
@@ -166,7 +177,8 @@ export async function recheckMain(R, { pushed, pushedAt, dry = false, gh: call =
       const check = (call(`${R}/commits/${p.head.sha}/check-runs?check_name=required&per_page=5`).check_runs || [])[0]
       log(`PR #${p.number}: ${hit ? 'shares an area with this push' : 'unaffected'}, required ${check ? check.conclusion || check.status : 'missing'}`)
       if (check && check.started_at > pushedAt) log('  its checks started after this push, so they saw it')
-      else if (hit && check && check.conclusion === 'success') await rerun(R, p.head.sha, { dry, why: hit.message, gh: call, log })
+      // A required still running may have read main before this push: re-run it too.
+      else if (hit && check && (check.conclusion === 'success' || check.status !== 'completed')) await rerun(R, p.head.sha, { dry, why: hit.message, gh: call, log })
     } catch (e) {
       log(`::error title=gates: PR #${p.number}::${e.message}`)
       errors.push({ pr: p.number, message: e.message })
