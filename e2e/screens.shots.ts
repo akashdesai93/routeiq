@@ -157,8 +157,6 @@ for (const palette of ['day', 'night'] as const) {
   test(`busy map ${palette}`, async ({ app, page }) => {
     app.outside.mapStyle = busyMapStyle(palette)
     app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
-    // The app picks its map and route colours from the phone's appearance (#145).
-    await page.emulateMedia({ colorScheme: palette === 'night' ? 'dark' : 'light' })
     await app.open({ fakeClock: true })
     await app.routesReady()
     await app.snap(`${palette}: trip screen`)

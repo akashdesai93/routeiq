@@ -214,8 +214,3 @@
   }
   .sim-badge { top: auto; bottom: 12px; right: 12px; }
 }
-/* Over the night map (#145, the map follows the phone's appearance): the turn card's and the sheet's
-   edge is lighter, or both melt into the dark streets. Only the border colour changes. */
-@media (prefers-color-scheme: dark) {
-  .live-top, .live-bottom { border-color: var(--hair-night); }
-}

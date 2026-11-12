@@ -11,7 +11,6 @@ import {
 import { tokenErrorHelp } from '../config.ts'
 import { SIGNAL_DATA_ATTRIBUTION } from './attribution.ts'
 import { driveMarkerFeatures, driveRouteFeatures, type DriveOverlay } from './driveFeatures.ts'
-import { DRIVE_HIDDEN_LAYERS, MAP_THEMES, mapThemeNow } from './mapTheme.ts'
 import { DRIVE_ROUTE_CASE_LAYER, DRIVE_ROUTE_LAYER, DRIVE_ROUTE_SOURCE, DRIVE_SOURCE, driveLayers } from './driveLayers.ts'
 import { PIN_COLOR, PIN_NAME, PIN_ROLES, type PinRole } from './pins.ts'
 import { routeFeatures } from './routeFeatures.ts'
@@ -89,15 +88,12 @@ export const MapView = memo(function MapView({
 
     const start = latest.current.pins
     const [west, south, east, north] = boundsOf(PIN_ROLES.map((role) => start[role].position))
-    // Day or night, chosen once as the map starts (#145). A change of appearance takes effect
-    // the next time the map starts: no style reload under a drive (#136).
-    const theme = MAP_THEMES[mapThemeNow()]
     let map: mapboxgl.Map
     try {
       map = new mapboxgl.Map({
         accessToken: token,
         container,
-        style: theme.style,
+        style: 'mapbox://styles/mapbox/streets-v12',
         bounds: [
           [west, south],
           [east, north],
@@ -215,8 +211,8 @@ export const MapView = memo(function MapView({
       // the turn-off of a switch (hollow while the switch is still waiting), and the car.
       map.addSource(DRIVE_ROUTE_SOURCE, { type: 'geojson', data: driveRouteFeatures([]), lineMetrics: true })
       map.addSource(DRIVE_SOURCE, { type: 'geojson', data: driveMarkerFeatures(null) })
-      // Ink on a white casing on the day map, a light line on a dark casing on the night map
-      // (mapTheme.ts). Both lines are trimmed alike, so no casing is left behind the car.
+      // Ink on a white casing, as the approved design draws the route on a light map. Both
+      // lines are trimmed alike, so no casing is left behind the car.
       map.addLayer({
         id: DRIVE_ROUTE_CASE_LAYER,
         type: 'line',
@@ -224,7 +220,7 @@ export const MapView = memo(function MapView({
         filter: ['==', ['get', 'kind'], 'route'],
         // Flat ends: the trimmed-off start is then gone whole (no round cap left behind), and the cut is under the car.
         layout: { 'line-join': 'round', 'line-cap': 'butt' },
-        paint: { 'line-color': theme.routeCase, 'line-width': 10, 'line-trim-offset': [0, 0] },
+        paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-trim-offset': [0, 0] },
       })
       map.addLayer({
         id: DRIVE_ROUTE_LAYER,
@@ -232,7 +228,7 @@ export const MapView = memo(function MapView({
         source: DRIVE_ROUTE_SOURCE,
         filter: ['==', ['get', 'kind'], 'route'],
         layout: { 'line-join': 'round', 'line-cap': 'butt' },
-        paint: { 'line-color': theme.routeCore, 'line-width': 6, 'line-trim-offset': [0, 0] },
+        paint: { 'line-color': '#0a0c0f', 'line-width': 6, 'line-trim-offset': [0, 0] },
       })
       map.addLayer({
         id: 'drive-turn',
@@ -339,19 +335,8 @@ export const MapView = memo(function MapView({
     markers?.origin.getElement().style.setProperty('display', 'none')
     PIN_ROLES.forEach((role) => markers?.[role].setDraggable(false))
     readyMap.easeTo({ zoom: FOLLOW_ZOOM, pitch: 40, duration: 0 })
-    // While driving: no points of interest, transit or traffic from the base map (mapTheme.ts).
-    // Once when the drive starts and once when it ends; nothing per fix.
-    const hidden = (readyMap.getStyle()?.layers ?? [])
-      .filter((layer) => DRIVE_HIDDEN_LAYERS.test(layer.id) && readyMap.getLayoutProperty(layer.id, 'visibility') !== 'none')
-      .map((layer) => layer.id)
-    for (const id of hidden) readyMap.setLayoutProperty(id, 'visibility', 'none')
     const { pins: shown } = latest.current
     return () => {
-      try {
-        for (const id of hidden) readyMap.setLayoutProperty(id, 'visibility', 'visible')
-      } catch {
-        // The map itself is being removed: nothing to put back.
-      }
       markers?.origin.getElement().style.removeProperty('display')
       PIN_ROLES.forEach((role) => markers?.[role].setDraggable(true))
       const [west, south, east, north] = boundsOf(PIN_ROLES.map((role) => shown[role].position))
