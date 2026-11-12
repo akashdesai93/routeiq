@@ -29,7 +29,7 @@ same JSON fixtures straight from `tests/fixtures`.
 | `TestPoints.swift` | `testPoints.ts` | `core.test.ts` |
 | `Directions.swift`, `JSONValue.swift` | `providers/mapbox/adapter.ts` (with guidance and per-segment traffic) | `mapbox.test.ts` (parseDirections), `guidance.test.ts` (adapter) |
 | `RouteIQKit/DirectionsClient.swift` | `providers/mapbox/client.ts` (fetchDirections) | `mapbox.test.ts` (fetchDirections), with a fake transport |
-| `RouteIQKit/SignalBundle.swift` | `providers/osm/bundle.ts`, `bundleLayer.ts`, `signalData.ts` (bundle only) | Parity: `Tests/RouteIQKitTests/Fixtures/signal-parity.json`, the web app's own counts on the real bundle |
+| `RouteIQKit/SignalBundle.swift` | `providers/osm/bundle.ts`, `bundleLayer.ts`, `signalData.ts` (bundle only) | Parity: `Tests/RouteIQKitTests/Fixtures/signal-parity.json`, the web app's own counts on a frozen copy of the bundle |
 | `JS.swift` | (none) | JavaScript number and string semantics the TypeScript relies on |
 
 ## Contract version
@@ -80,15 +80,24 @@ Not ported yet:
 ## The signal parity reference
 
 `Tests/RouteIQKitTests/Fixtures/signal-parity.json` holds the signal counts the web app's own
-TypeScript gives on the bundled tiles. That covers the three Directions fixtures, a route that
+TypeScript gives on bundled tiles. That covers the three Directions fixtures, a route that
 leaves the Carolinas, and three clipped edge tiles. `SignalBundleParityTests` requires the Swift
-counts to match exactly. The test also checks the bundle's data date, so it fails when
-`public/seed/osm-signals` is rebuilt. Regenerate the reference then, from the repository root,
-with Node 24:
+counts to match exactly.
+
+Both sides read a frozen copy of the bundle, `Tests/RouteIQKitTests/Fixtures/signal-bundle` (the
+index of 2026-11-10 and only the 26 tiles those routes touch, ODbL like the bundle), not
+`public/seed/osm-signals`. The test checks that Swift counts as the web app does, so the monthly
+data refresh (`signals-refresh.yml`) leaves it green (#193).
+`native/scripts/signal-parity-reference.test.mjs` checks that the committed reference is exactly
+what the script writes, and that changing the shipped bundle does not move it. After a change to
+the counting rules, regenerate the reference from the repository root, with Node 24:
 
 ```bash
 node native/scripts/signal-parity-reference.mjs > native/RouteIQCore/Tests/RouteIQKitTests/Fixtures/signal-parity.json
 ```
+
+Add `--freeze` only to change what the reference covers: it copies the index and the tiles the
+routes touch from `public/seed/osm-signals` into the fixture bundle first.
 
 ## Running the tests
 

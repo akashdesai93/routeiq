@@ -4,7 +4,10 @@
 // .github/workflows/gates.yml re-runs that job when a PR's labels or body change, or when
 // main moves on in an area the PR changes.
 //
-//   node scripts/orch/gates.mjs --pr N [--tested <sha>]   # evaluate PR N; exit 1 when a gate fails
+//   node scripts/orch/gates.mjs --pr N [--tested <sha>] [--size-growth <json>]
+//                                                       # evaluate PR N; exit 1 when a gate fails. --size-growth is
+//                                                       # what the size job measured (scripts/bundle-size.mjs, growthReport);
+//                                                       # given but empty, the growth counts as not measured
 //   node scripts/orch/gates.mjs --recheck-pr N            # re-run `required` of PR N's newest finished Gate run
 //   node scripts/orch/gates.mjs --recheck-main --before <sha> --after <sha>
 //                                                       # re-run `required` of open PRs in an area that push changed
@@ -19,6 +22,10 @@ import { fileURLToPath } from 'node:url'
 export const HOLD_LABELS = ['do-not-merge', 'needs-human']
 export const PHONE_LABEL = 'needs-phone'
 export const PHONE_VERIFIED = 'phone-verified'
+/** Passes the bundle growth limit and a change of the ceiling file (#170). The reviewer adds it, with a reason in the verdict. */
+export const SIZE_OK_LABEL = 'size-ok'
+/** The owner's bundle ceiling (#170): a feature PR does not change it. */
+export const BUDGET_FILE = 'scripts/bundle-budget.json'
 // At the start of a line, as PRs write it; a PR that only quotes it (like this one's docs) is not held.
 // A list item ("- ", "* ", "+ ", "1. ") counts too: a reviewer writes it as a bullet as often as a line.
 export const PHONE_MARKER = /^[ \t>]*(?:(?:[-*+]|\d+\.)[ \t]+)?(?:\*\*|#+[ \t]*)?PHONE CHECK NEEDED\b/im
@@ -56,14 +63,46 @@ export function areasOf(path) {
 
 const areaSet = (files) => new Set(files.flatMap(areasOf))
 
+const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`
+
+/**
+ * The bundle-size gate (#170). Pure. `growth` is the size job's report (`{ appJs: { base, pr,
+ * limit }, css: ... }`), `null` when the job ran but did not measure (unknown is never zero), or
+ * `undefined` when there is nothing to check (a local run without --size-growth).
+ * Fails when a measure grew by more than its limit, or the PR changes the ceiling file, unless
+ * the PR has `size-ok`.
+ */
+export function sizeFailures(pr, growth) {
+  if (pr.labels.includes(SIZE_OK_LABEL)) return []
+  const failures = []
+  if (pr.files.includes(BUDGET_FILE)) {
+    failures.push({ gate: 'size', message: `the PR changes ${BUDGET_FILE}, the owner's bundle ceiling; only an owner decision changes it (the reviewer then adds \`${SIZE_OK_LABEL}\`)` })
+  }
+  if (growth === undefined) return failures
+  const measures = growth === null || typeof growth !== 'object' ? [] : Object.entries(growth)
+  const valid = measures.length > 0 && measures.every(([, g]) => [g?.base, g?.pr, g?.limit].every(Number.isFinite))
+  if (!valid) {
+    failures.push({ gate: 'size', message: `the bundle growth against main was not measured (see the web job's "Bundle growth" step); \`${SIZE_OK_LABEL}\` passes it` })
+    return failures
+  }
+  for (const [key, g] of measures) {
+    const added = g.pr - g.base
+    if (added > g.limit) {
+      failures.push({ gate: 'size', message: `${key} grows by ${kB(added)} (${kB(g.base)} on main → ${kB(g.pr)}), over the ${kB(g.limit)} a PR may add; make it smaller, or the reviewer adds \`${SIZE_OK_LABEL}\` with a reason in the verdict` })
+    }
+  }
+  return failures
+}
+
 /**
  * Evaluates the gates. Pure.
  * pr: { labels: string[], body: string, files: string[] }
  * main: { aheadBy: number, files: string[] } — what main has that the PR's head has not
+ * growth: the size job's report, null when not measured, undefined to skip (see sizeFailures)
  * → { ok, failures: [{ gate, message }] }
  */
-export function evaluate(pr, main) {
-  const failures = []
+export function evaluate(pr, main, growth) {
+  const failures = [...sizeFailures(pr, growth)]
   for (const l of HOLD_LABELS) if (pr.labels.includes(l)) failures.push({ gate: 'hold', message: `the PR has the label \`${l}\`; remove it when the PR may merge` })
   const askedForPhone = pr.labels.includes(PHONE_LABEL) || PHONE_MARKER.test(pr.body || '')
   if (askedForPhone && !pr.labels.includes(PHONE_VERIFIED)) {
@@ -187,6 +226,17 @@ export async function recheckMain(R, { pushed, pushedAt, dry = false, gh: call =
   return errors
 }
 
+/** --size-growth <json>: undefined when absent, null when empty or not JSON (not measured). */
+export function sizeGrowthArg(argv) {
+  const i = argv.indexOf('--size-growth')
+  if (i < 0) return undefined
+  try {
+    return JSON.parse(argv[i + 1] || 'null')
+  } catch {
+    return null
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2)
   const R = `repos/${process.env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'}`
@@ -202,7 +252,7 @@ async function main() {
   }
   if (num('--pr')) {
     const s = readPr(R, num('--pr'), arg('--tested'))
-    const result = evaluate(s.pr, s.main)
+    const result = evaluate(s.pr, s.main, sizeGrowthArg(argv))
     console.log(`PR #${s.number} at ${s.head_sha.slice(0, 7)}: ${result.ok ? 'all gates pass' : `${result.failures.length} gate(s) fail`}`)
     for (const f of result.failures) console.log(`::error title=gate: ${f.gate}::${f.message}`)
     process.exitCode = result.ok ? 0 : 1
