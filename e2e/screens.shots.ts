@@ -10,6 +10,19 @@ import { JAM_ON_A_FROM_SECOND_CHECK } from './world/traffic.ts'
 // design-shots/<project>/<scenario> NN <name>.png. Nothing here is a test of
 // behaviour: the e2e scenarios (*.spec.ts) are.
 
+// The pictures may be committed (docs/design) and this repo is public: the Mapbox
+// wordmark is hidden in them (the app itself always shows it). The map is the
+// harness's blank style, so no map data is in them either.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style')
+      style.textContent = '.mapboxgl-ctrl-logo { visibility: hidden !important; }'
+      document.head.append(style)
+    })
+  })
+})
+
 // Playwright needs the object pattern here, even with no fixtures in it.
 // oxlint-disable-next-line no-empty-pattern
 test.afterEach(async ({}, info) => {
