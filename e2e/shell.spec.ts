@@ -95,7 +95,7 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   const checks = diagnostics.split('\n').find((l) => l.startsWith('checks: ')) ?? ''
   expect(checks).toContain('a faster one, waiting for the next check to confirm it 1')
   expect(checks).toContain('switched to a faster one 1')
-  expect(diagnostics).toMatch(/most any route beat yours by: [1-9]\d* s/)
+  expect(diagnostics).toMatch(/best saving another route offered: [1-9]\d* s/)
   expect(diagnostics).not.toMatch(/\d\.\d|pk\.|https?:/)
   await page.getByRole('button', { name: 'Copy' }).click()
   await expect(page.getByText('Copied. Paste it into a message.')).toBeVisible()

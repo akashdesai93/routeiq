@@ -27,7 +27,7 @@ export interface NativeDevice {
   /** True when the positions are a test drive's (made up), not the GPS's. */
   readonly simulated: boolean
   /** A drive check was decided: its outcome goes into the diagnostics (DriveDiagnostics.checked). */
-  readonly checked: (code: string, routes: number, fasterBySec: number | null) => void
+  readonly checked: (code: string, routes: number | null, savingSec: number | null) => void
 }
 
 export interface NativeDeviceOptions {

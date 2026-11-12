@@ -1162,8 +1162,12 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **Drive diagnostics** (top bar, and behind More in the drive view; shell only): a log
   with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
   ticks received and the longest wait between them, route requests with their times,
-  spoken lines started and finished, and when the app went to the background. Counts and
-  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  spoken lines started and finished, when the app went to the background, and what each
+  drive check concluded: a tally of the outcomes in words ("yours was the fastest",
+  "another was faster, by less than the minimum saving", "waiting for the next check to
+  confirm it" ...) and the best saving another route offered, in whole seconds, from the
+  reroute engine's own like-for-like comparison (unknown when it could not compare). Counts
+  and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
@@ -1458,8 +1462,9 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
-position, no address, no token. The last drive's text is also kept in the app's storage
+and timings (fixes, ticks, route requests, spoken lines, app in front or not, what each
+check concluded from a fixed list of words, and seconds saved): no position, no address,
+no road name, no token. The last drive's text is also kept in the app's storage
 on the phone, and a text that looked as if it held a position, a token or an address is
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own

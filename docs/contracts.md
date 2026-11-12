@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 6** (Nov 12, 2026: version 5 plus the switch moment's fields on `LiveState`, #84). The Swift port matches it, except the drive log and the place book (#33);
+**Current version: 7** (Nov 12, 2026: version 6 plus each check's route count and saving on `LiveState.lastDecision`, #175). The Swift port matches it, except the drive log and the place book (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -108,8 +108,8 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 6 | by definition |
-| Swift port (`native/RouteIQCore`) | 6, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment (#33, #84) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
+| Web app (`src/`) | 7 | by definition |
+| Swift port (`native/RouteIQCore`) | 7, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment and each check's summary (#33, #84, #175) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
@@ -139,3 +139,7 @@ the declarations that changed.
   `turnInM`, and its `text` is now the spoken line; `LiveState` gains `offer` (a faster route
   being confirmed) and `kept` (the calm banner after "Keep my route") and `declinedTurns`; `LiveOptions` gains `heldTurnMatchM`. The `keep-previous`
   event now also turns down a route that is still being confirmed.
+- **7** (Nov 12, 2026, #175): `LiveState.lastDecision` gains `routes` (how many routes the
+  check's answer had; null when none came back or the previous route was kept) and `savingSec`
+  (the considered alternative's like-for-like saving, `RerouteAlternative.savingSec`; null when
+  the engine could not compare). Read by the drive diagnostics; the reroute engine is unchanged.

@@ -13,7 +13,6 @@ import {
 } from './core/index.ts'
 import { sessionClock, sessionNow } from './device/clock.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
-import { fasterBySec } from './device/native/diagnostics.ts'
 import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
 import { pageVisibility } from './device/visibility.ts'
@@ -181,7 +180,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         const decided = next.lastDecision
         if (native !== null && decided !== null && decided.atMs !== seenCheckAtMs) {
           seenCheckAtMs = decided.atMs
-          native.checked(decided.code, next.candidates?.length ?? 0, fasterBySec(next.eta?.durationSec, next.candidates?.map((c) => c.durationSec)))
+          native.checked(decided.code, decided.routes, decided.savingSec)
         }
         const spent = next.switches.length > seenSwitches && whatIfInPlay.current
         seenSwitches = next.switches.length

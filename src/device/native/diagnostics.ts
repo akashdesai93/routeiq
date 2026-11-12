@@ -10,7 +10,6 @@
  * mistake (tests/shellHttp.test.ts checks the output by pattern).
  */
 
-import { DEFAULT_REROUTE_OPTIONS } from '../../core/reroute.ts'
 
 /** How many events are kept; older ones are dropped and counted. */
 export const DIAGNOSTICS_EVENT_LIMIT = 200
@@ -35,7 +34,7 @@ const SIMULATED_KINDS: readonly string[] = ['follow', 'wrong-turn', 'turn-around
 export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'current-best': 'yours was the fastest',
   'no-alternative': 'no other route came back',
-  'saving-too-small': `another was faster, by less than ${Math.round(DEFAULT_REROUTE_OPTIONS.minSavingSec / 60)} min`,
+  'saving-too-small': 'another was faster, by less than the minimum saving',
   'saving-share-too-small': 'another was faster, by too small a share of the trip',
   confirming: 'a faster one, waiting for the next check to confirm it',
   cooldown: 'a faster one, held back by the cooldown after a switch',
@@ -54,17 +53,8 @@ export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'kept-previous': 'kept the previous answer',
 })
 
-/**
- * How many seconds the fastest route of a check's answer beats the time of the
- * route being driven, or 0 when none does, or null when either is unknown. A
- * summary for the log only: the decision itself is the reroute engine's.
- */
-export function fasterBySec(etaSec: number | null | undefined, candidateSecs: readonly number[] | null | undefined): number | null {
-  if (typeof etaSec !== 'number' || !Number.isFinite(etaSec) || candidateSecs === null || candidateSecs === undefined) return null
-  const usable = candidateSecs.filter((d) => Number.isFinite(d) && d > 0)
-  if (usable.length === 0) return null
-  return Math.max(0, Math.round(etaSec - Math.min(...usable)))
-}
+/** A route count above this is logged as this: the log needs "a few", not an exact number. */
+export const CHECK_ROUTES_CAP = 9
 
 export interface DriveDiagnostics {
   /** When this log began, milliseconds since 1970. */
@@ -87,11 +77,13 @@ export interface DriveDiagnostics {
   /** A route request ended. `status`: the HTTP status. `nativeMs`: how long the native side says it took. */
   requestEnded(n: number, outcome: RequestOutcome, status?: number, nativeMs?: number): void
   /**
-   * A drive check was decided. `code`: its outcome, a word from CHECK_OUTCOMES. `routes`: how many
-   * routes its answer had. `fasterBySec`: how much the fastest of them beat the route driven
-   * (fasterBySec), null when unknown. The log tallies the outcomes and notes when one changes.
+   * A drive check was decided (LiveState.lastDecision). `code`: its outcome, a word from
+   * CHECK_OUTCOMES. `routes`: how many routes its answer had, null when none came back.
+   * `savingSec`: what the alternative the engine considered saves against the route driven,
+   * like for like; negative when slower, null when the engine could not compare. The log
+   * tallies the outcomes, keeps the largest saving seen and notes when the outcome changes.
    */
-  checked(code: unknown, routes: number, fasterBySec: number | null): void
+  checked(code: unknown, routes: number | null, savingSec: number | null): void
   speechStarted(): void
   /** `finished` false: the line was cut off or failed. */
   speechEnded(finished: boolean): void
@@ -202,16 +194,18 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         log(`request ${whole(n)}${tag} ${kind} after ${ms} ms`)
       }
     },
-    checked(code, routes, faster) {
+    checked(code, routes, saving) {
       const known = typeof code === 'string' && Object.hasOwn(CHECK_OUTCOMES, code) ? code : 'other'
       checks.count++
       checks.tally.set(known, (checks.tally.get(known) ?? 0) + 1)
-      const by = faster === null ? null : whole(faster)
+      // Unknown stays unknown; a slower alternative saves nothing (0), it is not a negative number in the log.
+      const by = typeof saving === 'number' && Number.isFinite(saving) ? whole(saving) : null
       if (by !== null && (checks.mostFasterSec === null || by > checks.mostFasterSec)) checks.mostFasterSec = by
       // Once a minute for a whole drive would push everything else out of the events: only a change is noted.
       if (known !== checks.last) {
         checks.last = known
-        log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${Math.min(whole(routes), 9)} routes${by !== null && by > 0 ? `, fastest beat yours by ${by} s` : ''})`)
+        const answer = routes === null ? 'no answer' : `${Math.min(whole(routes), CHECK_ROUTES_CAP)} routes`
+        log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${answer}${by !== null && by > 0 ? `, the best other saves ${by} s` : ''})`)
       }
     },
     speechStarted() {
@@ -247,7 +241,7 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
                 .sort((a, b) => b[1] - a[1])
                 .map(([code, n]) => `${CHECK_OUTCOMES[code] ?? 'other'} ${n}`)
                 .join(', ')}`,
-              `most any route beat yours by: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
+              `best saving another route offered: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
             ]),
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
         ...(simulatedDrives > 0
