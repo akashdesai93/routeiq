@@ -65,3 +65,13 @@ export function jamWhereAllThreeShare(factor: number, fromRequest = 2): Traffic 
  */
 export const BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK: Closure = (at, n) =>
   n >= 3 && Math.abs(at.side - 300) < 50 && at.f > 0.6 && at.f < 0.7
+
+/**
+ * A jam on the direct route (A) from the second check of the drive on, only where the East Loop
+ * (B) goes round it and the West Loop (C) does not: from 42 % to 56 % of the trip, before C
+ * swings west at 55 %. So the East Loop is the one faster route, and turning it down leaves none.
+ */
+export const JAM_ONLY_THE_EAST_LOOP_MISSES: Traffic = (route, at, n) => {
+  const onJammedStretch = Math.abs(at.side - 300) < 50 && at.f > 0.42 && at.f < 0.56
+  return FREE_FLOW(route, at, n) * (n >= 3 && onJammedStretch ? 5 : 1)
+}

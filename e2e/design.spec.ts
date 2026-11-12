@@ -79,6 +79,10 @@ test.describe('on a phone in landscape', () => {
     await app.open({ fakeClock: true })
     await app.routesReady()
     expect(await offscreenX(page), 'trip screen').toEqual([])
+    // An 844 px wide phone is still a phone in a hand (#132): every control is a finger's size,
+    // although the screen is wide enough for the side-by-side layout.
+    await app.snap('the trip screen in landscape: every control 44 px or more')
+    expect(await smallTargets(page.locator('.app'), 44), 'trip screen controls under 44 px').toEqual([])
     let looked = false
     await app.drive({
       maxSec: 64,

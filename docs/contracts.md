@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 5** (Nov 12, 2026: version 4 plus the private drive log, #107). The Swift port is being brought up to it (#33);
+**Current version: 6** (Nov 12, 2026: version 5 plus the switch moment's fields on `LiveState`, #84). The Swift port matches it, except the drive log and the place book (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -108,8 +108,8 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 5 | by definition |
-| Swift port (`native/RouteIQCore`) | 5, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive (#33) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
+| Web app (`src/`) | 6 | by definition |
+| Swift port (`native/RouteIQCore`) | 6, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive with the switch moment (#33, #84) | drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
@@ -134,3 +134,8 @@ the declarations that changed.
 - **5** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
   none); the private drive log `DriveLog` (`DriveRecord`, `LoggedSwitch`, `LoggedSignals`, `DriveOutcome`)
   joins the contract as data kept on the device.
+- **6** (Nov 12, 2026, #84): the live drive's switch moment, display data only; the reroute
+  engine is unchanged. `LiveState.switchBanner` gains `atMs`, `beforeSec`, `afterSec` and
+  `turnInM`, and its `text` is now the spoken line; `LiveState` gains `offer` (a faster route
+  being confirmed) and `kept` (the calm banner after "Keep my route") and `declinedTurns`; `LiveOptions` gains `heldTurnMatchM`. The `keep-previous`
+  event now also turns down a route that is still being confirmed.

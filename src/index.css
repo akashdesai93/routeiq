@@ -142,6 +142,12 @@ button.link:hover { background: none; color: #ffffff; }
   .panel { order: 3; flex: none; background: var(--glass); font-size: 15px; }
   /* Clear of the sheet's rounded top, which laps 24px over the map. */
   .map .mapboxgl-ctrl-bottom-left, .map .mapboxgl-ctrl-bottom-right { bottom: 24px; }
+  .drive-log { max-height: 200px; }
+}
+/* Touch sizes: on a phone-width screen, and on any touch screen however wide (a phone on its
+   side is 844 px wide but still tapped with a finger, #132). The layout above stays width-only,
+   so a landscape phone keeps the side-by-side trip screen. */
+@media (max-width: 700px), (pointer: coarse) {
   /* Everything that is tapped is at least 44px high. */
   button, summary, .plan input, .setting input { min-height: 44px; }
   button { padding: 8px 14px; }
@@ -152,7 +158,6 @@ button.link:hover { background: none; color: #ffffff; }
   /* Height from min-height, not padding round the text: font metrics differ between machines (43 px in CI). */
   .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
-  .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
 }
 /* The attribution is never collapsed (it carries the OpenStreetMap credit), so on a narrow map it is kept clear of the Mapbox logo in the other corner. */
