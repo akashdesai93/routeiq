@@ -39,7 +39,9 @@ gh run download <run-id> -n RouteIQ-unsigned
 That leaves `RouteIQ-unsigned.ipa` in the current folder. Or in the browser: the repository's
 **Actions** tab, workflow **Gate**, the newest green run that has a **shell-ios** job, **Artifacts**
 at the bottom, `RouteIQ-unsigned` (a `.zip` with the `.ipa` inside). Artifacts are deleted after 30 days;
-any change under `native/shell/` or `src/` builds a new one, and `gh workflow run shell-ios.yml`
+a pull request that changes `native/shell/` (or the web build files) builds a new one, every
+push to `main` that changes `native/shell/`, `src/` or `public/` does too (so the newest green
+`main` run has the current app), and `gh workflow run shell-ios.yml`
 builds one on demand (that run is then under the workflow **Shell iOS (unsigned ipa)**).
 
 ## 2. Install it from Windows with a free Apple ID

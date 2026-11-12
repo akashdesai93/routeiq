@@ -453,8 +453,18 @@ export function signalTilesForRoute(
   options: Partial<SignalMatchOptions> = DEFAULT_SIGNAL_MATCH,
 ): string[] {
   const { clusterRadiusM, toleranceM, intersectionRadiusM } = resolve(options)
-  return tilesForRoute(geometry, clusterRadiusM + toleranceM + intersectionRadiusM)
+  const marginM = clusterRadiusM + toleranceM + intersectionRadiusM
+  // A check asks this for each route when it loads the tiles and again when it counts (#96).
+  // The answer depends only on the geometry array (never changed in place) and the margin.
+  let byMargin = tilesByGeometry.get(geometry)
+  if (byMargin === undefined) tilesByGeometry.set(geometry, (byMargin = new Map()))
+  let ids = byMargin.get(marginM)
+  if (ids === undefined) byMargin.set(marginM, (ids = tilesForRoute(geometry, marginM)))
+  return [...ids]
 }
+
+/** signalTilesForRoute's answers, by geometry array and margin. */
+const tilesByGeometry = new WeakMap<readonly LngLat[], Map<number, readonly string[]>>()
 
 /**
  * Everything known about signals when routes are counted. The route's own
@@ -503,6 +513,9 @@ export function withSignalCounts(
   if (data === null) return { routes, signalsByRouteId }
   const resolved = resolve(options)
   const primary: Sourced[] = data.primary.map((point) => ({ point, source: 'primary' }))
+  // The primary points are the same for every route: grouped once, and only again for a
+  // route that adds fallback points of its own (#96). Grouping does not depend on the route.
+  let primaryClusters: SignalCluster[] | null = null
 
   const counted = routes.map((route): RouteCandidate => {
     const needed = signalTilesForRoute(route.geometry, resolved)
@@ -522,7 +535,10 @@ export function withSignalCounts(
         })
       })
     }
-    const clusters = clusterSourced([...primary, ...fallback], resolved.clusterRadiusM)
+    const clusters =
+      fallback.length === 0
+        ? (primaryClusters ??= clusterSourced(primary, resolved.clusterRadiusM))
+        : clusterSourced([...primary, ...fallback], resolved.clusterRadiusM)
     const found = clustersOnRoute(route.geometry, clusters, resolved, {
       intersections: route.intersections?.map((i) => i.location) ?? null,
       limitedAccessSpansM: route.limitedAccessSpansM,

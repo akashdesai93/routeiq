@@ -8,21 +8,14 @@ import {
   type DriveLog,
   type DriveRecord,
   type DriveRecorder,
-  type LiveState,
   type RecorderStep,
 } from './core/index.ts'
+import type { LiveObserver } from './live/runner.ts'
 import type { TextStore } from './storage/local.ts'
 import { clearDriveLog, loadDriveLog, saveDriveLog } from './storage/driveLog.ts'
 
-/** What the live drive tells the log (see useLiveDrive's `observer`). */
-export interface DriveObserver {
-  /** The Start tap: a new drive. */
-  start: () => void
-  /** After every change of the live state, ticks included: cheap unless a switch or the arrival is in it. */
-  change: (state: LiveState, nowMs: number) => void
-  /** The End tap, with the last state before the drive view closes. */
-  end: (state: LiveState, nowMs: number) => void
-}
+/** What the live drive tells the log: the runner's observer (live/runner.ts), isolated there. `change` is cheap unless a switch or the arrival is in it. */
+export type DriveObserver = LiveObserver
 
 export interface DriveLogState {
   log: DriveLog

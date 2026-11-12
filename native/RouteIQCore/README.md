@@ -17,8 +17,13 @@ same JSON fixtures straight from `tests/fixtures`.
 | `Signals.swift` | `signals.ts` | `signals.test.ts` |
 | `Rank.swift` | `rank.ts` | `rank.test.ts` |
 | `Select.swift` | `select.ts` | `signals.test.ts` (sameRouteGeometry, resolveSelectedId) |
-| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` (all but the "side streets found by probes" describe, which needs `probe.ts`) |
+| `Reroute.swift` | `reroute.ts` | `reroute.test.ts` with `helpers/driveWorld.ts` |
+| `Probe.swift` | `probe.ts` | `probe.test.ts`, `probeRoutes.test.ts` |
+| `Tracking.swift` | `tracking.ts` | `tracking.test.ts` |
+| `SpeechQueue.swift` | `speechQueue.ts` | `device.test.ts` (speech queue rules) |
+| `Handoff.swift` | `handoff.ts` | `handoff.test.ts` |
 | `Guidance.swift` | `guidance.ts` | `guidance.test.ts` |
+| `Live.swift` | `live.ts` | `live.test.ts` with `helpers/driveWorld.ts` |
 | `Contract.swift` | `contract.ts` (`CORE_CONTRACT_VERSION`) | checked against `docs/contracts/core-contract.json` |
 | `Format.swift` | `format.ts`, `facts.ts` | `routeFacts.test.ts`, `signals.test.ts` (formatSignalCount) |
 | `TestPoints.swift` | `testPoints.ts` | `core.test.ts` |
@@ -48,15 +53,19 @@ What of version 5 is ported (#33, in stages):
   `RerouteState` (with `declined` and `lostAtSec`), `RerouteObservation` (with `baseline` and `drivenSinceM`),
   `RerouteDecision` (with `current`) and every `RerouteCode`, including `route-unconfirmed`,
   `probe-unconfirmed` and `driver-declined`; `declineRoute`, `baselineProbe`, `MatchMeter`.
+- **Types the live drive uses:** `PositionFix`, `TrackingOptions`, `TrackingState`, `SpokenLine`,
+  `CheckProbeMemory`, `DriveProbeBudget` (stage B).
+- **Live drive:** `LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect` (with `LiveStatus`,
+  `LiveSwitch`, `LiveSummary`, `PositionErrorKind`, `RequestPurpose`, `WakeLockStatus`), and
+  `Live.liveStep`, `Live.livePollGate`, `Live.liveView` (stage C).
 
 When the version changes, compare `docs/contracts/core-contract.json` (`declarations`, one line
 per type) with the Swift types. The `history` there lists every version with its hash.
 
 Not ported yet:
 
-- `speechQueue.ts`, `tracking.ts`, `probe.ts`, `handoff.ts` (stage B of #33), and the probe
-  describe of `reroute.test.ts`, which needs `probe.ts`.
-- `live.ts`, the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`): stage C.
+- `driveLog.ts` (#107, contract version 5): the private drive log of predicted against actual
+  times. `LiveSwitch.savingSec`, which it reads, is ported.
 - `places.ts` and `search.ts`: saved places (the `PlaceBook` contract) and search sessions,
   needed when the app gets a Plan screen.
 - `buildDirectionsUrl`'s via points, `radiuses` and `annotations=congestion,duration`
@@ -132,6 +141,13 @@ All are about types, not about decisions:
   given; the TypeScript rounds one.
 - **Route identity.** Swift structs are values, so `rankRoutes` works with positions instead of
   object identity. The result is the same, including for two equal routes.
+- **The live drive** (`Live.swift`). `LiveEvent` and `LiveEffect` are enums with associated
+  values; `type` gives the TS discriminant string. The TS `'kept-previous'` decision code is
+  `LiveDecisionCode.keptPrevious` next to `.reroute(RerouteCode)`. The `requests` and `probes`
+  counts of a `routes` event are `Int?` (the TS rounds a fractional count; Swift cannot be given
+  one). Where the TS compares objects with `===`, the Swift compares the same thing by value (the
+  guidance cursor) or by id (the candidate switched to), and it makes a fresh `TrackedRoute` where
+  the TS caches one by array identity, which was only an optimisation.
 - **The Directions parser** takes a `JSONValue`, which keeps `true` and `1` apart exactly like
   JavaScript `typeof`. The rule "only a literal `true` is a traffic signal" holds.
   `Directions.parse(data:)` decodes through `JSONDecoder`, which is stricter than `JSON.parse`. A
