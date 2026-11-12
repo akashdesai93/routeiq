@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   distanceM,
@@ -22,7 +23,7 @@ import {
   type ReplayPlan,
 } from '../src/drive/replay.ts'
 import { DEFAULT_REPLAY_SETUP, replayPlanOf } from '../src/drive/replaySetup.ts'
-import { createLiveRunner, type RoutesQuery } from '../src/live/runner.ts'
+import { createLiveRunner, type LiveObserver, type RoutesQuery } from '../src/live/runner.ts'
 import { replayLiveOptions } from '../src/useLiveDrive.ts'
 import { at, candidate, nameOf, type RouteName } from './helpers/driveWorld.ts'
 
@@ -146,9 +147,17 @@ async function replayDrive(options: {
   live?: Partial<LiveOptions>
   maxRealSec?: number
   /** Called once per tick with the drive time in seconds. */
-  each?: (tSec: number, api: { runner: ReturnType<typeof createLiveRunner>; state: LiveState; setHidden: (hidden: boolean) => void }) => void
+  each?: (tSec: number, api: { runner: ReturnType<typeof createLiveRunner>; state: LiveState; busy: readonly boolean[]; setHidden: (hidden: boolean) => void }) => void
   /** A request sent at these drive times (seconds, rounded) fails. */
   failAt?: (tSec: number) => boolean
+  /** A request sent at these drive times (seconds, rounded) never answers. */
+  hangAt?: (tSec: number) => boolean
+  /** Handed to the runner as its observer (the drive log's place). */
+  observer?: LiveObserver
+  /** onChange and onBusy throw after doing their job, as a broken screen or clock hold would. */
+  throwingCallbacks?: boolean
+  /** Also called from the runner's onChange: what the screen is given. */
+  onChange?: (state: LiveState) => void
 }) {
   let realMs = 0
   const timers: (() => void)[] = []
@@ -209,14 +218,21 @@ async function replayDrive(options: {
     now: source.now,
     every,
     options: () => ({ ...replayLiveOptions(options.multiplier), ...options.live }),
-    onChange: (state) => states.push(state),
+    onChange: (state) => {
+      states.push(state)
+      options.onChange?.(state)
+      if (options.throwingCallbacks) throw new Error('onChange failed')
+    },
     onBusy: (b) => {
       busy.push(b)
       source.hold(b)
+      if (options.throwingCallbacks) throw new Error('onBusy failed')
     },
+    observer: options.observer,
     routes: (query) => {
       const now = tSec()
       queries.push({ ...query, tSec: now })
+      if (options.hangAt?.(Math.round(now))) return new Promise<never>(() => {})
       if (options.failAt?.(Math.round(now))) return Promise.resolve({ routes: null, message: 'Could not reach Mapbox.' })
       // The made-up service routes from the nearest point of each road, like a real one snaps to a road.
       const offered: RouteCandidate[] = []
@@ -246,6 +262,7 @@ async function replayDrive(options: {
     options.each?.(tSec(), {
       runner,
       state: runner.state(),
+      busy,
       setHidden: (next) => {
         hidden = next
         onVisibility?.(next)
@@ -450,5 +467,168 @@ describe('a whole replayed drive through the live runner', () => {
     drive.runner.dispose()
     expect(drive.wake.at(-1)).toBe('release')
     expect(drive.timers).toHaveLength(0)
+  })
+})
+
+describe('a broken callback never stops or delays the drive', () => {
+  const plan = { ...DEFAULT_REPLAY_PLAN, noiseM: 5, seed: 7 }
+
+  it('an observer and callbacks that throw: the same switch, the same spoken lines, the same checks, and the arrival', async () => {
+    const clean = await replayDrive({ plan, multiplier: 5, world: traffic(100, 360) })
+    // An observer (the drive log's place) that throws at every call, as a log whose storage or code fails would.
+    const calls: string[] = []
+    const drive = await replayDrive({
+      plan,
+      multiplier: 5,
+      world: traffic(100, 360),
+      throwingCallbacks: true,
+      observer: {
+        start: () => {
+          calls.push('start')
+          throw new Error('start failed')
+        },
+        change: () => {
+          calls.push('change')
+          throw new Error('change failed')
+        },
+        end: () => {
+          calls.push('end')
+          throw new Error('end failed')
+        },
+      },
+    })
+    const final = drive.runner.state()
+    expect(final.status).toBe('arrived')
+    expect(final.summary!.switches.map((s) => s.code)).toEqual(['faster-route'])
+    // Not one line said later or left out, not one check moved.
+    expect(drive.said).toEqual(clean.said)
+    expect(drive.queries.map((q) => [q.purpose, Math.round(q.tSec)])).toEqual(clean.queries.map((q) => [q.purpose, Math.round(q.tSec)]))
+    expect(drive.states.map((s) => s.status)).toEqual(clean.states.map((s) => s.status))
+    // The clock hold was let go and the device released, though onBusy threw every time.
+    expect(drive.busy.at(-1)).toBe(false)
+    expect(drive.wake).toEqual(['acquire', 'release'])
+    expect(drive.timers).toHaveLength(0)
+    // Every failure was caught and counted: the start, each change twice (onChange and the observer), each hold.
+    expect(calls[0]).toBe('start')
+    expect(calls.filter((c) => c === 'change')).toHaveLength(drive.states.length)
+    expect(drive.runner.callbackFailures()).toBe(1 + 2 * drive.states.length + drive.busy.length)
+  })
+
+  it('the observer is told each change after the screen is, never before', async () => {
+    const screen: LiveState[] = []
+    const told: LiveState[] = []
+    let ahead = 0
+    const drive = await replayDrive({
+      plan,
+      multiplier: 5,
+      world: traffic(Infinity, 0),
+      maxRealSec: 40,
+      onChange: (state) => screen.push(state),
+      observer: {
+        start: () => {},
+        change: (state) => {
+          told.push(state)
+          if (screen.at(-1) !== state) ahead++
+        },
+        end: () => {},
+      },
+    })
+    expect(told.length).toBeGreaterThan(5)
+    expect(ahead).toBe(0)
+    expect(told).toEqual(drive.states)
+  })
+
+  it('an observer that throws at the end: End still lets go of the GPS, the timers and the screen lock', async () => {
+    const ends: LiveState['status'][] = []
+    const drive = await replayDrive({
+      plan,
+      multiplier: 5,
+      world: traffic(Infinity, 0),
+      maxRealSec: 40,
+      observer: {
+        start: () => {},
+        change: () => {},
+        end: (state) => {
+          ends.push(state.status)
+          throw new Error('storage failed')
+        },
+      },
+    })
+    expect(drive.runner.state().status).toBe('driving')
+    drive.runner.dispose()
+    // Told once, with the drive as it was before it ended.
+    expect(ends).toEqual(['driving'])
+    expect(drive.runner.state().status).not.toBe('driving')
+    expect(drive.wake).toEqual(['acquire', 'release'])
+    expect(drive.timers).toHaveLength(0)
+    expect(drive.runner.callbackFailures()).toBe(1)
+  })
+
+  it('End while a check is out and onBusy throws: the request is let go, and so are the GPS, the timers and the screen lock', async () => {
+    let endedInFlight = false
+    const drive = await replayDrive({
+      plan,
+      multiplier: 5,
+      world: traffic(Infinity, 0),
+      maxRealSec: 40,
+      throwingCallbacks: true,
+      hangAt: (t) => t >= 60,
+      each: (_t, { runner, busy }) => {
+        if (endedInFlight || busy.at(-1) !== true) return
+        endedInFlight = true
+        runner.dispose()
+      },
+    })
+    expect(endedInFlight).toBe(true)
+    expect(drive.busy.at(-1)).toBe(false)
+    expect(drive.wake).toEqual(['acquire', 'release'])
+    expect(drive.timers).toHaveLength(0)
+  })
+
+  it('the page going away is not logged as an end, and a disposed runner tells the observer nothing more', async () => {
+    const told: string[] = []
+    const drive = await replayDrive({
+      plan,
+      multiplier: 5,
+      world: traffic(Infinity, 0),
+      maxRealSec: 40,
+      observer: { start: () => told.push('start'), change: (state) => told.push(state.status), end: () => told.push('end') },
+    })
+    drive.runner.dispose(false)
+    const atDispose = told.length
+    expect(told).not.toContain('end')
+    // Anything that still reaches the disposed runner may change its state, but is not passed on.
+    const statesBefore = drive.states.length
+    drive.runner.start(at(20_000, 0))
+    drive.runner.dispose()
+    expect(drive.states.length).toBeGreaterThan(statesBefore)
+    expect(told.slice(atDispose)).toEqual([])
+  })
+})
+
+describe('every callback the live drive loop calls is isolated (the guard for the whole class)', () => {
+  const runnerSource = readFileSync(new URL('../src/live/runner.ts', import.meta.url), 'utf8')
+  const deps = /export interface LiveRunnerDeps \{([\s\S]*?)\n\}/.exec(runnerSource)![1]!
+  // The callbacks and observers among the runner's deps: onX, anything optional that is a function, and an observer.
+  const callbacks = [...deps.matchAll(/^ {2}readonly (\w+)(\?)?: (.*)$/gm)]
+    .filter(([, name, optional, type]) => /^on[A-Z]/.test(name!) || /observer/i.test(type!) || (optional === '?' && type!.startsWith('(')))
+    .map(([, name]) => name!)
+
+  it('finds them: onChange, onBusy and the observer', () => {
+    expect(callbacks).toEqual(expect.arrayContaining(['onChange', 'onBusy', 'observer']))
+  })
+
+  it('the runner calls each one only inside isolated(...), so a throw is caught and counted', () => {
+    // Whitespace and line breaks do not matter: a call split over lines is still a call.
+    const flat = runnerSource.replace(/\s*\.\s*/g, '.').replace(/\s+/g, ' ')
+    const bare = callbacks.filter((name) => flat.split(`deps.${name}`).length !== flat.split(`isolated(() => deps.${name}`).length)
+    expect(bare).toEqual([])
+    // Nor can deps be renamed or taken apart, which would hide a bare call from the check above.
+    expect(flat).not.toMatch(/=\s*deps\b(?!\.)|\(\s*deps\s*\)|\{[^}]*\}\s*=\s*deps/)
+  })
+
+  it('the hook hands the drive log to the runner and never calls it itself', () => {
+    const hook = readFileSync(new URL('../src/useLiveDrive.ts', import.meta.url), 'utf8')
+    expect(hook).not.toMatch(/observer\??\.(start|change|end)\(/)
   })
 })
