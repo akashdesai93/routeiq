@@ -3,7 +3,7 @@ import XCTest
 import RouteIQCore
 
 // Mirrors tests/signals.test.ts: the signalsOnRoute, limited-access spans,
-// clusterSignals, rule (c), withSignalCounts (three describes),
+// clusterSignals, rule (c), withSignalCounts (two describes),
 // geometryHash/routeIdFromGeometry and sameRouteGeometry/resolveSelectedId
 // describes. The signalFeatures describe and the one "map draws it once"
 // assertion are map-layer code, not core, and are not mirrored here. The geo
@@ -49,11 +49,10 @@ final class SignalsTests: XCTestCase {
     }
 
     /// Signal data with the primary tiles loaded for every one of the given routes.
-    private func loadedFor(_ routes: [RouteCandidate], _ primary: [SignalPoint], _ gapFill: [SignalPoint]? = nil) -> SignalData {
+    private func loadedFor(_ routes: [RouteCandidate], _ primary: [SignalPoint]) -> SignalData {
         SignalData(
             primary: primary,
-            primaryTileIds: Set(routes.flatMap { Signals.signalTilesForRoute($0.geometry) }),
-            gapFill: gapFill
+            primaryTileIds: Set(routes.flatMap { Signals.signalTilesForRoute($0.geometry) })
         )
     }
 
@@ -84,26 +83,24 @@ final class SignalsTests: XCTestCase {
 
     func test_signalsOnRoute_documentsItsDefaultsInOnePlace() {
         // The three rule distances (group 60 m, route 30 m, intersection 40 m), then the
-        // gap-fill distance, the along-route merge and the freeway margin.
+        // along-route merge and the freeway margin.
         let d = SignalMatchOptions.default
         XCTAssertEqual(d, SignalMatchOptions(
             clusterRadiusM: 60,
             toleranceM: 30,
             intersectionRadiusM: 40,
-            gapFillRadiusM: 60,
             mergeRadiusM: 40,
             limitedAccessMarginM: 30
         ))
         XCTAssertEqual(d.clusterRadiusM, 60)
         XCTAssertEqual(d.toleranceM, 30)
         XCTAssertEqual(d.intersectionRadiusM, 40)
-        XCTAssertEqual(d.gapFillRadiusM, 60)
         XCTAssertEqual(d.mergeRadiusM, 40)
         XCTAssertEqual(d.limitedAccessMarginM, 30)
     }
 
     func test_signalsOnRoute_countsAPointJustInsideTheToleranceAndNotOneJustOutside() {
-        // The tolerance is 30 m now (it was 20 m when the city list was the only source).
+        // The tolerance is 30 m.
         let inside = signal("inside", 29.9, 300)
         let outside = signal("outside", -30.1, 700)
         let found = Signals.signalsOnRoute(north1km, [outside, inside])
@@ -534,7 +531,7 @@ final class SignalsTests: XCTestCase {
 
     func test_withSignalCounts_saysNoneWithNoCountWhenNothingAtAllIsKnownAboutARoute() {
         let inside = insideRoute
-        let nothing = SignalData(primary: [], primaryTileIds: [], gapFill: nil)
+        let nothing = SignalData(primary: [], primaryTileIds: [])
         XCTAssertEqual(Signals.withSignalCounts([inside], nothing).routes.map { countAndCoverage($0) }, [cc(nil, SignalCoverage.none)])
         // Stray points do not help: without its tile loaded, the data says nothing about what else is there.
         var stray = nothing
@@ -542,9 +539,8 @@ final class SignalsTests: XCTestCase {
         XCTAssertEqual(Signals.withSignalCounts([inside], stray).routes.map { countAndCoverage($0) }, [cc(nil, SignalCoverage.none)])
     }
 
-    // Replaces "leaves the count unknown for a route that leaves the area the data covers": the box
-    // around the city list is gone. What matters now is whether the tiles a route needs were loaded,
-    // and a route with some of them missing gets a partial count rather than none.
+    // What matters is whether the tiles a route needs were loaded: a route with some of them
+    // missing gets a partial count rather than none.
     func test_withSignalCounts_marksARoutePartialNeverZeroAsIfKnownWhenATileItNeedsIsMissing() {
         let inside = insideRoute
         // 50 km north: far outside the tiles loaded for the short route.
@@ -604,69 +600,6 @@ final class SignalsTests: XCTestCase {
         XCTAssertEqual(wide.routes.first?.signalCount, 3)
     }
 
-    // MARK: - describe('withSignalCounts: primary data first, gap-fill data only where it has nothing')
-
-    /// Two heads of one junction at 300 m, from the primary source.
-    private var gapPrimary: [SignalPoint] { [signal("osm-east", 10, 300), signal("osm-west", -10, 300)] }
-
-    func test_withSignalCountsGapFill_ignoresAGapFillPointNearAPrimaryIntersectionAndAddsOneFarFromAny() {
-        let inside = insideRoute
-        let primary = gapPrimary
-        let city = [
-            signal("city-same-junction", 5, 320),
-            signal("city-missing-from-primary", 0, 700),
-            // Nowhere near the route: makes no difference to anything.
-            signal("city-elsewhere", 20_000, 20_000),
-        ]
-        let counted = Signals.withSignalCounts([inside], loadedFor([inside], primary, city))
-        XCTAssertEqual(counted.routes.map { countAndCoverage($0) }, [cc(2, .full)])
-        XCTAssertEqual(
-            counted.signalsByRouteId["inside"]?.map { [$0.id, $0.source.rawValue] },
-            [["osm-east", "primary"], ["city-missing-from-primary", "gapFill"]]
-        )
-        // Gap-fill only ever adds: the primary intersection is exactly what it is without the city list.
-        let alone = Signals.withSignalCounts([inside], loadedFor([inside], primary)).signalsByRouteId["inside"] ?? []
-        XCTAssertEqual(counted.signalsByRouteId["inside"]?.first, alone.first)
-        XCTAssertEqual(alone.count, 1)
-    }
-
-    func test_withSignalCountsGapFill_measuresNearFromEveryPointOfThePrimaryIntersection_60mByDefault() {
-        let inside = insideRoute
-        let single = [signal("osm", 0, 300)]
-        func countAt(_ northM: Double, _ gapFillRadiusM: Double? = nil) -> Int? {
-            let options = gapFillRadiusM.map { SignalMatchOptions(gapFillRadiusM: $0) } ?? SignalMatchOptions()
-            return Signals.withSignalCounts(
-                [inside],
-                loadedFor([inside], single, [signal("city", 0, northM)]),
-                options: options
-            ).routes.first?.signalCount
-        }
-        let norths: [Double] = [359, 361]
-        XCTAssertEqual(norths.map { countAt($0) }, [1, 2])
-        XCTAssertEqual(countAt(400, 120), 1)
-        // The along-route merge (40 m) is still the last word: with no gap-fill distance at all,
-        // a city point 30 m up the road is the same stop.
-        XCTAssertEqual(countAt(330, 0), 1)
-    }
-
-    func test_withSignalCountsGapFill_neverLetsTheGapFillDataDecideTheCoverage() {
-        let inside = insideRoute
-        let town = [signal("a", 0, 300), signal("b", 0, 800)]
-        func resultOf(_ data: SignalData) -> [CountAndCoverage] {
-            Signals.withSignalCounts([inside], data).routes.map { countAndCoverage($0) }
-        }
-        // A route nowhere near the city's points is still fully covered by its tiles
-        // (the old rule called anything outside the box around the city list unknown).
-        XCTAssertEqual(resultOf(loadedFor([inside], town, [signal("city", 300_000, 300_000)])), [cc(2, .full)])
-        // The city list failing to load changes nothing either.
-        XCTAssertEqual(resultOf(loadedFor([inside], town, nil)), [cc(2, .full)])
-        // City list only, no tile loaded: a lower bound, so partial, never full.
-        XCTAssertEqual(
-            resultOf(SignalData(primary: [], primaryTileIds: [], gapFill: [signal("city", 0, 300)])),
-            [cc(1, .partial)]
-        )
-    }
-
     // MARK: - describe('withSignalCounts across tiles')
 
     // A road running east along latitude 35.25, across the tile edge at longitude -80.8.
@@ -688,7 +621,7 @@ final class SignalsTests: XCTestCase {
         let east = osm(2, -80.79985)
         XCTAssertEqual([Tiles.tileIdAt(west.position), Tiles.tileIdAt(east.position)], [westTile, eastTile])
         let crossing = route("crossing", road)
-        let both = SignalData(primary: [west, east], primaryTileIds: [westTile, eastTile], gapFill: nil)
+        let both = SignalData(primary: [west, east], primaryTileIds: [westTile, eastTile])
         let counted = Signals.withSignalCounts([crossing], both)
         XCTAssertEqual(counted.routes.map { countAndCoverage($0) }, [cc(1, .full)])
         XCTAssertEqual(counted.signalsByRouteId["crossing"]?.first?.mergedIds, ["osm-1", "osm-2"])
@@ -697,7 +630,7 @@ final class SignalsTests: XCTestCase {
         twice.primary = [west, east, west, east]
         XCTAssertEqual(Signals.withSignalCounts([crossing], twice).routes.map { countAndCoverage($0) }, [cc(1, .full)])
         // With only the west tile loaded, the half that is known counts once, and the count is partial.
-        let half = SignalData(primary: [west], primaryTileIds: [westTile], gapFill: nil)
+        let half = SignalData(primary: [west], primaryTileIds: [westTile])
         XCTAssertEqual(Signals.withSignalCounts([crossing], half).routes.map { countAndCoverage($0) }, [cc(1, .partial)])
     }
 
@@ -716,7 +649,7 @@ final class SignalsTests: XCTestCase {
         crossing.providerSignalCount = 4
         let primary = [osm(7, -80.807)]
 
-        let westOnly = SignalData(primary: primary, primaryTileIds: [westTile], gapFill: nil)
+        let westOnly = SignalData(primary: primary, primaryTileIds: [westTile])
         let counted = Signals.withSignalCounts([crossing], westOnly)
         XCTAssertEqual(counted.routes.map { countAndCoverage($0) }, [cc(2, .partial)])
         XCTAssertEqual(counted.signalsByRouteId["crossing"]?.map(\.source), [SignalSource.primary, SignalSource.fallback])
@@ -729,13 +662,26 @@ final class SignalsTests: XCTestCase {
         XCTAssertEqual(Signals.withSignalCounts([crossing], both).routes.map { countAndCoverage($0) }, [cc(1, .full)])
 
         // No tile loaded: every flag stands in, grouped like any other signal points. Still partial.
-        let noData = SignalData(primary: [], primaryTileIds: [], gapFill: nil)
+        let noData = SignalData(primary: [], primaryTileIds: [])
         XCTAssertEqual(Signals.withSignalCounts([crossing], noData).routes.map { countAndCoverage($0) }, [cc(3, .partial)])
 
-        // A gap-fill point at a flagged junction is the same junction, not one more.
-        var withCity = westOnly
-        withCity.gapFill = [SignalPoint(id: "city-1", position: LngLat(-80.79495, 35.2501), name: "A_B")]
-        XCTAssertEqual(Signals.withSignalCounts([crossing], withCity).routes.map { countAndCoverage($0) }, [cc(2, .partial)])
+        // An empty intersection list is still something known: partial, and a partial 0 reads as unknown.
+        var bareRoute = crossing
+        bareRoute.intersections = []
+        guard let bare = Signals.withSignalCounts([bareRoute], noData).routes.first else { return XCTFail("no route") }
+        XCTAssertEqual(countAndCoverage(bare), cc(0, .partial))
+        XCTAssertEqual(Format.formatSignalCount(bare.signalCount, bare.signalCoverage), "Signals: unknown")
+    }
+
+    func test_withSignalCountsAcrossTiles_countsAJunctionOnceWhenAPrimaryPointAndAProviderFlagInTheMissingTileMeetAtIt() {
+        // A junction right on the tile edge: OpenStreetMap has its west head, Mapbox flags it 14 m east.
+        var crossing = route("crossing", road)
+        crossing.intersections = [RouteIntersection(location: LngLat(-80.79985, 35.25), signal: true)]
+        let westOnly = SignalData(primary: [osm(1, -80.80015)], primaryTileIds: [westTile])
+        let counted = Signals.withSignalCounts([crossing], westOnly)
+        XCTAssertEqual(counted.routes.map { countAndCoverage($0) }, [cc(1, .partial)])
+        // The most trusted source names it.
+        XCTAssertEqual(counted.signalsByRouteId["crossing"]?.map(\.source), [SignalSource.primary])
     }
 
     // MARK: - describe('geometryHash and routeIdFromGeometry')

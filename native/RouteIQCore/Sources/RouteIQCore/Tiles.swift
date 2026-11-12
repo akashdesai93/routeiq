@@ -95,9 +95,7 @@ public enum Tiles {
         func addBox(_ lngA: Double, _ latA: Double, _ lngB: Double, _ latB: Double) {
             let south = min(latA, latB) - padLat
             let north = max(latA, latB) + padLat
-            // A degree of longitude shrinks toward the poles; the floor keeps the padding finite there.
-            let widest = max(abs(south), abs(north))
-            let padLng = padLat / max(0.01, cos(min(89.9, widest) * Double.pi / 180))
+            let padLng = Geo.lngDegreesFor(padLat, max(abs(south), abs(north)))
             var x0 = tenthsBelow(min(lngA, lngB) - padLng)
             var x1 = tenthsBelow(max(lngA, lngB) + padLng)
             // The TypeScript loops over the raw ranges and wraps or clamps each
