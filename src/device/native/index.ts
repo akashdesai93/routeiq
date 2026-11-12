@@ -26,6 +26,8 @@ export interface NativeDevice {
   readonly every: (ms: number, fn: () => void) => () => void
   /** True when the positions are a test drive's (made up), not the GPS's. */
   readonly simulated: boolean
+  /** A drive check was decided: its outcome goes into the diagnostics (DriveDiagnostics.checked). */
+  readonly checked: (code: string, routes: number | null, savingSec: number | null) => void
 }
 
 export interface NativeDeviceOptions {
@@ -50,6 +52,7 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
   const saver = lastDriveSaver(log, options.store ?? localTextStore(), options.timers?.now)
   return {
     simulated: simulate !== null,
+    checked: (code, routes, faster) => log.checked(code, routes, faster),
     source: {
       start(onFix, onError) {
         log.gps(true)
