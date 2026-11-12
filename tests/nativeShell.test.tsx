@@ -2,6 +2,7 @@ import { renderToString } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_LIVE_OPTIONS, type LiveState, type PositionFix, type RouteCandidate } from '../src/core/index.ts'
 import { checkToken, tokenErrorHelp } from '../src/config.ts'
+import { sessionNow } from '../src/device/clock.ts'
 import { currentPosition, type LocationErrorKind } from '../src/device/geolocation.ts'
 import { pageVisibility, type PageVisibility } from '../src/device/visibility.ts'
 import { nativeDeviceFor } from '../src/device/native/index.ts'
@@ -126,6 +127,29 @@ describe('native position source', () => {
     expect(calls).toEqual(['startLocation', 'stopLocation'])
     emit('fix', { lng: -80.84, lat: 35.22 })
     expect(fixes).toHaveLength(3)
+  })
+
+  it('by default stamps fixes with the session clock, the one the drive runs on, which never steps back (#30)', () => {
+    const { plugin, emit } = fakePlugin()
+    let wall = 1_800_000_000_000
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => wall)
+    try {
+      const fixes: PositionFix[] = []
+      const stop = nativePositionSource(plugin).start((f) => fixes.push(f), () => {})
+      for (const step of [1000, 1000, -30_000, 1000]) {
+        wall += step
+        emit('fix', { lng: -80.84, lat: 35.22, accuracy: 6 })
+      }
+      stop()
+      const times = fixes.map((f) => f.timeMs)
+      for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!)
+      expect(times[1]! - times[0]!).toBe(1000)
+      // The same clock as the drive's: a fix stamped now is not newer than the session's own time.
+      expect(sessionNow()).toBeGreaterThanOrEqual(times.at(-1)!)
+      expect(sessionNow() - times.at(-1)!).toBeLessThan(5)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('a fix that is not a place on Earth is an error, not a position', () => {

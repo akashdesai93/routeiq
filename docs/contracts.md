@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 3** (Nov 12, 2026: version 2 plus the reroute changes of #74 and #68). The Swift port is being brought up to it (#33);
+**Current version: 4** (Nov 12, 2026: version 3 plus the live drive's robustness fixes, #29, #30, #71). The Swift port is being brought up to it (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -107,9 +107,9 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 3 | by definition |
-| Swift port (`native/RouteIQCore`) | 3, for everything but the place book: routes, signal tiles and bundle, reroute engine, live drive (#33) | place book (`places.ts`) not yet; see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 3 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| Web app (`src/`) | 4 | by definition |
+| Swift port (`native/RouteIQCore`) | 4, for everything but the place book: routes, signal tiles and bundle, reroute engine, live drive (#33) | place book (`places.ts`) not yet; see its README and #33 |
+| iPhone shell plugin (`native/shell`) | 4 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
@@ -125,3 +125,8 @@ the declarations that changed.
   looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
   age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
   its length). For the port: see the Swift-port note on PR #109.
+- **4** (Nov 12, 2026, #29, #30, #71): the live drive's robustness fixes.
+  `LiveOptions.requestTimeoutSec` (a request not answered in time is a failed answer),
+  `LiveState.pickedAtMs` and the Start event's `routeFetchedAtMs` (a drive started on the
+  plan's route counts the plan's answer as its last check). No field removed or renamed; the
+  Swift port is not affected beyond these live-drive shapes.
