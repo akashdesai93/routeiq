@@ -16,6 +16,8 @@ import {
   afterRequest,
   afterSwitch,
   cruiseSpeedMps,
+  simulatedProbeAllowance,
+  simulatedTimeLeftSec,
   DEFAULT_DRIVE_SETTINGS,
   DRIVE_START,
   formatSimClock,
@@ -62,6 +64,22 @@ describe('simulated clock', () => {
     expect(cruiseSpeedMps({ distanceM: 30_000, durationSec: 0 })).toBe(13)
     expect(cruiseSpeedMps({ distanceM: 10, durationSec: 2_000 })).toBe(1.5)
     expect(cruiseSpeedMps({ distanceM: 900_000, durationSec: 100 })).toBe(45)
+  })
+
+  it('the probes keep back the plain checks until the simulated arrival, at the speed driven now (#183)', () => {
+    // 27 km left at 9.375 m/s (a 30-minute plan driven 1.6 times slower): 48 minutes.
+    expect(simulatedTimeLeftSec(30_000, 3_000, 9.375)).toBeCloseTo(2880, 6)
+    expect(simulatedTimeLeftSec(30_000, 31_000, 10)).toBe(0)
+    expect(simulatedTimeLeftSec(30_000, 3_000, 0)).toBeNull()
+    expect(simulatedTimeLeftSec(NaN, 3_000, 10)).toBeNull()
+    const settings = { pollIntervalSec: 60, maxRequests: 60 }
+    // 48 minutes left: 72 kept back, more than the whole budget, so no probe.
+    expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 9.375 })).toBe(0)
+    // At the planned speed (20 m/s: 22.5 minutes, 34 kept back) there is room.
+    expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(1)
+    // 34 kept back: the 26th request has 60 - 26 - 1 - 34 = -1, none.
+    expect(simulatedProbeAllowance({ requestsUsed: 26, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 20 })).toBe(0)
+    expect(simulatedProbeAllowance({ requestsUsed: 2, probesUsed: 0 }, settings, { routeLengthM: 30_000, alongM: 3_000, speedMps: 0 })).toBe(0)
   })
 
   it('shows simulated time as a stopwatch', () => {

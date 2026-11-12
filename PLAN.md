@@ -298,6 +298,16 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       route being driven was not among Mapbox's answers and the path check was not made).
       The back-off has no time or distance decay, and it watches only the route being driven:
       a side street that clears (a train crossing) does not re-arm it.
+      11d (#183, desk-drive findings): the drive never goes blind. A probe goes out only
+      from what is left after one request per poll interval until the expected arrival
+      (times `arrivalReserve`, 1.5) is kept back for the plain checks
+      (`plainCheckReserve`, `checkProbeAllowance`); the time left is the view's own
+      (`remainingDriveSec`). e2e: "when the side streets keep losing, they never use up
+      the checks before I arrive". Open for later: the total budget (`maxRequests`, 60)
+      does not grow with a longer planned drive, so a drive of over an hour still runs
+      out of checks without any probe (a cost decision for the owner); back-off after
+      probes that keep losing, and the reason a probe was skipped in the diagnostics,
+      follow in their own PR.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

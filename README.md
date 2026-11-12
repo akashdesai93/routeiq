@@ -1007,8 +1007,21 @@ lead distance, the cooldown, no return. No threshold changed.
   check now offers.
 - **Budget.** Probes share the drive's request budget (`maxRequests`, 60) and never take
   the request a check's path check may need: a probe goes out only while, after the check
-  itself, one request would still be left for that path check (`checkProbeAllowance`). At
-  most `requestsPerDrive` (20) probes a drive, so most of the budget stays for the checks.
+  itself, one request would still be left for that path check (`checkProbeAllowance`).
+- **Never blind.** Nor do probes take what the plain checks until the arrival need (#183):
+  before a probe, one request per poll interval of the expected time left (the arrival
+  the drive view shows, `remainingDriveSec`), times `arrivalReserve` (1.5), is kept back
+  (`plainCheckReserve`), and probes spend only what is left after that. With 30 minutes
+  left and a check a minute, 45 requests are kept back. When the time left is not known,
+  no probe goes out (an unknown reserve is never zero). A desk drive on a real corridor
+  had spent 54 of its 60 requests on probing checks and drove the last 5.5 minutes with
+  no checks at all. The price: with 60 requests, a drive with more than about 38 minutes
+  left has no room for a probe yet, and the room then grows by about half a request a
+  minute, so on a long drive the side streets are tried mostly in its second half. The
+  simulated drive keeps back the same, for its own time left (the line ahead at the speed
+  it now drives, `simulatedTimeLeftSec`).
+- **Per drive.** At most `requestsPerDrive` (20) probes a drive, so most of the budget stays
+  for the checks.
   A search for a new route (off the route) and the first route never probe. Nothing to
   probe (under 3 km left, freeway only, a route not held up) costs nothing. Every request
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
@@ -1047,6 +1060,7 @@ lead distance, the cooldown, no return. No threshold changed.
 | `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
 | `losingChecks` | 3 | Losses in a row (a side street found, compared like for like, not holding up) after which the checks stop probing |
 | `rearmSlowdownChange` | 0.1 | How much the slowdown ahead (fresh time over typical) must change, either way, to end the back-off |
+| `arrivalReserve` | 1.5 | Before a probe, this many requests per poll interval until the expected arrival are kept back for the plain checks |
 
 What a check costs: 1 request, plus 1 for the path check when the route being driven is
 not among the fresh routes, plus 0 or 1 probe, plus 1 path check after a probe that found
