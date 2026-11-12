@@ -1,0 +1,55 @@
+name: Gates re-check
+
+# Keeps the PR gates in the Gate's `required` job current (scripts/orch/gates.mjs,
+# docs/orchestrator.md). `required` reads labels, body and main when it runs; this re-runs just
+# that job (seconds, not the whole Gate) when
+#   - a PR gains or loses needs-phone, phone-verified, do-not-merge or needs-human, or its body
+#     is edited (PHONE CHECK NEEDED), and
+#   - main moves on in an area an open PR also changes, so a PR whose checks ran before that
+#     change turns red until its branch is updated (case (d) of the first night).
+# A Gate run still in progress needs nothing: its `required` reads the gates when it gets there.
+# About 15 s per event on ubuntu-latest.
+on:
+  pull_request:
+    types: [labeled, unlabeled, edited]
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: gates-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  recheck:
+    if: >-
+      github.event_name == 'push' || github.event.action == 'edited' ||
+      contains(fromJSON('["needs-phone","phone-verified","do-not-merge","needs-human"]'), github.event.label.name)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # re-runs the required job of a Gate run
+      contents: read # sparse checkout of scripts/orch; compares commits
+      pull-requests: read # the open PRs and their files
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/orch
+          sparse-checkout-cone-mode: true
+
+      - name: Re-check this PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node scripts/orch/gates.mjs --recheck-pr "$PR"
+
+      - name: Re-check open PRs in the areas this push changed
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: node scripts/orch/gates.mjs --recheck-main --before "$BEFORE" --after "$AFTER"
