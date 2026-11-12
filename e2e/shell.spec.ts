@@ -165,7 +165,8 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
   expect(spoken.slice(0, 3)).toEqual([
     'RouteIQ started',
     'You are off the route. Finding a new one.',
-    expect.stringMatching(/^New route\. \d+ minutes to your destination\.$/),
+    // And on to the next turn, at once (#183).
+    expect.stringMatching(/^New route\. \d+ minutes to your destination\. In [\d.]+ miles?, continue onto Main Corridor\.$/),
   ])
   expect(spoken.filter((line) => line === 'You are off the route. Finding a new one.')).toHaveLength(1)
   expect(spoken.at(-1)).toMatch(/^You have arrived\./)

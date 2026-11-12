@@ -946,6 +946,53 @@ describe('off the route', () => {
     expect(s.view().offRoute).toBe(false)
   })
 
+  it('after a new route, the next turn is said at once, not only half a mile before it (#183)', () => {
+    // The new route runs 8 km from the car to its one turn: as on a freeway, a long silence
+    // would follow "New route" until half a mile before that turn.
+    const longStretch = (xM: number, yM: number): RouteCandidate => {
+      const c = fromHere(xM, yM)
+      const turnM = 8000
+      return {
+        ...c,
+        geometry: [at(xM, yM), at(xM + turnM, yM), at(xM + turnM, yM + 2000)],
+        distanceM: turnM + 2000,
+        guidance: [
+          { atDistanceM: 0, location: at(xM, yM), type: 'depart', modifier: null, primaryText: 'Long Road', secondaryText: null, announcements: [], synthesized: true },
+          {
+            atDistanceM: turnM,
+            location: at(xM + turnM, yM),
+            type: 'turn',
+            modifier: 'left',
+            primaryText: 'Last Road',
+            secondaryText: null,
+            announcements: synthesizeAnnouncements('Turn left onto Last Road.', 0, turnM),
+            synthesized: true,
+          },
+          { atDistanceM: turnM + 2000, location: at(xM + turnM, yM + 2000), type: 'arrive', modifier: null, primaryText: 'Your destination', secondaryText: null, announcements: [], synthesized: true },
+        ],
+      }
+    }
+    const s = driving()
+    cruise(s, 65)
+    for (const t of [66, 67, 68, 69, 70]) {
+      s.setTime(t)
+      s.fix(15 * t, 120)
+    }
+    expect(s.state.request).toMatchObject({ purpose: 'replan' })
+    s.setTime(71)
+    const applied = s.answer([longStretch(1050, 120)])
+    // One line, so the voice's queue cannot drop the turn behind the new-route line; the banner shows it word for word.
+    expect(s.spoken()).toEqual(['You are off the route. Finding a new one.', 'New route. 18 minutes to your destination. In 4.9 miles, turn left onto Last Road.'])
+    expect(applied.filter((e) => e.type === 'speak')).toHaveLength(1)
+    expect(s.state.switchBanner).toMatchObject({ text: s.spoken().at(-1), turnInM: null })
+    // And the turn's own prompts still come when they are due, once each.
+    for (let t = 72; t <= 600; t++) {
+      s.setTime(t)
+      s.fix(1050 + 15 * (t - 71), 120)
+    }
+    expect(s.spoken().slice(2)).toEqual(['In 0.4 miles, turn left onto Last Road.', 'Turn left onto Last Road.'])
+  })
+
   it('replans even when a check was sent a second ago, dropping that check', () => {
     const s = driving()
     cruise(s, 57)

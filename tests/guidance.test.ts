@@ -3,6 +3,8 @@ import {
   armGuidance,
   arrowKind,
   dueAnnouncement,
+  nextManeuverLine,
+  NEXT_TURN_SOON_M,
   nextTurn,
   synthesizeAnnouncements,
   type GuidanceCursor,
@@ -215,6 +217,41 @@ describe('what to say', () => {
     expect(said(STEPS, [0], armGuidance(STEPS, 0, true))).toHaveLength(1)
     // No guidance: nothing to say, and nothing breaks.
     expect(dueAnnouncement(undefined, armGuidance(undefined, 0, true), 500).say).toBeNull()
+  })
+})
+
+describe('the next turn, right after a new route (#183)', () => {
+  it('names the next maneuver with the distance to it, from its own instruction', () => {
+    // 100 m along: Second Road's first line (at 0) is behind, its next one 500 m ahead.
+    expect(nextManeuverLine(STEPS, 100)).toEqual({ text: 'In 0.5 miles, turn left onto Second Road.', distanceToManeuverM: 900 })
+    // On Second Road, a long way before Third Road: its first line is 900 m ahead.
+    expect(nextManeuverLine(STEPS, 1100)).toEqual({ text: 'In 1.1 miles, turn right onto Third Road.', distanceToManeuverM: 1900 })
+  })
+
+  it('says nothing when the next maneuver speaks for itself in a moment, or is the arrival', () => {
+    // Third Road's next line is due at 2200 m: 300 m or less away is "in a moment".
+    expect(nextManeuverLine(STEPS, 2200 - NEXT_TURN_SOON_M)).toBeNull()
+    expect(nextManeuverLine(STEPS, 2200 - NEXT_TURN_SOON_M - 1)).toEqual({ text: 'In 0.6 miles, turn right onto Third Road.', distanceToManeuverM: 1101 })
+    // Second Road's last line (920 m) is near too.
+    expect(nextManeuverLine(STEPS, 700)).toBeNull()
+    expect(nextManeuverLine(STEPS, 3100)).toBeNull()
+    expect(nextManeuverLine(undefined, 0)).toBeNull()
+    expect(nextManeuverLine(STEPS, NaN)).toBeNull()
+  })
+
+  it('never names a maneuver beside or behind the car, and never puts a distance in front of one', () => {
+    // Every line of Second Road is behind the car, and the turn is 5 m ahead or 10 m behind: nothing ("In 0 feet" would be wrong).
+    expect(nextManeuverLine(STEPS, 995)).toBeNull()
+    expect(nextManeuverLine(STEPS, 1010)).toBeNull()
+    // Only the bare instruction takes a distance: a step whose last line has one, or opens the route, gets nothing.
+    const only = (text: string): GuidanceStep[] => [
+      STEPS[0]!,
+      { ...STEPS[1]!, announcements: [{ atDistanceM: 0, text }] },
+      STEPS[3]!,
+    ]
+    expect(nextManeuverLine(only('In a quarter mile, turn left onto Second Road.'), 100)).toBeNull()
+    expect(nextManeuverLine(only('Drive east on First Road. Then, in half a mile, turn left onto Second Road.'), 100)).toBeNull()
+    expect(nextManeuverLine(only('Turn left onto Second Road.'), 100)).toEqual({ text: 'In 0.5 miles, turn left onto Second Road.', distanceToManeuverM: 900 })
   })
 })
 
