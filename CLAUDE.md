@@ -141,23 +141,37 @@ Read both before calling a PR done, and triage each comment or alert:
 ## Task list and the autonomous loop
 
 GitHub issues on `akashdesai93/routeiq` are the task list. The labels are `ready`,
-`in-progress`, `blocked`, `needs-human`, `triage`, `review`, `p1`–`p3` and `area:*`.
+`in-progress`, `blocked`, `needs-human`, `triage`, `review`, `p1`–`p3` and `area:*`; on PRs
+also `needs-phone`, `phone-verified` and `do-not-merge`, which the gate enforces
+(`docs/orchestrator.md`, Labels).
 `/loop /work-loop` runs autonomously. Each iteration syncs the board, claims the top
 `ready` issue, builds it in its own worktree on `claude/issue-N-*`, verifies it and opens
 a PR. When nothing is ready, it files new `triage` issues instead. Nobody pushes to
-`main` (it is protected) and loops never merge their own PRs: the orchestrator reviews and merges (`/pr-watch`). Rules: `.claude/skills/work-loop/SKILL.md`.
+`main` (it is protected) and loops never merge their own PRs: the reviewer role (or the
+orchestrator) reviews and lands them (`/pr-watch`). Rules: `.claude/skills/work-loop/SKILL.md`.
 
 ## Coordination (several sessions at once)
 
-- **Orchestrator:** the CLI session started in `C:\Users\akash\dev` (its name is on #17, currently `dev-18`). It keeps
-  the board up to date, reviews and merges PRs (`/pr-watch`), sends out work, and reports
-  to the owner. Other sessions don't merge.
-- **Status board:** pinned issue #17. Every session posts with `/status` when it starts,
-  ships, gets blocked or stops, and at least once an hour while working.
+**The operating model is `docs/orchestrator.md`:** the roles and what each may do, the
+labels, the status and heartbeat formats, the gates, the failure modes and the takeover
+procedure. Read it before coordinating, reviewing or landing anything. A session is
+dispatched with a role prompt from `.claude/orch/roles/` (`node scripts/orch/prompt.mjs`),
+and every role follows `.claude/orch/rules.md`. `node scripts/orch/state.mjs` rebuilds the
+whole picture from GitHub alone.
+
+- **Orchestrator:** the local CLI session on the owner's PC started in `C:\Users\akash\dev`.
+  Its name is in the `heartbeat: orchestrator` comment on #17, which it edits every tick. It
+  talks to the owner, sends out work and does what cloud sessions cannot. The reviewer role
+  lands PRs; other sessions don't merge. When its heartbeat is stale, the understudy routine
+  keeps the cloud side moving and any fresh session can take over (`docs/orchestrator.md`, Takeover).
+- **Status board:** pinned issue #17. Its body is written by `.github/workflows/board.yml`;
+  nobody edits it by hand. Every session posts with `/status` (the format is in
+  `docs/orchestrator.md`, Formats) when it starts, ships, gets blocked or stops, and at least
+  once an hour while working.
 - **Check in on start (required, local sessions):** the first thing any session working on RouteIQ does is
   send the orchestrator a 5-line status (goal, branch/worktree, files you touch, done, next)
   with SendMessage. Find it in `ListAgents`: it's the CLI session whose cwd is
-  `C:\Users\akash\dev`, and its current name is on #17. Message it again when you ship,
+  `C:\Users\akash\dev`, and its current name is in the heartbeat comment on #17. Message it again when you ship,
   get blocked or stop. The fleet mod also greets new RouteIQ sessions automatically.
 - **Before editing:** run `mcp__fleet__roster` (the fleet mod) or `ListAgents` to see who
   else is in the repo, and `mcp__fleet__brief <id>` to read their context. Work in your
@@ -167,27 +181,33 @@ a PR. When nothing is ready, it files new `triage` issues instead. Nobody pushes
   A PR merges only when the single required check, **`required`**, is green. It is the last
   job of `.github/workflows/gate.yml`, which runs on every PR: the web checks (typecheck,
   lint, tests, build, bundle-size budget) and the e2e scenarios always, the Swift tests and
-  the macOS builds when their paths change. The branch must also be up to date with `main`
-  (`gh pr update-branch N`), and review threads must be resolved. Details and the exact
-  settings: `docs/branch-protection.md`.
+  the macOS builds when their paths change. `required` also fails while the PR has
+  `do-not-merge`, `needs-human`, or `needs-phone` without `phone-verified`, and while `main`
+  has changed an area the PR changes since its base (update the branch:
+  `gh api -X PUT repos/akashdesai93/routeiq/pulls/N/update-branch`). Review threads must be
+  resolved. Details and the exact settings: `docs/branch-protection.md`.
 - **Ship work through PRs**, one issue per PR, with `Closes #N` and how it was verified.
-  The orchestrator reviews the PR with an independent agent, then squash-merges it with
-  `gh pr merge N --squash --auto`, which merges once `required` is green. GitHub deletes the
-  head branch on merge. After a merge, restart from `origin/main`.
+  Open them ready for review, never as drafts (nobody in the cloud can mark a draft ready);
+  use `do-not-merge` while unfinished. A PR whose change must be seen on the real iPhone gets
+  `needs-phone`. The reviewer role reviews the PR independently, posts `verdict: approve
+  <sha7>`, and squash-merges it with an explicit message once `required` is green. GitHub
+  deletes the head branch on merge. After a merge, restart from `origin/main`.
 - **Questions for the owner** go on the issue with the `needs-human` label (remove `ready`)
   and in your status post, as one comment that starts `Decision needed:` with the question,
-  a recommendation and the options. The orchestrator collects them for the owner.
+  a recommendation and the options. The orchestrator collects them for the owner. A
+  decision asked only in a status comment or a PR body is not in the queue.
 - **Who is on what** is the `in-progress` label plus the comment
   `claude-loop: claimed by <session/agent>` on the issue. The orchestrator regenerates #17
   from those; nobody edits its body by hand.
 
 ### Cloud sessions
 
-Some sessions run as Claude Code cloud sessions (claude.ai/code) instead of on the owner's
-PC: the design session (#21), the native session (#15) and the e2e session (#32). Setup for
-the owner: `docs/cloud-sessions.md`.
+Most sessions run as Claude Code cloud sessions (claude.ai/code), started as routines:
+standing ones (understudy, reviewer, conductor) on a schedule, others one-time with a role
+prompt. Setup for the owner: `docs/cloud-sessions.md`. What a cloud session cannot do, and
+how it hands that off (`asks:` in its status): `docs/orchestrator.md`.
 
-- **Start from the handoff.** Read this file, then the handoff comment on your issue, then continue.
+- **Start from your role prompt**, or the handoff comment on your issue if you were given one.
 - **No messaging.** A cloud session can't see or message the local sessions (the fleet mod,
   SendMessage and ListAgents are local only), so skip the check-in message and the roster.
   Report with `/status` comments on #17 instead, and through your PRs. The orchestrator
