@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, installShellStubs, type E2EWindow } from './browserStubs.ts'
-import { along, alongOf, FREE_FLOW, sideStep, World, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
+import { along, alongOf, FREE_FLOW, NO_CLOSURES, sideStep, World, type Closure, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
 
 export { expect }
 
@@ -43,6 +43,8 @@ const fixture = (name: string) => readFileSync(`tests/fixtures/${name}`, 'utf8')
 export interface Outside {
   /** Traffic on the made-up road network. Default: free flow. */
   traffic?: Traffic
+  /** Stretches of road closed, from some request on. Default: none. */
+  closed?: Closure
   /** The road network has Parallel Street (S), a side street Mapbox never offers among its three. Default: no. */
   sideStreet?: boolean
   /** Answers every Mapbox request (map style, Directions, Search) with this HTTP status instead. */
@@ -52,6 +54,12 @@ export interface Outside {
    * the way a slow answer from Mapbox would. Default: answered at once.
    */
   holdProbes?: boolean
+  /**
+   * These Directions requests (by `n`, as the traffic scripts count them) are
+   * never answered: the connection hangs, as one can in a dead zone. The page
+   * gives up on its own or not at all; `settle` does not wait for them.
+   */
+  hangRequests?: readonly number[]
   /** Answers an Overpass tile query. Default: 504 (busy). */
   overpass?: (query: string) => { status: number; body?: unknown }
 }
@@ -75,6 +83,11 @@ export interface DriveOptions {
   hideAtSec?: number
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
+  /** At this simulated second the page's wall clock (Date.now) is put back `clockBackSec` seconds, as NTP or a carrier can. */
+  clockBackAtSec?: number
+  clockBackSec?: number
+  /** The next turn's distance, as the drive view shows it, is read at these simulated seconds (DriveLog.turnDistances). */
+  readTurnAtSec?: readonly number[]
   /** Looks at the screen mid-drive: each runs once, at its simulated second, with the drive standing still. */
   lookAtSec?: readonly { atSec: number; look: () => Promise<void> }[]
 }
@@ -86,6 +99,8 @@ export interface DriveLog {
   statusLines: { atSec: number; text: string }[]
   arrived: boolean
   seconds: number
+  /** The next turn's distance in meters, read at DriveOptions.readTurnAtSec. */
+  turnDistances: { atSec: number; meters: number | null }[]
 }
 
 export class App {
@@ -96,7 +111,7 @@ export class App {
   directionsRequests = 0
   /** What each Directions request was answered with: route names and minutes, fastest first. */
   readonly answers: { n: number; routes: { name: string; durationSec: number }[] }[] = []
-  /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on. */
+  /** The drive's own checks of the route being driven (baselineProbe: vias, from a moving car): the road each one came back on ('NoRoute': closed that way). */
   readonly pathChecks: { n: number; road: string | null; vias: number }[] = []
   /**
    * Side-street probes (one via point with a `radiuses` entry), in order: the road each one came
@@ -119,8 +134,15 @@ export class App {
   readonly abortedProbes: number[] = []
   private held: (() => Promise<void>)[] = []
   private readonly heldRequests = new Map<Request, number>()
+  /** Requests left hanging (Outside.hangRequests) that the page has not cancelled yet. */
+  private readonly hanging = new Set<Request>()
+  /** The `n` of every hanging request the page cancelled itself. */
+  readonly cancelledHanging: number[] = []
+  private readonly hangingN = new Map<Request, number>()
   readonly unexpected: string[] = []
   outside: Outside = {}
+  /** Real milliseconds lost between reading the page clock and pausing it at drive start: the #71 race, on purpose. */
+  slowMomentAtStartMs = 0
   private shot = 0
 
   constructor(page: Page, info: TestInfo) {
@@ -145,6 +167,7 @@ export class App {
     page.on('requestfailed', (request) => {
       const index = this.heldRequests.get(request)
       if (index !== undefined) this.abortedProbes.push(index)
+      if (this.hanging.delete(request)) this.cancelledHanging.push(this.hangingN.get(request)!)
     })
     await page.addInitScript(installBrowserStubs)
     if (options.shell === true) await page.addInitScript(installShellStubs)
@@ -216,11 +239,11 @@ export class App {
     const minutes = (sec: number) => `${(sec / 60).toFixed(1)} min`
     const text = this.answers
       .map(({ n, routes }) => {
-        const offered = routes.map((r) => `${names[r.name] ?? r.name} ${minutes(r.durationSec)}`).join(', ')
+        const offered = routes.length === 0 ? '(never answered: left hanging)' : routes.map((r) => `${names[r.name] ?? r.name} ${minutes(r.durationSec)}`).join(', ')
         const probes = this.probes
           .filter((p) => p.forRequest === n)
           .map((p) => (p.road === null ? 'NoSegment' : `${names[p.road] ?? p.road} ${minutes(p.durationSec ?? 0)}`))
-        return `request ${String(n).padStart(2)}: ${offered}${probes.length > 0 ? `\n   probes: ${probes.join(', ')}` : ''}`
+        return `request ${String(n).padStart(2)}: ${offered || 'NoRoute'}${probes.length > 0 ? `\n   probes: ${probes.join(', ')}` : ''}`
       })
       .join('\n')
     await this.info.attach('route answers', { body: text, contentType: 'text/plain' })
@@ -234,9 +257,8 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, lookAtSec = [] } = options
-    const now = await page.evaluate(() => Date.now())
-    await page.clock.pauseAt(now + 1000)
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [] } = options
+    await pauseSoon(page, this.slowMomentAtStartMs)
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
 
@@ -249,7 +271,7 @@ export class App {
     let position: LngLat = UPTOWN
     let heading = 180
     let speed = 0
-    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0 }
+    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0, turnDistances: [] }
     let lastBanner = ''
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
@@ -258,6 +280,11 @@ export class App {
           Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
           document.dispatchEvent(new Event('visibilitychange'))
         })
+      }
+      if (clockBackAtSec !== undefined && sec === clockBackAtSec) {
+        // Only the wall clock moves: timers keep their pace, as on a phone.
+        const wall = await page.evaluate(() => Date.now())
+        await page.clock.setSystemTime(wall - clockBackSec * 1000)
       }
       if (route !== null && astray === null && wrongTurnAtSec !== undefined && sec === wrongTurnAtSec) {
         const here = along(route, alongM)
@@ -307,6 +334,11 @@ export class App {
       }
       lastBanner = state.banner
       if (snapAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) await this.snap(`driving, minute ${Math.floor(sec / 60)}`)
+      if (readTurnAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) {
+        const text = (await page.getByLabel('Next turn').textContent()) ?? ''
+        const m = /([\d.]+)\s*(mi|ft)/.exec(text)
+        log.turnDistances.push({ atSec: sec, meters: m === null ? null : Number(m[1]) * (m[2] === 'mi' ? 1609.344 : 0.3048) })
+      }
       for (const { atSec, look } of lookAtSec) if (atSec >= sec && atSec < sec + STEP_SEC) await look()
       log.seconds = sec + STEP_SEC
       if (state.arrived) {
@@ -331,9 +363,11 @@ export class App {
         status: (document.querySelector('.live-status')?.textContent ?? '').split(' · ')[0]!,
         arrived: document.querySelector('[aria-label="Drive summary"]') !== null,
       }))
-      quiet = look.inflight === 0 ? quiet + 1 : 0
+      // A request left hanging on purpose is not waited for: only the page can end it.
+      const waiting = look.inflight > this.hanging.size
+      quiet = waiting ? 0 : quiet + 1
       if (quiet >= 2) return look
-      if (look.inflight > 0) await new Promise((r) => setTimeout(r, 5))
+      if (waiting) await new Promise((r) => setTimeout(r, 5))
     }
     throw new Error('A request in the page never finished')
   }
@@ -343,7 +377,7 @@ export class App {
     const url = new URL(request.url())
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue()
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
-    const { mapboxStatus, traffic = FREE_FLOW, overpass, sideStreet = false } = this.outside
+    const { mapboxStatus, traffic = FREE_FLOW, closed = NO_CLOSURES, overpass, sideStreet = false } = this.outside
 
     if (url.hostname === 'api.mapbox.com') {
       if (mapboxStatus !== undefined) return route.fulfill({ status: mapboxStatus, json: { message: 'Not Authorized - Invalid Token' } })
@@ -369,7 +403,7 @@ export class App {
         if (points.length === 3 && url.searchParams.get('waypoints') === '0;2' && Number.isFinite(viaRadius)) {
           // Through the via, answered with the traffic of the request it belongs to (the plan,
           // or the drive's check it follows). As Mapbox reads the radius: no road that close is NoSegment.
-          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, viaRadius)
+          const probe = world.through(from, points[1]!, traffic, this.directionsRequests, viaRadius, closed)
           const index =
             this.probes.push({
               forRequest: this.directionsRequests,
@@ -389,17 +423,26 @@ export class App {
         }
         // The drive's own check of the route being driven: through vias, with the car's heading.
         if (points.length > 2) {
-          const path = world.pathThrough(from, points.slice(1, -1), traffic, this.directionsRequests + 1)
+          const path = world.pathThrough(from, points.slice(1, -1), traffic, this.directionsRequests + 1, closed)
           if (path !== null) {
             this.directionsRequests++
-            this.pathChecks.push({ n: this.directionsRequests, road: path.road, vias: points.length - 2 })
-            this.answers.push({ n: this.directionsRequests, routes: [{ name: path.road, durationSec: path.durationSec }] })
+            this.pathChecks.push({ n: this.directionsRequests, road: path.road ?? 'NoRoute', vias: points.length - 2 })
+            this.answers.push({
+              n: this.directionsRequests,
+              routes: path.road === null ? [] : [{ name: path.road, durationSec: path.durationSec ?? 0 }],
+            })
             return route.fulfill({ json: path.answer })
           }
           this.pathChecks.push({ n: this.directionsRequests + 1, road: null, vias: points.length - 2 })
         }
         this.directionsRequests++
-        const json = world.directions(from, traffic, this.directionsRequests)
+        if (this.outside.hangRequests?.includes(this.directionsRequests) === true) {
+          this.answers.push({ n: this.directionsRequests, routes: [] })
+          this.hanging.add(request)
+          this.hangingN.set(request, this.directionsRequests)
+          return
+        }
+        const json = world.directions(from, traffic, this.directionsRequests, closed)
         this.answers.push({ n: this.directionsRequests, routes: world.lastOffered.map((r) => ({ name: r.name, durationSec: r.durationSec })) })
         return route.fulfill({ json })
       }
@@ -415,6 +458,25 @@ export class App {
     }
     this.unexpected.push(`${request.method()} ${url.origin}${url.pathname}`)
     return route.abort('blockedbyclient')
+  }
+}
+
+/**
+ * Pauses the page's fake clock a second from now. Until it is paused the clock runs in real
+ * time, so on a slow moment (a busy machine) the second can be over before pauseAt is called,
+ * and pauseAt refuses a time in the past (#71). The time is then read again and asked again.
+ */
+async function pauseSoon(page: Page, slowMomentMs = 0) {
+  for (let attempt = 1; ; attempt++) {
+    const now = await page.evaluate(() => Date.now())
+    // A scenario can make the first try slow on purpose, to keep the race covered.
+    if (attempt === 1 && slowMomentMs > 0) await new Promise((r) => setTimeout(r, slowMomentMs))
+    try {
+      await page.clock.pauseAt(now + 1000)
+      return
+    } catch (error) {
+      if (attempt >= 5 || !String(error).includes('Cannot fast-forward to the past')) throw error
+    }
   }
 }
 

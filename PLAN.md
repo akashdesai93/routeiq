@@ -123,6 +123,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    `src/live/runner.ts` runs the machine with whatever it is handed. A development
    GPS replay (`src/drive/replay.ts`) drives the same path with noise, dropouts, a
    stop, a tunnel and a wrong turn.
+   Robustness (Nov 12, 2026): a request not answered within 30 s
+   (`requestTimeoutSec`) is a failed answer, so one hung connection no longer stops
+   every later check (#29); fixes and the session share one clock that never steps
+   back with the wall clock (`src/device/clock.ts`, #30); a drive started on the
+   plan's route counts the plan's answer as its last check, so "checked N s ago" is
+   true from the start (#71). Open for later: the clock follows a forward step of the
+   wall clock on purpose (time asleep must count), so a forward correction of N s
+   still shortens the cooldown and no-return by N s, and can time out a check in flight.
    The limit: a web page only runs in front with the screen on. Open: none of it has
    been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
    audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Settled
@@ -152,6 +160,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    determinism, and 40 seeded random drives in which switches are never closer
    together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
    request budget, the what-if delay and a whole simulated drive offline.
+   Follow-ups (#74, #68): the match looks for the fresh route's start near the car
+   first (`matchStartSearchM`), so a cloverleaf no longer loses the current route; "no
+   route" answers older than `routeLostWindowSec` (15 min) no longer count toward a
+   closure switch; and the e2e world has road closures, with the scenario "when a block
+   ahead is closed, it reroutes around it". Open for later: whether the side-street
+   probes of #23 shorten the wait for a closure between via points (#68, item 3).
 8. **Done: go anywhere.** The web version of the phone app's Plan screen
    (`src/PlanPanel.tsx`). Search for either end of the trip through the Mapbox Search
    Box API (`/suggest` + `/retrieve` on a session token; chosen over Geocoding v6,

@@ -1,6 +1,6 @@
-import { alongRouteM, distanceM, isValidLngLat, localProjector, nearestAlongM, pointAtDistance, pointToSegment } from './geo.ts'
+import { alongRouteM, distanceM, isValidLngLat, localProjector, nearestAlongM, pointAtDistance, pointToSegment, type MatchMeter } from './geo.ts'
 import { findCurrentRoute, type RerouteDecision, type RerouteOptions } from './reroute.ts'
-import { SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
+import { everyPointNear, SAME_ROUTE_TOLERANCE_M, sameRouteGeometry } from './select.ts'
 import type { CongestionLevel, DistanceSpanM, LngLat, RouteCandidate } from './types.ts'
 
 /**
@@ -404,24 +404,12 @@ export function coversRoute(
   known: readonly LngLat[],
   toleranceM: number = SAME_ROUTE_TOLERANCE_M,
   sampleM: number = DEFAULT_PROBE_OPTIONS.coverSampleM,
+  meter?: MatchMeter,
 ): boolean {
   if (probe.length < 2 || known.length < 2) return false
   const project = localProjector(known[0]!)
-  const line = probe.map(project)
-  const segments = line.length - 1
-  // Consecutive samples are usually beside the same segment: each search starts at the last hit.
-  let last = 0
-  return sampled(known, sampleM).every((point) => {
-    const p = project(point)
-    for (let k = 0; k < segments; k++) {
-      const i = (last + k) % segments
-      if (pointToSegment(p, line[i]!, line[i + 1]!).distanceM <= toleranceM) {
-        last = i
-        return true
-      }
-    }
-    return false
-  })
+  // Each sample looks only at the probe's segments near it (segmentGrid in geo.ts), not the whole line.
+  return everyPointNear(sampled(known, sampleM).map(project), probe.map(project), toleranceM, meter)
 }
 
 /**
@@ -435,19 +423,21 @@ export function coversRoute(
  * deduplicated among themselves too, the earlier one kept, and a probed route
  * with no usable travel time or line is dropped. The provider's routes come
  * first, as they came. Ranking is left to rankRoutes, unchanged, so a probed
- * route wins only on ETA.
+ * route wins only on ETA. `meter`, when given, is counted up with the work
+ * of the comparisons (see MatchMeter): linear in the routes' length.
  */
 export function mergeProbeRoutes(
   candidates: readonly RouteCandidate[],
   probed: readonly RouteCandidate[],
   toleranceM: number = SAME_ROUTE_TOLERANCE_M,
   coverSampleM: number = DEFAULT_PROBE_OPTIONS.coverSampleM,
+  meter?: MatchMeter,
 ): RouteCandidate[] {
   const merged = [...candidates]
   for (const route of probed) {
     if (!usable(route)) continue
-    if (merged.some((known) => sameRouteGeometry(known.geometry, route.geometry, toleranceM))) continue
-    if (merged.some((known) => usable(known) && coversRoute(route.geometry, known.geometry, toleranceM, coverSampleM))) continue
+    if (merged.some((known) => sameRouteGeometry(known.geometry, route.geometry, toleranceM, meter))) continue
+    if (merged.some((known) => usable(known) && coversRoute(route.geometry, known.geometry, toleranceM, coverSampleM, meter))) continue
     merged.push({ ...route, source: 'probe' })
   }
   return merged
