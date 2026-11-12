@@ -340,13 +340,13 @@ describe('Start drive and the live drive view', () => {
     expect(app).not.toContain('class="app live"')
   })
 
-  it('before the first route it says what it is waiting for, with More and End already there and Mute behind More', () => {
+  it('before the first route it says what it is waiting for, with More and End already there and the voice switch behind More', () => {
     const html = render(play(started), T0)
     expect(html).toContain('Finding a route…')
     expect(html).toContain('aria-expanded="false">More</button>')
     expect(html).toContain('>End</button>')
-    expect(html).not.toContain('aria-label="Mute"')
-    expect(render(play(started), T0, { initiallyOpen: true })).toContain('aria-label="Mute"')
+    expect(html).not.toContain('data-tile="voice"')
+    expect(render(play(started), T0, { initiallyOpen: true })).toContain('data-tile="voice"')
     expect(html).not.toContain('Keep previous route')
     expect(render(play([started[0]!]), T0)).toContain('Finding your position…')
   })
@@ -365,7 +365,7 @@ describe('Start drive and the live drive view', () => {
     // Everything else is behind More.
     expect(html).not.toContain('Lights on route')
     expect(html).not.toContain('requests')
-    expect(html).not.toContain('aria-label="Mute"')
+    expect(html).not.toContain('data-tile="voice"')
   })
 
   it('behind More: lights, distance left, the automatic switch, the voice and the quiet status line', () => {
@@ -375,12 +375,12 @@ describe('Start drive and the live drive view', () => {
     expect(html).toMatch(/Distance<\/span><span class="live-tile-word">\d\.\d<span class="live-unit"> mi<\/span>/)
     expect(html).toContain('Auto-switch</span><span class="live-tile-word">On</span>')
     expect(html).toContain('Watching for a faster route. · checked 12 s ago · 1 of 60 requests')
-    expect(html).toContain('aria-pressed="false" aria-label="Mute"')
+    expect(html).toContain('role="switch" class="live-tile live-voice" data-tile="voice" aria-checked="true"')
     expect(html).toContain('Voice</span><span class="live-tile-word">On</span>')
     expect(html).not.toContain('GPS replay')
     expect(render(driving, T0 + 13_000, { ...open, replaying: true })).toContain('GPS replay (simulated position)')
     const muted = render({ ...driving, muted: true }, T0 + 13_000, open)
-    expect(muted).toContain('aria-pressed="true" aria-label="Unmute"')
+    expect(muted).toContain('data-tile="voice" aria-checked="false"')
     expect(muted).toContain('Voice</span><span class="live-tile-word">Off</span>')
     expect(render(driving, T0 + 13_000, { ...open, extra: <button type="button">Drive diagnostics</button> })).toContain('>Drive diagnostics</button>')
   })
