@@ -1,5 +1,5 @@
 import { expect, test } from './harness.ts'
-import { JAM_ON_A_FROM_SECOND_CHECK, NOISY_BUT_NOTHING_FASTER } from './world/traffic.ts'
+import { BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK, JAM_ON_A_FROM_SECOND_CHECK, NOISY_BUT_NOTHING_FASTER } from './world/traffic.ts'
 
 // Live drives on the fake clock and fake GPS, through the real live-drive
 // code: the app asks for routes, decides, speaks, and the made-up driver does
@@ -58,6 +58,81 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   await expect(page.getByLabel('Drive summary')).toBeVisible()
 })
 
+test('when a route check never answers, it gives up on it and the next checks still find the faster route', async ({ app }) => {
+  // The drive's first check (request 2, a minute in) hangs, as a request can in a dead zone.
+  // From the second check on, the direct route jams; the East Loop goes round it.
+  app.outside.hangRequests = [2]
+  app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ snapAtSec: [70, 92] })
+  await app.snap('arrived: the summary lists the switch')
+
+  // The page itself cancelled the hung check (after requestTimeoutSec), and kept checking.
+  expect(app.cancelledHanging).toEqual([2])
+  expect(app.directionsRequests).toBeGreaterThanOrEqual(4)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switched to a faster route')
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toHaveLength(1)
+  expect(spoken).toContain('Turn left onto East Loop.')
+  expect(spoken).not.toContain(OFF_ROUTE)
+})
+
+test('when the phone clock is put back half a minute mid-drive, the car keeps moving and every turn is spoken', async ({ app }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // Three minutes in, just before the first turn prompt, the wall clock goes back 30 s (#30).
+  const log = await app.drive({ clockBackAtSec: 180, snapAtSec: [200], readTurnAtSec: [178, 188, 198, 208] })
+  await app.snap('arrived: the summary')
+
+  // The next turn keeps coming nearer through the half minute the clock went back: the car never stood still.
+  const meters = log.turnDistances.map((d) => d.meters)
+  expect(meters).toHaveLength(4)
+  expect(meters.every((m) => m !== null)).toBe(true)
+  for (let i = 1; i < meters.length; i++) expect(meters[i]!).toBeLessThan(meters[i - 1]!)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toEqual([])
+  expect(await app.spoken()).toEqual([
+    STARTED,
+    'In half a mile, turn left onto Cross Street.',
+    'Turn left onto Cross Street.',
+    'Turn right onto Main Corridor.',
+    'In half a mile, turn right onto Cross Street.',
+    'Turn right onto Cross Street.',
+    'Turn left onto Main Corridor.',
+    'Your destination is ahead.',
+    'You have arrived. Trip time 17 minutes.',
+  ])
+})
+
+test('when a block ahead is closed, it reroutes around it', async ({ app }) => {
+  // From the second check on, a block of Main Corridor's own stretch (60 to 70 % of the way) is
+  // closed. Traffic flows freely, so no route is faster by time: only the closure can move the drive.
+  app.outside.closed = BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ snapAtSec: [150] })
+  await app.snap('arrived: the summary lists the change')
+
+  expect(log.arrived).toBe(true)
+  // Mapbox stops offering A, and the drive's check of A itself comes back "no route" each time.
+  const closedChecks = app.pathChecks.filter((c) => c.road === 'NoRoute')
+  expect(closedChecks.length).toBeGreaterThanOrEqual(3)
+  // One change of route, made only once three checks in a row found no way along A (DEFAULT_REROUTE_OPTIONS.routeLostPolls).
+  expect(log.banners).toHaveLength(1)
+  const spoken = await app.spoken()
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toEqual([expect.stringMatching(/^Switching routes\. The road ahead on your route looks closed\. Turn in [\d.]+ miles\.$/)])
+  const statusBefore = log.statusLines.filter((l) => l.atSec < log.banners[0]!.atSec).map((l) => l.text)
+  expect(statusBefore).toEqual(expect.arrayContaining([expect.stringContaining('check 1 of 3'), expect.stringContaining('check 2 of 3')]))
+  // The driver takes one of the loops round the closed block and is never told to turn back.
+  expect(spoken.some((line) => line.includes('East Loop') || line.includes('West Loop'))).toBe(true)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+})
+
 test('when nothing is faster, it never switches', async ({ app }) => {
   // Traffic wobbles by up to 6 % from check to check, and the GPS wanders up to 8 m off the road.
   app.outside.traffic = NOISY_BUT_NOTHING_FASTER
@@ -94,6 +169,26 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   expect(spoken.slice(0, 3)).toEqual([STARTED, OFF_ROUTE, expect.stringMatching(/^New route\. \d+ minutes to your destination\.$/)])
   expect(spoken.filter((line) => line === OFF_ROUTE)).toHaveLength(1)
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+})
+
+test('right after Start, "checked" says how old the plan is, not 0 s', async ({ app, page }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // The trip was planned, then the driver waited 40 s before tapping Start drive (#71).
+  await page.clock.fastForward(40_000)
+  // And the machine running this is slow at the wrong moment: the clock flake of #71 stays covered.
+  app.slowMomentAtStartMs = 1500
+  await app.drive({ maxSec: 6 })
+  // The status line, with "checked N s ago", is behind More on the driving screen (#106).
+  await page.getByRole('button', { name: 'More' }).click()
+  await app.snap('just after Start: checked about 45 s ago')
+
+  const text = (await page.getByLabel('Live drive').getByText(/checked \d+ s ago/).textContent()) ?? ''
+  const seconds = Number(/checked (\d+) s ago/.exec(text)?.[1])
+  expect(seconds).toBeGreaterThanOrEqual(45)
+  expect(seconds).toBeLessThan(60)
+  // The first check is still to come: it is due a minute after the plan, not after the tap.
+  expect(app.directionsRequests).toBe(1)
 })
 
 test.describe('on a phone', () => {

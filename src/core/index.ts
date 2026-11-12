@@ -135,6 +135,7 @@ export {
   liveStep,
   liveView,
   POSITION_ERROR_MESSAGES,
+  REQUEST_TIMED_OUT,
   SPOKEN,
   switchLine,
   WAKE_LOCK_WARNING,

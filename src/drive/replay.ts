@@ -1,5 +1,5 @@
 import { alongRouteM, isValidLngLat, nearestAlongM, pointAtDistance, type LngLat, type PositionFix } from '../core/index.ts'
-import type { LocationErrorKind, PositionSource } from '../device/geolocation.ts'
+import type { PositionSource } from '../device/geolocation.ts'
 
 /**
  * GPS replay (development only): a made-up driver whose position fixes go
@@ -205,8 +205,6 @@ export interface ReplaySourceOptions {
   readonly realNow?: () => number
   /** Calls `fn` every `ms` real milliseconds; returns the function that stops it. */
   readonly every?: (ms: number, fn: () => void) => () => void
-  /** When set, the replay fails like a device would instead of giving fixes. */
-  readonly failWith?: LocationErrorKind | null
 }
 
 /**
@@ -236,7 +234,6 @@ export function createReplaySource(options: ReplaySourceOptions): ReplaySource {
       const id = setInterval(fn, ms)
       return () => clearInterval(id)
     },
-    failWith = null,
   } = options
   // Drive time starts at the wall clock's time, so arrival times read like real ones.
   const startMs = Date.now()
@@ -253,11 +250,7 @@ export function createReplaySource(options: ReplaySourceOptions): ReplaySource {
     follow(geometry) {
       state = replayFollow(state, geometry)
     },
-    start(onFix, onError) {
-      if (failWith !== null) {
-        onError(failWith)
-        return () => {}
-      }
+    start(onFix) {
       let last = realNow()
       // The first fix at once, like a device that already knows where it is.
       const first = replayStep(state, 0, startMs + driveMs, plan)
