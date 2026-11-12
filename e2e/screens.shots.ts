@@ -3,12 +3,26 @@ import { EMPTY_PLACE_BOOK, serializePlaceBook, setLastTrip, type Place } from '.
 import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
 import { expect, test } from './harness.ts'
 import { NO_TOKEN_PORT } from './ports.ts'
+import { busyMapStyle } from './world/busyMap.ts'
 import { JAM_ON_A_FROM_SECOND_CHECK } from './world/traffic.ts'
 
 // Every screen and state of the app, photographed for a design review
 // (npm run design:shots; playwright.shots.config.ts). Pictures land in
 // design-shots/<project>/<scenario> NN <name>.png. Nothing here is a test of
 // behaviour: the e2e scenarios (*.spec.ts) are.
+
+// The pictures may be committed (docs/design) and this repo is public: the Mapbox
+// wordmark is hidden in them (the app itself always shows it). The map is the
+// harness's blank style or our own busy one (e2e/world/busyMap.ts): no Mapbox map art.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style')
+      style.textContent = '.mapboxgl-ctrl-logo { visibility: hidden !important; }'
+      document.head.append(style)
+    })
+  })
+})
 
 // Playwright needs the object pattern here, even with no fixtures in it.
 // oxlint-disable-next-line no-empty-pattern
@@ -136,3 +150,37 @@ test('iphone shell', async ({ app, page }) => {
   await page.getByRole('button', { name: 'Drive diagnostics' }).click()
   await app.snap('shell: drive diagnostics')
 })
+
+// #47: the driving screen over a map as busy as a real street map (e2e/world/busyMap.ts),
+// by day and by night: the turn card, the sheet, the route line and the switch's marker.
+for (const palette of ['day', 'night'] as const) {
+  test(`busy map ${palette}`, async ({ app, page }) => {
+    app.outside.mapStyle = busyMapStyle(palette)
+    app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
+    await app.open({ fakeClock: true })
+    await app.routesReady()
+    await app.snap(`${palette}: trip screen`)
+    let pendingShot = false
+    const looks = [
+      {
+        atSec: 60,
+        look: async () => {
+          await page.clock.runFor(50)
+          await app.snap(`${palette}: driving`)
+        },
+      },
+      ...Array.from({ length: 150 }, (_, i) => ({
+        atSec: 62 + i * 2,
+        look: async () => {
+          const status = (await page.locator('.live-status').first().textContent()) ?? ''
+          if (!pendingShot && status.includes('confirming')) {
+            pendingShot = true
+            await page.clock.runFor(50)
+            await app.snap(`${palette}: checking a faster route`)
+          }
+        },
+      })),
+    ]
+    await app.drive({ maxSec: 360, lookAtSec: looks })
+  })
+}

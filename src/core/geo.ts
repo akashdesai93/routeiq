@@ -156,10 +156,14 @@ export interface PointOnLine {
  * the end. Null when the line has no point. The point is interpolated
  * straight between two vertices, exact enough between the vertices of a road.
  */
-export function pointAtDistance(line: readonly LngLat[], alongM: number): PointOnLine | null {
+export function pointAtDistance(
+  line: readonly LngLat[],
+  alongM: number,
+  /** alongRouteM(line), when the caller has it already. */
+  along: readonly number[] = alongRouteM(line),
+): PointOnLine | null {
   const first = line[0]
   if (first === undefined) return null
-  const along = alongRouteM(line)
   const target = Math.min(Math.max(Number.isFinite(alongM) ? alongM : 0, 0), along.at(-1)!)
   // The first segment with a length that reaches the target.
   let index = 0

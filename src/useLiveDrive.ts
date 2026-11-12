@@ -112,7 +112,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   const [replaying, setReplaying] = useState(false)
   const [simulated, setSimulated] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(true)
-  const runnerRef = useRef<{ runner: LiveRunner; now: () => number; observer: DriveObserver | undefined } | null>(null)
+  const runnerRef = useRef<{ runner: LiveRunner; now: () => number } | null>(null)
   const speakerRef = useRef<Speaker | null>(null)
   const latest = useRef(config)
   const whatIfInPlay = useRef(false)
@@ -134,9 +134,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const { token, destination, route, replay, testDrive = null, routeFetchedAtMs = null } = latest.current
     if (token === null) return
     // "Try again" after a failure ends the drive that was under way: the log keeps it as ended.
-    const previous = runnerRef.current
-    previous?.observer?.end(previous.runner.state(), previous.now())
-    previous?.runner.dispose()
+    runnerRef.current?.runner.dispose()
     // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
     // and go on with the phone locked (src/device/native). In a browser: the browser's own.
     // A test drive swaps the GPS for a made-up car that the native side moves; the clock stays real.
@@ -152,9 +150,6 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const now = replaySource === null ? sessionNow : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
-    // A development replay and the shell's test drive are made-up drives: they are not logged.
-    const observer = replaySource === null && testDrive === null ? latest.current.observer : undefined
-    observer?.start()
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
@@ -171,17 +166,20 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
       },
       options: () => optionsOf(multiplier()),
       onBusy: (busy) => replaySource?.hold(busy),
+      // The runner tells the observer after onChange, and catches what either throws: the log never stalls a drive.
+      // A development replay and the shell's test drive are made-up drives: they are not logged.
+      observer: replaySource === null && testDrive === null ? latest.current.observer : undefined,
       onChange: (next) => {
         if (runnerRef.current?.runner !== runner) return
-        if (next.switches.length > seenSwitches && whatIfInPlay.current) {
+        // The state first: whatever the callbacks below do, the screen shows the drive.
+        setState(next)
+        setNowMs(now())
+        const spent = next.switches.length > seenSwitches && whatIfInPlay.current
+        seenSwitches = next.switches.length
+        if (spent) {
           whatIfInPlay.current = false
           latest.current.onWhatIfSpent()
         }
-        seenSwitches = next.switches.length
-        const at = now()
-        observer?.change(next, at)
-        setState(next)
-        setNowMs(at)
       },
       routes: async (query) => {
         const { token, whatIfDelaySec, rerouteOptions } = latest.current
@@ -212,7 +210,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },
     })
-    runnerRef.current = { runner, now, observer }
+    runnerRef.current = { runner, now }
     setReplaying(replaySource !== null)
     setSimulated(replaySource === null && native !== null && native.simulated)
     setSpeechSupported(speaker.supported)
@@ -221,9 +219,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [optionsOf])
 
   const end = useCallback(() => {
-    const current = runnerRef.current
-    current?.observer?.end(current.runner.state(), current.now())
-    current?.runner.dispose()
+    runnerRef.current?.runner.dispose()
     runnerRef.current = null
     setState(LIVE_IDLE)
   }, [])
@@ -242,7 +238,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [ticking])
 
   // A drive does not outlive the page it was started on.
-  useEffect(() => () => runnerRef.current?.runner.dispose(), [])
+  // The log is not told: a drive cut off this way is not one that was ended.
+  useEffect(() => () => runnerRef.current?.runner.dispose(false), [])
 
   const multiplier = replaying ? (config.replay?.multiplier ?? null) : null
   const { settings, rerouteOptions } = config

@@ -544,6 +544,53 @@ describe('withSignalCounts', () => {
     expect(counted.routes.map((r) => r.signalCount)).toEqual([2, 2, 1])
   })
 
+  // The primary points are grouped once per call and shared by the routes that add none of
+  // their own (#96). A route that adds its own signal flags (in a tile with no data) must
+  // still get them, and a route after it must not.
+  it('counts routes together exactly as it counts each one alone', () => {
+    const north50 = [at(0, 0), at(0, 1000), at(0, 50_000)]
+    const flagged = {
+      ...route('flagged', north50),
+      intersections: [
+        { location: at(0, 300), signal: false },
+        { location: at(0, 800), signal: false },
+        { location: at(0, 40_000), signal: true },
+      ] as RouteIntersection[],
+    }
+    const plain = route('plain', [...north50])
+    const routes = [inside, flagged, plain, { ...inside, id: 'inside-again' }]
+    const data = loadedFor([inside], town)
+    const together = withSignalCounts(routes, data)
+    const alone = routes.map((r) => withSignalCounts([r], data))
+    expect(together.routes).toEqual(alone.map((a) => a.routes[0]))
+    for (const r of routes) expect(together.signalsByRouteId.get(r.id)).toEqual(alone.find((a) => a.routes[0]!.id === r.id)!.signalsByRouteId.get(r.id))
+    // The flag 40 km out counts for the route that has it, and only for it.
+    expect(together.routes.map((r) => r.signalCount)).toEqual([2, 3, 2, 2])
+  })
+
+  it('works out the tiles of a route again for another reach', () => {
+    // The middle of a tile: with the default reach it needs that tile only; with a 6 km
+    // tolerance it needs its neighbours too, also when the same line was asked before.
+    const middle: LngLat[] = [
+      [-80.855, 35.255],
+      [-80.845, 35.255],
+    ]
+    const near = signalTilesForRoute(middle)
+    const wide = signalTilesForRoute(middle, { toleranceM: 6000 })
+    expect(near).toEqual(['-809_352'])
+    expect(wide).toEqual(signalTilesForRoute([...middle], { toleranceM: 6000 }))
+    expect(wide.length).toBeGreaterThan(near.length)
+    expect(signalTilesForRoute(middle)).toEqual(near)
+  })
+
+  it('hands every caller its own list of tiles', () => {
+    const tiles = signalTilesForRoute(NORTH_1KM)
+    tiles.push('-999_999')
+    tiles.sort().reverse()
+    expect(signalTilesForRoute(NORTH_1KM)).toEqual(signalTilesForRoute([...NORTH_1KM]))
+    expect(signalTilesForRoute(NORTH_1KM)).not.toContain('-999_999')
+  })
+
   it('passes its options through', () => {
     const wide = withSignalCounts([inside], loadedFor([inside], [...town, signal('far', 45, 500)]), { toleranceM: 50 })
     expect(wide.routes[0]!.signalCount).toBe(3)
