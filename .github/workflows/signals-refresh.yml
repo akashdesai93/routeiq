@@ -1,0 +1,128 @@
+name: Signals refresh
+
+# Monthly refresh of the bundled OpenStreetMap signal tiles (public/seed/osm-signals, #12).
+# Downloads the North and South Carolina extracts from Geofabrik (about 600 MB, two files, once a
+# month: Geofabrik asks for moderation, and this is it), builds a new bundle in a scratch folder,
+# and compares it with the one on main (scripts/refresh-signal-bundle.mjs; the limits are
+# DEFAULT_BUNDLE_REFRESH_CHECKS in src/providers/osm/refresh.ts).
+#
+# - Data no newer than what ships: green, nothing else happens.
+# - A check fails (a drop of more than 3 %, a city-sized hole, lost coverage, a broken file, ...):
+#   FAILS CLOSED. Nothing is committed, no pull request; the run goes red and its summary says why.
+# - Otherwise: commits the new files on bot/signals-refresh-<date> and opens a pull request to
+#   main with the before/after summary. It never pushes to main and never merges; the PR goes
+#   through `required` and review like any other. With an open refresh PR it opens no second one.
+#
+# Token: the SIGNALS_REFRESH_TOKEN secret when set (fine-grained, this repo, contents and pull
+# requests read/write), so the PR starts the gate. Without it the workflow's own token is used:
+# that needs "Allow GitHub Actions to create pull requests" in the repo settings, and a PR it
+# opens starts no workflow, so `required` first runs when the branch is next updated.
+# About 3 to 5 minutes a month on one ubuntu runner; no npm ci (the scripts have no dependencies).
+
+on:
+  schedule:
+    - cron: '23 6 3 * *' # 06:23 UTC on the 3rd of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: refresh the signal bundle
+    # Only from main: a manual run from another branch would put that branch's commits in the PR.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Skip when a refresh pull request is already open
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | select(.head.repo.full_name == env.GITHUB_REPOSITORY and (.head.ref | startswith("bot/signals-refresh-"))) | .number' | wc -l | tr -d " ")
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+          if [ "$open" != "0" ]; then
+            echo "A signal refresh pull request is already open; nothing to do until it is landed or closed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Download the extracts from Geofabrik
+        if: steps.open.outputs.open == '0'
+        run: |
+          mkdir -p data/osm-extracts
+          base=https://download.geofabrik.de/north-america/us
+          for region in north-carolina south-carolina; do
+            for file in "$region-latest.osm.pbf" "$region-latest.osm.pbf.md5" "$region.poly"; do
+              curl --fail --silent --show-error --location --retry 3 --retry-delay 60 \
+                --user-agent "routeiq-signals-refresh (+https://github.com/$GITHUB_REPOSITORY)" \
+                --output "data/osm-extracts/$file" "$base/$file"
+            done
+          done
+          ls -l data/osm-extracts
+
+      - name: Build, compare, and write only if the new data looks right
+        id: refresh
+        if: steps.open.outputs.open == '0'
+        run: |
+          set +e
+          node scripts/refresh-signal-bundle.mjs --summary "$RUNNER_TEMP/summary.md" --result "$RUNNER_TEMP/result.json"
+          code=$?
+          set -e
+          if [ ! -f "$RUNNER_TEMP/result.json" ]; then
+            echo "::error::The refresh script stopped before it could report (exit $code). Nothing was committed; see the log."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          outcome=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).outcome' "$RUNNER_TEMP/result.json")
+          date=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).dataDate ?? ""' "$RUNNER_TEMP/result.json")
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          # 0 refreshed, 3 nothing to do; anything else (2 build failed, 4 rejected) fails the run.
+          if [ "$code" != "0" ] && [ "$code" != "3" ]; then
+            echo "::error::Signal refresh $outcome (exit $code). Nothing was written; see the run summary."
+            exit "$code"
+          fi
+
+      - name: Open the pull request
+        if: steps.refresh.outputs.outcome == 'refreshed'
+        env:
+          DATA_DATE: ${{ steps.refresh.outputs.date }}
+          GH_TOKEN: ${{ secrets.SIGNALS_REFRESH_TOKEN || github.token }}
+        run: |
+          branch="bot/signals-refresh-$DATA_DATE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A public/seed/osm-signals
+          if git diff --cached --quiet; then
+            echo "The refresh changed no file." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -q -m "Refresh the OpenStreetMap signal bundle (data of $DATA_DATE)"
+          # A branch of the same date from a closed, unmerged PR makes this push fail: the run goes red, nothing lands.
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$branch"
+          {
+            echo "Monthly refresh of \`public/seed/osm-signals\` from the Geofabrik extracts, opened by \`signals-refresh.yml\` (#12). Every check below passed; a failing one would have stopped the run before this pull request."
+            echo
+            cat "$RUNNER_TEMP/summary.md"
+          } > "$RUNNER_TEMP/body.md"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pulls" \
+            -f title="Refresh the OpenStreetMap signal bundle (data of $DATA_DATE)" \
+            -f head="$branch" -f base=main -F body=@"$RUNNER_TEMP/body.md" --jq .html_url
