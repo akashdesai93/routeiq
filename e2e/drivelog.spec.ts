@@ -115,3 +115,22 @@ test('in the iPhone app, the drive log is kept on the phone across launches', as
   expect(stored).not.toMatch(COORDINATE)
   expect(stored).not.toContain('pk.')
 })
+
+test('when location is taken away mid-drive and I tap Try again, the drive so far is kept as ended', async ({ app, page }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await app.drive({ maxSec: 120 })
+  // Two minutes in, location permission is withdrawn: the drive cannot go on.
+  await page.evaluate(() => (window as unknown as { __e2e: { deny: () => void } }).__e2e.deny())
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
+  await app.snap('location withdrawn: the drive cannot go on')
+  await page.getByRole('button', { name: 'Try again' }).click()
+  // The new attempt never gets a position; the driver gives up on it.
+  await page.getByRole('button', { name: 'End' }).click()
+
+  await page.getByRole('button', { name: /^Drives/ }).click()
+  const drives = page.getByRole('list', { name: 'Past drives' }).getByRole('listitem')
+  await expect(drives).toHaveCount(1)
+  await expect(drives.first()).toContainText('Ended early')
+  await expect(drives.first()).toContainText('Took 2 min')
+})

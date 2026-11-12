@@ -60,9 +60,11 @@ interface AppProps {
   driveLogStore?: TextStore
   /** Shown in the top bar, after the name. The iPhone shell puts its "Change token" button here. */
   barExtra?: ReactNode
+  /** Shown in the drive view's More sheet. The top bar is hidden during a drive, so the iPhone shell puts "Drive diagnostics" here too. */
+  driveExtra?: ReactNode
 }
 
-export default function App({ status = tokenStatus, placeStore = deviceStore, driveLogStore = deviceStore, barExtra = null }: AppProps) {
+export default function App({ status = tokenStatus, placeStore = deviceStore, driveLogStore = deviceStore, barExtra = null, driveExtra = null }: AppProps) {
   const places = usePlaceBook(placeStore)
   // Another app's ETA for the trip, typed before Start drive (for comparing on the Drives screen).
   const [otherEtaText, setOtherEtaText] = useState('')
@@ -225,6 +227,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
               destinationLabel={pins.destination.label}
               speechSupported={live.speechSupported}
               replaying={live.replaying}
+              extra={driveExtra}
               dev={
                 import.meta.env.DEV
                   ? {
