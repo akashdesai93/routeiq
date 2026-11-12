@@ -54,7 +54,7 @@ button:hover { background: #eaeef2; }
 .route-distance { grid-column: 1 / -1; }
 .route-signals { grid-column: 1 / -1; }
 .route-delay { grid-column: 1 / -1; color: #57606a; }
-.route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 12px; font-weight: 400; color: #57606a; }
+.route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 13px; font-weight: 400; color: #57606a; }
 .route-source { margin-left: 2px; font-size: 12px; font-weight: 400; font-style: italic; color: #57606a; }
 .route-reasons { grid-column: 1 / -1; color: #57606a; font-size: 13px; }
 .hint { color: #57606a; font-size: 13px; }
@@ -102,7 +102,8 @@ button.link:hover { background: none; color: #0550ae; }
   summary::before { content: '▸'; }
   details[open] > summary::before { content: '▾'; }
   button.link { display: inline-flex; align-items: center; padding: 0 4px; }
-  .hint a, .handoff a { display: inline-block; padding: 14px 0; }
+  /* Height from min-height, not padding round the text: font metrics differ between machines (43 px in CI). */
+  .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
   .drive-log { max-height: 200px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
@@ -157,3 +158,5 @@ button.link:hover { background: none; color: #0550ae; }
 .other-eta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .other-eta input { width: 9em; }
 .other-eta .field-status { flex-basis: 100%; }
+/* "Other app's ETA" before Start drive (#118): a field a thumb can hit, 16 px so iOS does not zoom on focus. */
+.other-eta input { min-height: 44px; padding: 8px 10px; font: inherit; font-size: 16px; border: 1px solid #8c959f; border-radius: 6px; background: #ffffff; color: inherit; }

@@ -27,12 +27,15 @@ native/
    - types
    - geo helpers
    - tile ids
-   - signal counting with its three radii, clustering, gap-fill and freeway spans
+   - signal counting with its three radii, clustering and freeway spans (OpenStreetMap only)
    - ranking
    - route identity and geometry matching
-   - the reroute decision engine with every threshold
+   - the reroute decision engine with every threshold (overlap matching, the current path's own
+     travel time, declined routes)
+   - turn guidance (banner and voice instructions, and made-up ones where Mapbox sends none)
    - formatting
-   - the Directions JSON parser from `src/providers/mapbox/adapter.ts`
+   - the Directions JSON parser from `src/providers/mapbox/adapter.ts`, with guidance and
+     per-segment traffic
 
    Because it needs no Apple frameworks, its tests run on a cheap Linux runner. See
    [RouteIQCore/README.md](RouteIQCore/README.md).
@@ -78,8 +81,8 @@ native/
    the contract. The OpenStreetMap license file ships with the data, and the credit is visible
    in the app.
 
-   The City of Charlotte gap-fill list is **CC BY-NC-SA 4.0 (non-commercial)**. It stays out of
-   any build that other people get, unless the city agrees.
+   There is no City of Charlotte data: the web app removed its gap-fill list (CC BY-NC-SA 4.0,
+   non-commercial) in #13, and RouteIQCore followed in #33.
 5. **Voice** uses the SDK's `RouteVoiceController` (Mapbox Voice API, falling back to
    `AVSpeechSynthesizer`). RouteIQ speaks its own switch sentence, the decision's `reason`,
    through the same synthesizer, so it ducks other audio the same way. `UIBackgroundModes` must
