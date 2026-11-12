@@ -75,12 +75,13 @@ test('the Swift files follow the rule the Capacitor CLI relies on', () => {
   assert.equal(plugin.match(/@objc\(([A-Za-z]+)\)/)?.[1], 'RouteIQNativePlugin');
   assert.equal(/@objc\(/.test(engine), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8')), false);
+  assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQSimulation.swift', dir), 'utf8')), false);
 });
 
 test('positions and request addresses are never logged or stored by the native code', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
   const names = readdirSync(dir).filter((name) => name.endsWith('.swift'));
-  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQNativePlugin.swift']);
+  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
   for (const name of names) {
     const swift = readFileSync(new URL(name, dir), 'utf8');
     for (const banned of ['print(', 'NSLog(', 'os_log', 'Logger(', 'FileManager', 'write(to', 'debugPrint', 'dump(']) {
@@ -110,4 +111,36 @@ test('native route requests go to Mapbox only, are not redirected, and say nothi
   // Both methods are registered with Capacitor.
   assert.match(plugin, /CAPPluginMethod\(name: "httpGet"/);
   assert.match(plugin, /CAPPluginMethod\(name: "httpCancel"/);
+});
+
+test('a test drive replaces the GPS positions, marks its own, and ends with the drive', () => {
+  const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
+  const engine = readFileSync(new URL('RouteIQEngine.swift', dir), 'utf8');
+  const simulation = readFileSync(new URL('RouteIQSimulation.swift', dir), 'utf8');
+  const plugin = readFileSync(new URL('RouteIQNativePlugin.swift', dir), 'utf8');
+  // While a simulation is set, a position from the GPS is not handed on.
+  assert.match(engine, /if updating && simulation == nil && location\.timestamp/);
+  // Every made-up position says so.
+  assert.match(simulation, /"simulated": true/);
+  // Ending the location stream (End, arrival) ends the simulation and its timer.
+  assert.match(engine, /func stopLocation\(\) \{[^}]*?stopSimulatedRoute\(\)/);
+  assert.match(engine, /func stopSimulatedRoute\(\) \{\s*simulationTimer\?\.invalidate\(\)\s*simulationTimer = nil\s*simulation = nil/);
+  // The timer runs on the main run loop in the common modes, like the tick, and holds the engine weakly.
+  assert.match(engine, /let timer = Timer\(timeInterval: 1, repeats: true\) \{ \[weak self\] _ in\s*self\?\.stepSimulation\(\)\s*\}\s*RunLoop\.main\.add\(timer, forMode: \.common\)/);
+  // The simulation has no clock, no storage and no network of its own.
+  for (const banned of ['Date()', 'UserDefaults', 'URLSession', 'Timer', 'DispatchQueue']) {
+    assert.equal(simulation.includes(banned), false, `RouteIQSimulation.swift uses ${banned}`);
+  }
+  // The points are never put into a message.
+  assert.equal(/\\\((points|lng|lat|pair|item)\b/.test(plugin + engine + simulation), false);
+  for (const name of ['startSimulatedRoute', 'stopSimulatedRoute', 'share']) {
+    assert.match(plugin, new RegExp(`CAPPluginMethod\\(name: "${name}"`));
+  }
+});
+
+test('sharing hands the text to the share sheet and nowhere else', () => {
+  const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
+  const plugin = readFileSync(new URL('RouteIQNativePlugin.swift', dir), 'utf8');
+  assert.match(plugin, /UIActivityViewController\(activityItems: \[text\], applicationActivities: nil\)/);
+  assert.equal(plugin.includes('UIPasteboard'), false);
 });

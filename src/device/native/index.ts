@@ -3,11 +3,14 @@ import type { Speaker } from '../speech.ts'
 import type { PageVisibility } from '../visibility.ts'
 import type { ScreenWakeLock } from '../wakeLock.ts'
 import type { DirectionsTransport } from '../../providers/mapbox/client.ts'
+import { localTextStore, type TextStore } from '../../storage/local.ts'
 import { shellDiagnostics, type DriveDiagnostics } from './diagnostics.ts'
 import { nativeTransport } from './http.ts'
+import { lastDriveSaver } from './lastDrive.ts'
 import { nativePlugin, type RouteIQNativePlugin } from './plugin.ts'
 import { nativeGeolocation, nativePositionSource } from './position.ts'
-import { nativeEvery } from './pulse.ts'
+import { nativeEvery, type PulseTimers } from './pulse.ts'
+import { simulatedPositionSource, type SimulatedDrive } from './simulated.ts'
 import { createNativeSpeaker } from './speech.ts'
 import { ALWAYS_IN_FRONT } from './visibility.ts'
 import { nativeWakeLock } from './wakeLock.ts'
@@ -21,19 +24,36 @@ export interface NativeDevice {
   readonly wakeLock: ScreenWakeLock
   readonly visibility: PageVisibility
   readonly every: (ms: number, fn: () => void) => () => void
+  /** True when the positions are a test drive's (made up), not the GPS's. */
+  readonly simulated: boolean
+}
+
+export interface NativeDeviceOptions {
+  /** A test drive: the made-up car in place of the GPS (simulated.ts). Null or left out: the GPS. */
+  readonly simulate?: SimulatedDrive | null
+  /** Where the last drive's diagnostics are kept. Default: the app's own storage. */
+  readonly store?: TextStore
+  /** Swapped out in tests: the clock and the page timers behind the ticks and the saving. */
+  readonly timers?: PulseTimers
 }
 
 /**
  * `log`: the drive diagnostics. It is told that a fix or a tick came, that a
- * line was spoken and that the GPS went on or off; never what or where.
+ * line was spoken and that the GPS went on or off; never what or where. Its
+ * text is written to `store` when a drive ends and now and then during one
+ * (lastDrive.ts), so it is still there after the app was closed.
  */
-export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnostics = shellDiagnostics): NativeDevice {
-  const source = nativePositionSource(plugin)
-  const every = nativeEvery(plugin)
+export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnostics = shellDiagnostics, options: NativeDeviceOptions = {}): NativeDevice {
+  const simulate = options.simulate ?? null
+  const source = simulate === null ? nativePositionSource(plugin) : simulatedPositionSource(plugin, simulate)
+  const every = options.timers === undefined ? nativeEvery(plugin) : nativeEvery(plugin, options.timers)
+  const saver = lastDriveSaver(log, options.store ?? localTextStore(), options.timers?.now)
   return {
+    simulated: simulate !== null,
     source: {
       start(onFix, onError) {
         log.gps(true)
+        if (simulate !== null) log.simulated(simulate.preset, simulate.multiplier)
         const stop = source.start((fix) => {
           log.fix()
           onFix(fix)
@@ -41,8 +61,10 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
         return () => {
           log.gps(false)
           stop()
+          saver.end()
         }
       },
+      follow: (geometry) => source.follow?.(geometry),
     },
     speaker: createNativeSpeaker(plugin, { log }),
     wakeLock: nativeWakeLock(plugin),
@@ -50,6 +72,7 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
     every: (ms, fn) =>
       every(ms, () => {
         log.tick()
+        saver.tick()
         fn()
       }),
   }
@@ -72,10 +95,10 @@ export function startNativeShell(log: DriveDiagnostics = shellDiagnostics): Dire
   return nativeTransport(plugin, { log })
 }
 
-/** The shell's device, or null in a browser: the caller then uses the browser's own. */
-export function nativeDevice(): NativeDevice | null {
+/** The shell's device, or null in a browser: the caller then uses the browser's own. `simulate`: a test drive. */
+export function nativeDevice(simulate: SimulatedDrive | null = null): NativeDevice | null {
   const plugin = nativePlugin()
-  return plugin === null ? null : nativeDeviceFor(plugin)
+  return plugin === null ? null : nativeDeviceFor(plugin, shellDiagnostics, { simulate })
 }
 
 /** "Use my location": the plugin's position in the shell, the browser's otherwise. */

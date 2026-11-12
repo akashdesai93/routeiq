@@ -1,5 +1,5 @@
 import { isValidLngLat, type LngLat, type RouteCandidate } from '../../core/index.ts'
-import { tokenErrorHelp } from '../../config.ts'
+import { mapboxGet, redactToken, type MapboxFetch, type MapboxMessages } from './http.ts'
 import { parseDirections, type DirectionsResult } from './adapter.ts'
 
 const DIRECTIONS_BASE = 'https://api.mapbox.com/directions/v5/mapbox/driving-traffic'
@@ -133,10 +133,7 @@ export interface FetchDirectionsOptions {
  * when there is none, and rejects when `signal` is aborted. The browser's
  * `fetch` is one; the iPhone shell supplies another (src/device/native/http.ts).
  */
-export type DirectionsTransport = (
-  url: string,
-  init?: { signal?: AbortSignal },
-) => Promise<{ readonly status: number; json(): Promise<unknown> }>
+export type DirectionsTransport = MapboxFetch
 
 let transport: DirectionsTransport | null = null
 
@@ -182,37 +179,14 @@ export async function fetchDirections(options: FetchDirectionsOptions): Promise<
   if (url === null)
     return { ok: false, kind: 'malformed', message: 'A pin is not at a valid map coordinate.' }
 
-  let status: number
-  let body: unknown = null
-  try {
-    const response = await fetchImpl(url, { signal })
-    status = response.status
-    // Error bodies below 500 are JSON too ({ code, message }); anything else stays null.
-    body = await response.json().catch(() => null)
-  } catch {
-    if (signal?.aborted) return { ok: false, kind: 'aborted', message: 'Route request cancelled.' }
-    // The thrown error is deliberately not shown: it adds nothing for the user.
-    return {
-      ok: false,
-      kind: 'network',
-      message: 'Could not reach Mapbox. Check your internet connection and try again.',
-    }
-  }
-  if (signal?.aborted) return { ok: false, kind: 'aborted', message: 'Route request cancelled.' }
-
-  const tokenHelp = tokenErrorHelp(status)
-  if (tokenHelp !== null) return { ok: false, kind: 'token', message: tokenHelp }
-  if (status === 429)
-    return {
-      ok: false,
-      kind: 'rate-limit',
-      message: 'Mapbox is rate limiting route requests (429). Wait a minute, then try again.',
-    }
+  const answer = await mapboxGet(url, signal, fetchImpl, DIRECTIONS_MESSAGES)
+  if ('ok' in answer) return answer
+  const { status, body } = answer
 
   const result = parseDirections(body)
-  if (status >= 200 && status < 300) return redact(result, token)
+  if (status >= 200 && status < 300) return redactToken(result, token)
   // Non-2xx: keep Mapbox's own explanation when it sent one (422 InvalidInput, 404 ProfileNotFound).
-  if (!result.ok && result.kind === 'api') return redact(result, token)
+  if (!result.ok && result.kind === 'api') return redactToken(result, token)
   return {
     ok: false,
     kind: 'api',
@@ -220,10 +194,10 @@ export async function fetchDirections(options: FetchDirectionsOptions): Promise<
   }
 }
 
-/** Belt and braces: an API message that echoes the request must not show the token. */
-function redact(result: DirectionsResult, token: string): DirectionsResult {
-  if (result.ok || token === '' || !result.message.includes(token)) return result
-  return { ...result, message: result.message.replaceAll(token, '[token]') }
+const DIRECTIONS_MESSAGES: MapboxMessages = {
+  aborted: 'Route request cancelled.',
+  network: 'Could not reach Mapbox. Check your internet connection and try again.',
+  rateLimit: 'Mapbox is rate limiting route requests (429). Wait a minute, then try again.',
 }
 
 export interface FetchProbeRouteOptions {

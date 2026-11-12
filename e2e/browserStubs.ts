@@ -129,7 +129,11 @@ export function installBrowserStubs(): void {
 
 /** What the stand-in for the iPhone shell's plugin was asked to do, in order. */
 export interface ShellWindow {
-  __shell: { calls: string[] }
+  __shell: {
+    calls: string[]
+    /** Every text handed to the share sheet. */
+    shared: string[]
+  }
 }
 
 /**
@@ -143,14 +147,79 @@ export interface ShellWindow {
  * - the plugin's speak() writes into window.__e2e.spoken and resolves 1.5 s
  *   later on the page's clock, as the native voice does when a line ends;
  * - the plugin's httpGet() (native networking on a phone) is the page's fetch,
- *   and a hidden page is reported as the plugin's 'appState' event.
+ *   and a hidden page is reported as the plugin's 'appState' event;
+ * - the plugin's startSimulatedRoute() (the "Test drive") moves a made-up car
+ *   along the points it is given on the page's clock, one 'fix' a second
+ *   marked `simulated`, the way RouteIQSimulation.swift does on a phone, and
+ *   share() records the text instead of opening a share sheet.
  *
  * Self-contained, like installBrowserStubs.
  */
 export function installShellStubs(): void {
   const w = window as unknown as E2EWindow & ShellWindow & Window & { RouteIQNative: unknown }
   const calls: string[] = []
-  w.__shell = { calls }
+  const shared: string[] = []
+  w.__shell = { calls, shared }
+  // The made-up car of a test drive: where it is on its points, and the script still ahead.
+  type Step = { atM: number; speedMps?: number; stopSec?: number }
+  let car: { points: number[][]; along: number[]; steps: Step[]; speed: number; at: number; stop: number; last: number | null } | null = null
+  let carTimer: ReturnType<typeof setInterval> | null = null
+  const rad = (d: number) => (d * Math.PI) / 180
+  const metersBetween = (a: number[], b: number[]) => {
+    const h = Math.sin(rad(b[1]! - a[1]!) / 2) ** 2 + Math.cos(rad(a[1]!)) * Math.cos(rad(b[1]!)) * Math.sin(rad(b[0]! - a[0]!) / 2) ** 2
+    return 2 * 6_371_008.8 * Math.asin(Math.min(1, Math.sqrt(h)))
+  }
+  const moveCar = () => {
+    if (car === null) return
+    const now = Date.now()
+    const dt = car.last === null ? 0 : Math.min(3, Math.max(0, (now - car.last) / 1000))
+    car.last = now
+    const length = car.along.at(-1)!
+    const before = car.at
+    let left = dt
+    for (;;) {
+      while (car.steps.length > 0 && car.steps[0]!.atM <= car.at + 0.001) {
+        const step = car.steps.shift()!
+        if (step.speedMps !== undefined) car.speed = step.speedMps
+        if (step.stopSec !== undefined) car.stop += step.stopSec
+      }
+      if (left <= 0) break
+      if (car.stop > 0) {
+        const used = Math.min(car.stop, left)
+        car.stop -= used
+        left -= used
+        continue
+      }
+      if (car.speed <= 0 || car.at >= length) break
+      const limit = car.steps.length > 0 ? Math.min(length, car.steps[0]!.atM) : length
+      const room = limit - car.at
+      if (car.speed * left < room) {
+        car.at += car.speed * left
+        left = 0
+      } else {
+        car.at = limit
+        left -= room / car.speed
+      }
+    }
+    let i = 0
+    while (i < car.points.length - 2 && car.along[i + 1]! < car.at) i++
+    const a = car.points[i]!
+    const b = car.points[i + 1] ?? a
+    const span = (car.along[i + 1] ?? car.along[i]!) - car.along[i]!
+    const t = span > 0 ? Math.min(1, Math.max(0, (car.at - car.along[i]!) / span)) : 0
+    const y = Math.sin(rad(b[0]! - a[0]!)) * Math.cos(rad(b[1]!))
+    const x = Math.cos(rad(a[1]!)) * Math.sin(rad(b[1]!)) - Math.sin(rad(a[1]!)) * Math.cos(rad(b[1]!)) * Math.cos(rad(b[0]! - a[0]!))
+    const speed = dt > 0 ? (car.at - before) / dt : 0
+    emit('fix', {
+      lng: a[0]! + (b[0]! - a[0]!) * t,
+      lat: a[1]! + (b[1]! - a[1]!) * t,
+      accuracy: 5,
+      speed,
+      ...(speed > 0.5 && span > 0 ? { course: ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360 } : {}),
+      timestamp: now,
+      simulated: true,
+    })
+  }
   const listeners = new Map<string, Set<(data?: unknown) => void>>()
   const emit = (event: string, data?: unknown) => [...(listeners.get(event) ?? [])].forEach((l) => l(data))
   let line = 0
@@ -172,6 +241,34 @@ export function installShellStubs(): void {
     },
     async stopLocation() {
       calls.push('stopLocation')
+      // As on the phone: ending the location stream ends a test drive too.
+      if (carTimer !== null) clearInterval(carTimer)
+      carTimer = null
+      car = null
+    },
+    async startSimulatedRoute({ points, speedMps, script }: { points: number[][]; speedMps: number; script: Step[] }) {
+      calls.push('startSimulatedRoute')
+      if (points.length === 0) throw Object.assign(new Error('invalid'), { code: 'invalid' })
+      const along = [0]
+      for (let i = 1; i < points.length; i++) along.push(along[i - 1]! + metersBetween(points[i - 1]!, points[i]!))
+      // A route that replaces another carries on in the same rhythm; the first one reports at once.
+      const running = car !== null && carTimer !== null
+      car = { points, along, steps: [...script].sort((p, q) => p.atM - q.atM), speed: speedMps, at: 0, stop: 0, last: running ? car!.last : null }
+      if (running) return
+      if (carTimer !== null) clearInterval(carTimer)
+      carTimer = setInterval(moveCar, 1000)
+      moveCar()
+    },
+    async stopSimulatedRoute() {
+      calls.push('stopSimulatedRoute')
+      if (carTimer !== null) clearInterval(carTimer)
+      carTimer = null
+      car = null
+    },
+    async share({ text }: { text: string }) {
+      calls.push('share')
+      shared.push(text)
+      return { completed: true }
     },
     async getCurrentPosition() {
       calls.push('getCurrentPosition')
@@ -220,8 +317,10 @@ export function installShellStubs(): void {
     },
   }
 
-  w.__e2e.fix = (lng, lat, headingDeg, speedMps) =>
-    emit('fix', { lng, lat, accuracy: 5, speed: speedMps, course: speedMps > 0.5 ? headingDeg : -1, timestamp: Date.now() })
+  // The phone's own GPS. During a test drive the native side discards it, so it is not sent on here either.
+  w.__e2e.fix = (lng, lat, headingDeg, speedMps) => {
+    if (car === null) emit('fix', { lng, lat, accuracy: 5, speed: speedMps, course: speedMps > 0.5 ? headingDeg : -1, timestamp: Date.now() })
+  }
   const geolocation = navigator.geolocation as unknown as { watchPosition: () => number; getCurrentPosition: () => void }
   geolocation.watchPosition = () => {
     calls.push('BROWSER watchPosition')

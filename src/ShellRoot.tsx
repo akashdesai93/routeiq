@@ -103,7 +103,7 @@ export function ShellApp({ store }: { store: TextStore }) {
         }
       />
       {/* Beside the app, not in place of it: opening it must not end a drive. */}
-      {diagnostics && <DriveDiagnosticsPanel onClose={() => setDiagnostics(false)} />}
+      {diagnostics && <DriveDiagnosticsPanel store={store} onClose={() => setDiagnostics(false)} />}
     </>
   )
 }

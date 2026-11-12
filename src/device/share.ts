@@ -1,6 +1,8 @@
+import { nativePlugin } from './native/plugin.ts'
+
 /**
- * Handing text on: the share sheet where the web view offers one (Safari on
- * the iPhone, the shell's web view where iOS allows it), the clipboard
+ * Handing text on: the share sheet (in the iPhone shell, the plugin's own;
+ * in a browser, the Web Share API where it is offered), the clipboard
  * otherwise. Nothing is sent anywhere by this module itself: the owner picks
  * where the text goes, or pastes it.
  */
@@ -18,13 +20,28 @@ function nav(): ShareNavigator | null {
   }
 }
 
+/** The iPhone shell's share sheet, or null outside the shell (or in an older app without it). */
+function pluginShare(): ((text: string) => Promise<unknown>) | null {
+  const plugin = nativePlugin()
+  return plugin === null || typeof plugin.share !== 'function' ? null : (text) => plugin.share!({ text })
+}
+
 /** True when there is a share sheet to open. */
 export function canShare(): boolean {
-  return typeof nav()?.share === 'function'
+  return pluginShare() !== null || typeof nav()?.share === 'function'
 }
 
 /** Opens the share sheet. 'cancelled' when the owner closed it; 'failed' when it could not open. */
 export async function shareText(title: string, text: string): Promise<'shared' | 'cancelled' | 'failed'> {
+  const native = pluginShare()
+  if (native !== null) {
+    try {
+      await native(text)
+      return 'shared'
+    } catch {
+      return 'failed'
+    }
+  }
   const share = nav()?.share
   if (typeof share !== 'function') return 'failed'
   try {

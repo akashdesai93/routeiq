@@ -1,3 +1,4 @@
+import type { ShellWindow } from './browserStubs.ts'
 import { expect, test } from './harness.ts'
 import { NO_TOKEN_PORT } from './ports.ts'
 import { JAM_ON_A_FROM_SECOND_CHECK } from './world/traffic.ts'
@@ -114,6 +115,15 @@ test('in the iPhone app, the drive log is kept on the phone across launches', as
   const stored = await page.evaluate((key) => localStorage.getItem(key), LOG_KEY)
   expect(stored).not.toMatch(COORDINATE)
   expect(stored).not.toContain('pk.')
+
+  // Export: Share opens the phone's own share sheet (the shell plugin) with the CSV.
+  await page.getByRole('button', { name: 'Export' }).click()
+  await page.getByRole('button', { name: 'Share' }).click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as ShellWindow).__shell.shared)).toHaveLength(1)
+  const shared = (await page.evaluate(() => (window as unknown as ShellWindow).__shell.shared))[0]!
+  expect(shared).toMatch(/^started,corridor,hour,outcome/)
+  expect(shared.split('\n')).toHaveLength(2)
+  expect(shared).not.toMatch(COORDINATE)
 })
 
 test('when location is taken away mid-drive and I tap Try again, the drive so far is kept as ended', async ({ app, page }) => {

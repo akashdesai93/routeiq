@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "hash": "a999f2176817cabf955521c7996d51683fa3c837414f76a21356debeb3b865b6",
+  "version": 3,
+  "hash": "7bb395d265a26830ca100b1d9537f8540e693f39bc97dddc09c3006f67b5a234",
   "history": [
     {
       "version": 1,
@@ -8,7 +8,11 @@
     },
     {
       "version": 2,
-      "hash": "a999f2176817cabf955521c7996d51683fa3c837414f76a21356debeb3b865b6"
+      "hash": "c3446259ba3fc54d756e6049eb82e8926dba517db3eefca4b3a0bdc32716267a"
+    },
+    {
+      "version": 3,
+      "hash": "7bb395d265a26830ca100b1d9537f8540e693f39bc97dddc09c3006f67b5a234"
     }
   ],
   "declarations": {
@@ -33,9 +37,10 @@
     "LoggedSignals": "interface LoggedSignals { readonly count : number readonly partial : boolean }",
     "LoggedSwitch": "interface LoggedSwitch { readonly atSec : number readonly code : RerouteCode readonly accepted : boolean readonly claimedSavingSec : number | null readonly newRouteSec : number | null readonly realisedSavingSec : number | null readonly toSource : RouteSource }",
     "Maneuver": "interface Maneuver { readonly atDistanceM : number readonly kind : string readonly location : LngLat }",
-    "NativeFix": "interface NativeFix { readonly lng : number readonly lat : number readonly accuracy ? : number readonly speed ? : number readonly course ? : number readonly timestamp ? : number }",
+    "NativeFix": "interface NativeFix { readonly lng : number readonly lat : number readonly accuracy ? : number readonly speed ? : number readonly course ? : number readonly timestamp ? : number readonly simulated ? : boolean }",
     "NativeListenerHandle": "interface NativeListenerHandle { remove ( ) : Promise < void > }",
     "NativeLocationError": "interface NativeLocationError { readonly kind : string }",
+    "NativeSimulatedStep": "interface NativeSimulatedStep { readonly atM : number readonly speedMps ? : number readonly stopSec ? : number }",
     "OsmBundleIndex": "interface OsmBundleIndex { readonly version : 2 readonly source : string readonly dataDate : number readonly extracts : readonly OsmExtractInfo [ ] readonly covered : TileRows readonly files : TileRows readonly nodeCount : number readonly attribution : string readonly license : string }",
     "OsmExtractInfo": "interface OsmExtractInfo { readonly name : string readonly dataDate : number }",
     "OsmSignalNode": "interface OsmSignalNode { readonly id : number readonly lng : number readonly lat : number }",
@@ -52,7 +57,7 @@
     "RerouteOptions": "interface RerouteOptions { readonly minSavingSec : number readonly minSavingFraction : number readonly confirmPolls : number readonly cooldownSec : number readonly noReturnSec : number readonly returnSavingFactor : number readonly minLeadDistanceM : number readonly minLeadTimeSec : number readonly freewayLeadDistanceM : number readonly routeLostPolls : number readonly offRouteM : number readonly sameRouteToleranceM : number readonly matchToleranceM : number readonly matchMinOverlap : number readonly matchMaxGapM : number readonly matchMaxDivergenceM : number readonly matchIgnoreStartM : number readonly baselineViaSpacingM : number readonly baselineMaxViaPoints : number readonly returnOverlapFraction : number readonly requireTypicalDuration : boolean readonly etaTieWindowSec : number }",
     "RerouteState": "interface RerouteState { readonly pending : { readonly geometry : readonly LngLat [ ] readonly polls : number } | null readonly lastSwitchAtSec : number | null readonly abandoned : readonly { readonly geometry : readonly LngLat [ ] readonly atSec : number } [ ] readonly failedPolls : number readonly lostPolls : number readonly declined ? : readonly { readonly geometry : readonly LngLat [ ] readonly untilSec : number } [ ] }",
     "RouteCandidate": "interface RouteCandidate { readonly id : string readonly geometry : readonly LngLat [ ] readonly durationSec : number readonly typicalDurationSec : number | null readonly distanceM : number readonly signalCount : number | null readonly signalCoverage : SignalCoverage readonly providerSignalCount : number | null readonly intersections : readonly RouteIntersection [ ] | null readonly limitedAccessSpansM : readonly DistanceSpanM [ ] | null readonly maneuvers : readonly Maneuver [ ] readonly guidance ? : readonly GuidanceStep [ ] readonly source ? : RouteSource readonly via ? : LngLat readonly segmentTraffic ? : SegmentTraffic | null }",
-    "RouteIQNativePlugin": "interface RouteIQNativePlugin { startLocation ( ) : Promise < { authorization ? : string } > stopLocation ( ) : Promise < unknown > getCurrentPosition ( ) : Promise < NativeFix > speak ( options : { text : string } ) : Promise < { finished ? : boolean } > cancelSpeech ( ) : Promise < unknown > keepAwake ( options : { on : boolean } ) : Promise < unknown > httpGet ( options : { id : string url : string timeoutMs : number } ) : Promise < { status ? : number body ? : string ms ? : number } > httpCancel ( options : { id : string } ) : Promise < unknown > addListener ( event : 'appState' , listener : ( change : { state ? : string } ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'fix' , listener : ( fix : NativeFix ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'locationError' , listener : ( error : NativeLocationError ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'tick' , listener : ( ) => void ) : Promise < NativeListenerHandle > }",
+    "RouteIQNativePlugin": "interface RouteIQNativePlugin { startLocation ( ) : Promise < { authorization ? : string } > stopLocation ( ) : Promise < unknown > getCurrentPosition ( ) : Promise < NativeFix > speak ( options : { text : string } ) : Promise < { finished ? : boolean } > cancelSpeech ( ) : Promise < unknown > keepAwake ( options : { on : boolean } ) : Promise < unknown > httpGet ( options : { id : string url : string timeoutMs : number } ) : Promise < { status ? : number body ? : string ms ? : number } > httpCancel ( options : { id : string } ) : Promise < unknown > startSimulatedRoute ? ( options : { points : number [ ] [ ] speedMps : number script : NativeSimulatedStep [ ] } ) : Promise < unknown > stopSimulatedRoute ? ( ) : Promise < unknown > share ? ( options : { text : string } ) : Promise < { completed ? : boolean } > addListener ( event : 'appState' , listener : ( change : { state ? : string } ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'fix' , listener : ( fix : NativeFix ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'locationError' , listener : ( error : NativeLocationError ) => void ) : Promise < NativeListenerHandle > addListener ( event : 'tick' , listener : ( ) => void ) : Promise < NativeListenerHandle > }",
     "RouteIntersection": "interface RouteIntersection { readonly location : LngLat readonly signal : boolean }",
     "RouteSignal": "interface RouteSignal { readonly id : string readonly position : LngLat readonly name : string | null readonly source : SignalSource readonly atDistanceM : number readonly offsetM : number readonly mergedIds : readonly string [ ] }",
     "RouteSource": "type RouteSource = 'provider' | 'probe'",
