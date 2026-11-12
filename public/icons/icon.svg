@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- RouteIQ app icon, from the approved look (design-tokens: --bg, --fg, --amber):
+       a route on black glass, white from the start, amber where the faster way ends.
+       Source of every PNG in this folder: scripts/design/app-icons.mjs renders them. -->
+  <rect width="512" height="512" fill="#050607"/>
+  <g id="mark">
+    <path d="M143 400 V268 H285 V150 H368" fill="none" stroke="#f2f4f6" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="143" cy="400" r="38" fill="#f2f4f6"/>
+    <circle cx="368" cy="150" r="40" fill="#ffb000"/>
+  </g>
+</svg>
