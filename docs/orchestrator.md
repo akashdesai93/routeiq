@@ -12,6 +12,20 @@ and in this repo. Any fresh session can rebuild the whole picture with one comma
 node scripts/orch/state.mjs --out tmp/orch     # sessions, PRs, issues, events, decisions, health
 ```
 
+It writes `state.json` and, split out of it, `sessions.json`, `prs.json`, `issues.json`,
+`events.json`, `decisions.json`, `health.json` and `phone-queue.json`, plus `board.md`,
+`morning.md` and `alert.md`. The thresholds are in `scripts/orch/defaults.mjs`:
+
+| Threshold | Default |
+| --- | --- |
+| #17 comments read (by last update) | 48 h |
+| Orchestrator heartbeat stale (understudy acts) | 90 min |
+| Heartbeat alert | 3 h |
+| Session silent (working, waiting or blocked, with an open PR or issue) | 2 h |
+| PR orphaned (red or conflicting, no push) | 2 h |
+| Claim belongs to someone else | 2 h |
+| Dispatched session that never posted | 1 h |
+
 ## Roles
 
 Each role has a prompt template in `.claude/orch/roles/<role>.md`, rendered with
