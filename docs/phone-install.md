@@ -208,7 +208,9 @@ so it is safe to paste anywhere.
 How to read it yourself:
 
 - `ticks: 3200 (2900 while not active), longest gap 1 s`: the web code kept running while locked.
-  A line like `no tick for 45 s [background]` means iOS paused it.
+  A line like `no tick for 45 s [background]` means iOS paused it. While the car stands
+  still, the app passes on a fix only every 3 s (battery, #98), so a longest gap of 3 to 4 s
+  is expected after any stop; anything from 5 s up is logged and is a real pause.
 - `requests: 14 sent (12 while not active), 14 answered, 0 failed`: route checks got through
   while locked. `timeout` or `network` lines are requests that did not.
 - `speech: 22 lines started, 22 finished`: every line was spoken to the end.

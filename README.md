@@ -1116,6 +1116,20 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **A hidden page is not a pause.** In a browser the session stops asking for routes
   while the page is hidden; in the shell it is never told the page was hidden, so the
   checks go on. The rule in `core/live.ts` is unchanged.
+- **Standing still** (battery, #98). Core Location stays at `BestForNavigation` with no
+  distance filter and is never paused, for the whole drive. What changes is what crosses
+  into the web view (`RouteIQStillness.swift`, `RouteIQStillness.defaultOptions`). Once
+  the car has stood still (speed under 0.5 m/s, within 25 m of where it stopped) for 10 s,
+  a fix is passed on only every 3 s, and the native tick only when nothing else went for
+  3 s. The first fix that moves (0.5 m/s or more, more than 25 m away, or no speed known)
+  is passed on at once. While fixes flow, no native tick is sent either (they are the
+  clock); when they stop for 1.5 s (a tunnel), the ticks come back. A held fix waits at
+  most about 4 s: under the web app's `maxFixAgeSec` (10 s), so the web side still sees a
+  fresh position and a stopped car and pauses its checks by its own rule, and under the 5 s
+  at which Drive diagnostics logs `no tick for N s` (a pause iOS imposed). Diagnostics'
+  longest gap between fixes and ticks reads 3 to 4 s after a stop for that reason.
+  The checks: `bash native/shell/scripts/test-swift-logic.sh` (Linux or macOS, also in
+  CI) and `tests/stillness.test.ts`.
 - **The clock's ticks.** iOS may hold back a web page's timers while locked, so the
   session's once-a-second tick is driven by each native position fix and by a native
   one-second timer event, as well as by `setInterval`; whichever comes first counts, at
