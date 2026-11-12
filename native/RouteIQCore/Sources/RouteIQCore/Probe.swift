@@ -398,27 +398,18 @@ public enum Probe {
     /// True when `probe` passes within `toleranceM` of every point of `known`,
     /// `known` sampled every `sampleM` meters: the probe drives all of the
     /// known route and something more, so it can only be slower. One-way.
-    public static func coversRoute(_ probe: [LngLat], _ known: [LngLat], toleranceM: Double = Select.sameRouteToleranceM, sampleM: Double = ProbeOptions.default.coverSampleM) -> Bool {
+    /// Linear in the routes' length (#93); `meter` counts the work.
+    public static func coversRoute(
+        _ probe: [LngLat],
+        _ known: [LngLat],
+        toleranceM: Double = Select.sameRouteToleranceM,
+        sampleM: Double = ProbeOptions.default.coverSampleM,
+        meter: MatchMeter? = nil
+    ) -> Bool {
         if probe.count < 2 || known.count < 2 { return false }
         let project = Geo.localProjector(known[0])
-        let line = probe.map(project)
-        let segments = line.count - 1
-        // Consecutive samples are usually beside the same segment: each search starts at the last hit.
-        var last = 0
-        for point in sampled(known, sampleM) {
-            let p = project(point)
-            var hit = false
-            for k in 0..<segments {
-                let i = (last + k) % segments
-                if Geo.pointToSegment(p, line[i], line[i + 1]).distanceM <= toleranceM {
-                    last = i
-                    hit = true
-                    break
-                }
-            }
-            if !hit { return false }
-        }
-        return true
+        // Each sample looks only at the probe's segments near it (SegmentGrid), not the whole line.
+        return Select.everyPointNear(sampled(known, sampleM).map(project), probe.map(project), toleranceM, meter)
     }
 
     /// The provider's routes with the probed ones added, each tagged `.probe`
@@ -429,13 +420,14 @@ public enum Probe {
         _ candidates: [RouteCandidate],
         _ probed: [RouteCandidate],
         toleranceM: Double = Select.sameRouteToleranceM,
-        coverSampleM: Double = ProbeOptions.default.coverSampleM
+        coverSampleM: Double = ProbeOptions.default.coverSampleM,
+        meter: MatchMeter? = nil
     ) -> [RouteCandidate] {
         var merged = candidates
         for route in probed {
             if !usable(route) { continue }
-            if merged.contains(where: { Select.sameRouteGeometry($0.geometry, route.geometry, toleranceM: toleranceM) }) { continue }
-            if merged.contains(where: { usable($0) && coversRoute(route.geometry, $0.geometry, toleranceM: toleranceM, sampleM: coverSampleM) }) { continue }
+            if merged.contains(where: { Select.sameRouteGeometry($0.geometry, route.geometry, toleranceM: toleranceM, meter: meter) }) { continue }
+            if merged.contains(where: { usable($0) && coversRoute(route.geometry, $0.geometry, toleranceM: toleranceM, sampleM: coverSampleM, meter: meter) }) { continue }
             var tagged = route
             tagged.source = .probe
             merged.append(tagged)

@@ -294,7 +294,11 @@ public enum Tracking {
                 }
             }
         } else {
-            let p = closest(passes)
+            // Nothing to go on: of the passes about as near as any, the first in driving order. A
+            // drive starts at the start of its route, and at a self-crossing (a cloverleaf) the
+            // later pass can be a meter nearer (#74).
+            let nearM = closest(passes).distanceM + samePassSlackM
+            let p = passes.first { $0.distanceM <= nearM }!
             pass = p
             alongM = p.alongM
         }
