@@ -159,7 +159,7 @@ repos/akashdesai93/routeiq/actions/workflows/board.yml/dispatches -f ref=main`).
 `orch-state` artifact, and keeps one `orch-alert` issue open while health is bad:
 orchestrator heartbeat older than 3 h, `main` red, orphaned PRs, sessions silent for 2 h
 with work in flight, stray decisions. It comments there only when the list changes, and
-closes it when health is good. At 11:00 UTC it also posts the **morning report** on #17:
+closes it when health is good. At its 11:23 UTC run it also posts the **morning report** on #17:
 phone results first, then what needs the owner, in plain words.
 
 Nobody edits the body of #17 by hand.
