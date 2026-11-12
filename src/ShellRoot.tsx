@@ -81,22 +81,21 @@ export function ShellApp({ store }: { store: TextStore }) {
       />
     )
   }
+  const diagnosticsButton = (
+    <button type="button" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
+      Drive diagnostics
+    </button>
+  )
   // A new token is a new app: nothing made with the old one is kept on screen.
   return (
     <>
       <App
         key={status.token}
         status={status}
-        driveExtra={
-          <button type="button" className="live-diagnostics" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
-            Diagnostics
-          </button>
-        }
+        driveExtra={diagnosticsButton}
         barExtra={
           <span className="shell-actions">
-            <button type="button" aria-expanded={diagnostics} onClick={() => setDiagnostics((open) => !open)}>
-              Drive diagnostics
-            </button>
+            {diagnosticsButton}
             <button type="button" className="change-token" onClick={() => setChanging(true)}>
               Change token
             </button>

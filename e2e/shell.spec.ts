@@ -37,7 +37,24 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   await app.snap('next launch: the trip, with Change token')
 
   // Half a minute into the drive the phone is locked, and stays locked to the end.
-  const log = await app.drive({ hideAtSec: 30 })
+  // Before that: the top bar is gone while driving, and Drive diagnostics is still one tap behind More.
+  const log = await app.drive({
+    hideAtSec: 30,
+    lookAtSec: [
+      {
+        atSec: 20,
+        look: async () => {
+          await page.getByRole('button', { name: 'More' }).click()
+          await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+          await expect(page.getByLabel('Diagnostics text')).toBeVisible()
+          await app.snap('driving in the iPhone app: Drive diagnostics from More')
+          await page.getByRole('button', { name: 'Close' }).click()
+          await page.getByRole('button', { name: 'Less' }).click()
+          await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
+        },
+      },
+    ],
+  })
   await app.snap('arrived, after a drive with the phone locked')
 
   expect(log.arrived).toBe(true)
@@ -110,11 +127,14 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
     if (sec === 8) {
       // The drive view says the position is made up, and has a way to the diagnostics without ending the drive.
       await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
-      await page.getByRole('button', { name: 'Diagnostics', exact: true }).click()
+      await page.getByRole('button', { name: 'More' }).click()
+      await page.getByRole('button', { name: 'Drive diagnostics' }).click()
       await expect(page.getByLabel('Diagnostics text')).toHaveValue(/SIMULATED GPS test drive: wrong-turn, 3x speed/)
       await app.snap('during the test drive: SIMULATED GPS, and the diagnostics on top')
       await page.getByRole('button', { name: 'Close' }).click()
+      await page.getByRole('button', { name: 'Less' }).click()
       await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
+      await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
     }
     // The phone's real GPS (it is at home, far from the route) keeps reporting; none of it reaches the drive.
     if (sec % 10 === 0) await page.evaluate(() => (window as unknown as { __e2e: { fix: (...a: number[]) => void } }).__e2e.fix(-80.9, 35.3, 0, 0))

@@ -96,6 +96,67 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
 })
 
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+
+  test('the driving screen shows the next turn and its distance large, one line for the arrival, and the rest behind More', async ({ app, page }) => {
+    await app.open({ fakeClock: true })
+    await app.routesReady()
+    const turnCard = page.getByLabel('Next turn')
+    const sheet = page.getByLabel('Live drive')
+    const mute = page.getByRole('button', { name: 'Mute' })
+
+    const log = await app.drive({
+      maxSec: 70,
+      lookAtSec: [
+        {
+          atSec: 60,
+          look: async () => {
+            // The turn card: the distance to the next turn is the hero, over the street to turn onto.
+            await expect(turnCard.locator('.live-turn-distance')).toHaveText('2.9 mi')
+            await expect(turnCard.locator('.live-turn-road')).toHaveText('Turn left: Cross Street')
+            await expect(turnCard.locator('[data-arrow="left"]')).toBeVisible()
+            // One line: the time left, and the arrival time.
+            await expect(sheet.locator('.live-eta')).toHaveText(/^\d+ minArrive \d{1,2}:\d{2} AM$/)
+            // Two figures at a glance: the lights, the distance left and the voice are not on this screen.
+            await expect(mute).toHaveCount(0)
+            await expect(sheet).not.toContainText('Lights')
+            await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
+            // The turn card and the sheet leave the car, in the middle of the map, in view.
+            const [card, bottom] = [await turnCard.boundingBox(), await sheet.boundingBox()]
+            expect(card!.y + card!.height).toBeLessThan(844 / 3)
+            expect(bottom!.y).toBeGreaterThan(844 / 2)
+            await app.snap('driving on a phone: the next turn, the time left and the arrival')
+
+            await page.getByRole('button', { name: 'More' }).click()
+            // The map is a little shorter now: one frame for it to draw at its new size.
+            await page.clock.runFor(50)
+            // A full light count is a plain number; the distance left; the automatic switch; the voice.
+            await expect(sheet.locator('[data-tile="lights"]')).toHaveText(/^Lights on route\d+$/)
+            await expect(sheet.locator('[data-tile="distance"]')).toHaveText(/^Distance\d+ mi$/)
+            await expect(sheet.locator('[data-tile="auto-switch"]')).toHaveText('Auto-switchOn')
+            await expect(sheet).toContainText('Staying: current route is still the fastest · checked')
+            await expect(mute).toHaveAttribute('aria-pressed', 'false')
+            await app.snap('More: lights, distance, the automatic switch and the voice')
+            // Everything tapped is 44px or more.
+            for (const button of await sheet.getByRole('button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+
+            await mute.click()
+            await expect(page.getByRole('button', { name: 'Unmute' })).toHaveAttribute('aria-pressed', 'true')
+            await page.getByRole('button', { name: 'Unmute' }).click()
+            await page.getByRole('button', { name: 'Less' }).click()
+            await expect(mute).toHaveCount(0)
+          },
+        },
+      ],
+    })
+    expect(log.arrived).toBe(false)
+
+    await page.getByRole('button', { name: 'End' }).click()
+    await expect(page.locator('.route-badge', { hasText: 'Recommended' })).toBeVisible()
+  })
+})
+
 test('the map fills the drive view, and fits the trip screen again after End', async ({ app, page }) => {
   await app.open()
   await app.routesReady()

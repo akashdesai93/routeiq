@@ -93,7 +93,7 @@ and payment methods. The signing Apple ID does not need to be the one signed in 
      "While Using"; nobody has measured that on this app.
    - Leave **Precise Location** on.
    - If you tapped "Don't Allow": Settings > Privacy & Security > Location Services > RouteIQ.
-6. You should hear "RouteIQ started". If not: volume up, and check the mute button in the app's
+6. You should hear "RouteIQ started". If not: volume up, and check Voice behind More in the app's
    drive view. The ring/silent switch should not matter (the app uses the playback audio category).
 
 ## 4. The 10-minute check, at home, before the drive
@@ -110,7 +110,7 @@ Do this on foot or parked. It is the only real test of the thing this app exists
 4. Start some music, lock again. When RouteIQ speaks, the music should get quieter, then return.
 5. Unlock, open another app (Messages) for two minutes, keep moving. The voice should continue.
 6. Open RouteIQ. The map should be where you are, not where you were when you locked it, and the
-   drive view should say "checked N s ago" with N under about a minute.
+   drive view should say "checked N s ago" (behind More) with N under about a minute.
 7. Tap **End**.
 8. Tap **Drive diagnostics** in the top bar, then **Copy**, and send what it copied (step 6 below).
    Do this even if everything worked.
@@ -138,12 +138,12 @@ moved by the app's native code, so it keeps going while the phone is locked, lik
    "1 min" comes after 20 seconds. The clock, and the once-a-minute checks for a faster route,
    stay in real time.
 5. Tap **Start drive**. You hear "RouteIQ started". The drive view shows a yellow **SIMULATED GPS**
-   badge for the whole drive. iOS may ask for location: allow it, as for a real drive (see below).
+   badge over the map, on the right, for the whole drive. iOS may ask for location: allow it, as for a real drive (see below).
 6. **Lock the phone.** With **Wrong turn** you should hear, about 10 seconds after the turn,
    "You are off the route. Finding a new one." and then "New route. N minutes to your
    destination." The car then follows the new route, and you hear its turns.
-7. To look at the diagnostics without ending the drive: unlock, tap **Diagnostics** (bottom
-   right of the drive view), read or **Share**, then **Close**.
+7. To look at the diagnostics without ending the drive: unlock, tap **More**, then **Drive
+   diagnostics**, read or **Share**, then **Close**.
 8. Tap **End** when you have heard enough. A test drive does not end by itself unless the car
    reaches the destination. Untick **Test drive (simulated GPS)** before a real drive; it is also
    off again every time the app is opened.
@@ -152,7 +152,7 @@ Things to know:
 
 - **The route requests are real.** Each new route and each check for a faster one is a real
   request to Mapbox with your token, and counts against the drive's request budget ("N of 60
-  requests" in the drive view) and your Mapbox account, the same as on a real drive.
+  requests", behind More in the drive view) and your Mapbox account, the same as on a real drive.
 - **The traffic is real too**, for wherever the made-up car is. The side street of the wrong turn
   is not a real road: it is a straight line off the route, and Mapbox answers from the nearest
   real road.
@@ -174,7 +174,7 @@ Things to know:
   - turn prompts at the usual distances;
   - "Switching to a faster route. Saves N minutes." if traffic changes;
   - after a phone call, the next prompt should come by itself.
-- Glance only when stopped: "checked N s ago" in the drive view should never be many minutes old.
+- Glance only when stopped: "checked N s ago" (behind More in the drive view) should never be many minutes old.
   If it is, route checks are not happening in the background (see the first two unverified items).
 - Things worth writing down afterwards: any silence longer than expected, any prompt that came
   late (after the turn), whether audio came from the car, whether a switch was announced.
@@ -191,7 +191,7 @@ happened while the phone was locked, so please send it after every test drive, g
    If Copy says it could not copy: press and hold the text, **Select All**, **Copy**.
 3. Send it with a line about what you heard and saw.
 
-During a drive the same log is behind **Diagnostics** at the bottom right of the drive view.
+During a drive the same log is behind **More**, then **Drive diagnostics**, in the drive view.
 
 **If the app was closed in between** (swiped away, or iOS ended it), the last drive is still
 there: the app writes the log to its own storage when a drive ends and about every 30 seconds

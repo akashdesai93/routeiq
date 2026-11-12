@@ -57,7 +57,7 @@ the background means iOS did not run the web code.
 The log's text is also written to the app's storage when a drive ends and every 30 s during one
 (`../../src/device/native/lastDrive.ts`), and the panel shows it as "Last drive" after the app was
 closed. **Share** calls the plugin's `share`, which presents a `UIActivityViewController` with the
-text. During a drive the panel opens from **Diagnostics** in the drive view.
+text. During a drive the panel opens from **More**, then **Drive diagnostics**, in the drive view.
 
 ### Test drive (simulated positions)
 

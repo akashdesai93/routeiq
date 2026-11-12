@@ -45,7 +45,7 @@ the phone needs before it hands the page a GPS position.
 - **Use a mount, or have a passenger operate it.** Plan the trip before you set off.
 - **Voice needs one tap first.** iPhone browsers only speak after a tap, so the
   *Start drive* tap itself says "RouteIQ started". If you hear nothing: turn the volume up,
-  check the ring/silent switch, and check Mute in the drive view.
+  check the ring/silent switch, and check Voice behind More in the drive view.
 - Planning and the side-street routes work from the couch; only the live drive needs
   the car.
 

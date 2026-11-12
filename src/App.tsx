@@ -57,7 +57,7 @@ interface AppProps {
   placeStore?: TextStore
   /** Shown in the top bar, after the name. The iPhone shell puts its "Change token" button here. */
   barExtra?: ReactNode
-  /** Shown in the drive view while driving. The iPhone shell puts its "Diagnostics" button here. */
+  /** Shown in the drive view's More sheet. The top bar is hidden during a drive, so the iPhone shell puts "Drive diagnostics" here too. */
   driveExtra?: ReactNode
 }
 
@@ -215,6 +215,8 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
             onSelectRoute={driving || live.active ? ignore : routing.select}
             onCenterChange={noteCenter}
           />
+          {/* A test drive (the iPhone shell): the positions are made up, and the screen says so for as long as it runs. */}
+          {live.active && live.simulated && <span className="sim-badge">SIMULATED GPS</span>}
           {live.active && (
             <LiveDriveView
               state={live.state}
@@ -222,6 +224,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
               destinationLabel={pins.destination.label}
               speechSupported={live.speechSupported}
               replaying={live.replaying}
+              extra={driveExtra}
               dev={
                 import.meta.env.DEV
                   ? {
@@ -231,18 +234,6 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
                       setWhatIfDelaySec: sim.setWhatIfDelaySec,
                     }
                   : null
-              }
-              extra={
-                live.simulated || driveExtra !== null ? (
-                  <div className="live-extra">
-                    {live.simulated && (
-                      <span className="sim-badge" role="status">
-                        SIMULATED GPS
-                      </span>
-                    )}
-                    {driveExtra}
-                  </div>
-                ) : null
               }
               onKeepPrevious={live.keepPrevious}
               onMute={live.setMuted}
