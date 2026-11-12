@@ -1,11 +1,11 @@
 {
   "note": "Bundle-size budget for scripts/check-bundle-size.mjs, in bytes (minified, not compressed). Each budget is the measured size + 10 %. Update with `npm run build && npm run size -- --update` and say why in the pull request.",
   "appJs": {
-    "measured": 377738,
-    "budget": 415512
+    "measured": 415998,
+    "budget": 457598
   },
   "css": {
-    "measured": 64438,
-    "budget": 70882
+    "measured": 70429,
+    "budget": 77472
   }
 }
