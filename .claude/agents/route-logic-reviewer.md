@@ -34,5 +34,15 @@ and a concrete failure scenario:
    meaning; and edge cases left uncovered where relevant (empty routes, a single route,
    failed polls, a tiny remaining trip).
 
+10. **Review findings have guards** (CLAUDE.md, "Review findings become checks"). Read the
+   PR's Copilot and CodeQL comments. Each true finding is fixed in this PR together with a
+   test, lint rule or CI step that fails without the fix; a fix without one is blocking.
+   Known classes to check for even when no bot flagged them:
+   - **Input picks a handler by name** (CodeQL `js/unvalidated-dynamic-method-call`, #91):
+     a name or id from a request, message or file never selects a function by plain
+     property or map lookup. Use a fixed table of own keys (`Object.hasOwn`, or a
+     prototype-less object), check that the entry is a function, and reject anything else
+     (404 or 400). Malformed input is turned away, never thrown on inside a handler.
+
 Finish with a verdict: OK to commit, or the blocking findings in order of severity.
 Don't edit files.

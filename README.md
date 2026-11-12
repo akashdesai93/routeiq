@@ -591,6 +591,9 @@ it; moving a pin, Swap and Reset end the drive. While a drive is on, the route l
 the map show what the last check returned from the car's position, the route being
 driven is drawn in black on a white casing with the car on it, and an amber dot marks where a switch
 leaves the old route (hollow while the switch is still waiting to be confirmed).
+The map gets the route's line only when the route changes; on each fix it gets the car
+(a few hundred bytes) and the part behind the car is trimmed off the line
+(`line-trim-offset`, src/map/driveLayers.ts), for the live drive too (#94).
 
 The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
 
@@ -917,6 +920,12 @@ is marked "via side streets" in the route list.
   plus a spur or loop out to the via: never faster, and not a side street. `coversRoute`
   checks one way only, so the probe's extra roads are allowed, and the sampling between
   vertices keeps a real cut-through that leaves a long straight segment.
+- **The comparison is linear.** Both tests walk along the line and look at the few
+  segments after the last one a point was near; only a miss measures further (the whole
+  line for the first 8 misses, then a segment grid, `segmentGrid` in src/core/geo.ts, the
+  one the reroute matcher uses). A point counts as near only when a segment really is
+  within 10 m, so the answers are those of measuring every segment (#93: a 60 km plan
+  went from about 0.4 s to under 5 ms on a desktop).
 
 | `DEFAULT_PROBE_BUDGET` | Default | Meaning |
 | --- | --- | --- |
@@ -1061,8 +1070,10 @@ destination stops and shows a short summary (trip time, the switches and why).
 with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
 route the plan's probes found (`source: 'probe'`). When the first good fix is on that
 route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
-request of its own, and the plan's answer counts as the first one: the first check goes
-out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+request of its own, and the plan's answer counts as the first one, as old as it is
+(#71): "checked N s ago" counts from when the plan's answer came, not from the Start
+tap, and the first check goes out a poll interval (60 s) after the plan, at once when
+the plan is older than that. A check alone never switches (confirmation needs two). A first fix that is not on it (the trip was planned
 from somewhere else) plans a route from there, as before. From then on the engine judges
 the picked route like any other. Mapbox does not offer a side street by itself, so a
 check from the car usually lacks it; the existing path check (`baselineProbe`, one more
@@ -1186,6 +1197,30 @@ kept in reserve for that. If the car is back on the route line by the time that 
 comes, the answer is taken like any check (minimum saving, confirmation, cooldown, lead),
 not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
+
+**A request that never answers** (#29). Only one route request is out at a time, so a
+connection that hangs (a dead zone) would hold back every check after it. A request not
+answered within 30 seconds (`requestTimeoutSec`, counted from when it was sent and
+covering everything one check asks) is given up: it is cancelled, and taken as a failed
+answer. A check then changes nothing but the engine's failed-poll counter, the quiet
+line says "Staying: could not check for faster routes (The route request timed out.)",
+and the next check goes out at the usual minute; an answer that turns up later is
+ignored. A search for a new route off the route is asked again after `replanGapSec`. A
+first route that never comes ends the start with "Could not find a route from here. The
+route request timed out.", as a failed one does. The limit is generous on purpose: a
+browser keeps a request going for minutes, while the iPhone shell's own limit is 20 s a
+request, and a check can be two or three requests one after another. In a replay the
+limit is stretched by the replay speed, like the request gap.
+
+**The drive's clock** (#30, `src/device/clock.ts`). Tracking only believes a fix that is
+newer than the last one, so every fix is stamped on arrival with one session clock, the
+same one the drive itself runs on (the browser's GPS, the iPhone shell's GPS and the
+session all share it). It follows the wall clock forward, so time with the phone asleep
+counts, but a step back of the wall clock (NTP or the carrier correcting it, or the time
+set by hand) is absorbed: the clock carries on from where it was. Before, a step back of
+30 s left every fix for 30 s "out of order" and the car stood still on the map, with no
+turn prompts. `performance.now()` was not used because it does not advance while an
+Apple device sleeps (w3c/hr-time#115). The arrival time is still shown on the wall clock.
 
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
