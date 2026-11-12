@@ -1,4 +1,4 @@
-// CI timing probe for #119 (never merged).
+// CI timing probe for #119 (never merged), run 2.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
