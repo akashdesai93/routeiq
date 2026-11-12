@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 2** (Nov 12, 2026: version 1 plus the shell's test drive and share sheet, #86). The Swift port does not match it yet;
+**Current version: 3** (Nov 12, 2026: version 2 plus the reroute changes of #74 and #68). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -107,9 +107,9 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 2 | by definition |
+| Web app (`src/`) | 3 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| iPhone shell plugin (`native/shell`) | 3 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
@@ -121,3 +121,7 @@ the declarations that changed.
   `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
   `startSimulatedRoute`, `stopSimulatedRoute` and `share`. The bridge schema gains
   `simulatedRouteRequest`, `simulatedStep` and `shareRequest`.
+- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.

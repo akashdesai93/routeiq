@@ -3,7 +3,6 @@ import {
   CURRENT_LOCATION_ID,
   DEFAULT_TRIP,
   formatLatLng,
-  lineFrom,
   restoreTrip,
   type LngLat,
   type Place,
@@ -50,6 +49,7 @@ const deviceStore = localTextStore()
 const ignore = () => {}
 const NO_ROUTES: readonly RouteCandidate[] = []
 const NO_SIGNALS: readonly RouteSignal[] = []
+const NO_LINE: readonly LngLat[] = []
 
 interface AppProps {
   status?: TokenStatus
@@ -166,24 +166,27 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, ba
   const driving = view !== null
   const polled = view !== null && view.candidates !== null ? view : null
   const car = view?.car
-  const routeAhead = view?.routeAhead
+  const simRoute = view?.route
+  const simAlongM = view?.alongM
   const turn = view?.turn
   const simOverlay = useMemo(
-    () => (car === undefined || routeAhead === undefined ? null : { car, routeAhead, turn: turn ?? null }),
-    [car, routeAhead, turn],
+    (): DriveOverlay | null =>
+      car === undefined || simRoute === undefined || simAlongM === undefined ? null : { car, route: simRoute, alongM: simAlongM, turn: turn ?? null },
+    [car, simRoute, simAlongM, turn],
   )
 
   // The live drive draws through the same overlay: the car where the tracker has it,
-  // the rest of the route being driven, and the turn-off of a switch.
+  // the route being driven (the same array until the route changes, so the map gets the
+  // line once) with how far along it the car is, and the turn-off of a switch.
   const liveTracking = live.state.tracking
   const liveRoute = live.state.route
   const liveTurn = live.state.turn
   const liveFix = live.state.lastFix
   const liveOverlay = useMemo((): DriveOverlay | null => {
     if (liveTracking !== null && liveRoute !== null) {
-      return { car: liveTracking.position, routeAhead: lineFrom(liveRoute.geometry, liveTracking.alongRouteM), turn: liveTurn }
+      return { car: liveTracking.position, route: liveRoute.geometry, alongM: liveTracking.alongRouteM, turn: liveTurn }
     }
-    if (liveFix !== null) return { car: [liveFix.lng, liveFix.lat], routeAhead: [], turn: null }
+    if (liveFix !== null) return { car: [liveFix.lng, liveFix.lat], route: NO_LINE, alongM: 0, turn: null }
     return null
   }, [liveTracking, liveRoute, liveTurn, liveFix])
   const liveCar = liveOverlay?.car
