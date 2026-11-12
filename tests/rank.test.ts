@@ -3,6 +3,7 @@ import {
   DEFAULT_ETA_TIE_WINDOW_SEC,
   rankRoutes,
   recommendedRouteId,
+  routeDelta,
   type RouteCandidate,
 } from '../src/core/index.ts'
 
@@ -291,5 +292,48 @@ describe('rankRoutes', () => {
     expect(recommendedRouteId([route('fast', 900, 14), route('calm', 920, 11)], { etaTieWindowSec: 0 })).toBe(
       'fast',
     )
+  })
+})
+
+describe('routeDelta: the delta row of the route list', () => {
+  const MI = 1609.344
+  it('says what the recommended route gives against another: minutes, lights and miles, each signed', () => {
+    const best = route('a', 35 * 60, 21, 21 * MI)
+    const other = route('b', 43 * 60, 23, 24 * MI)
+    expect(routeDelta(best, other)).toEqual({
+      time: { figure: '\u22128', unit: 'min' },
+      lights: { figure: '\u22122', unit: 'lights' },
+      distance: { figure: '\u22123', unit: 'mi' },
+    })
+  })
+
+  it('a longer or busier recommended route says so with a plus; one light is singular; under 10 miles keeps a tenth', () => {
+    const best = route('a', 35 * 60, 22, 9.4 * MI)
+    const other = route('b', 41 * 60, 21, 7.1 * MI)
+    expect(routeDelta(best, other)).toEqual({
+      time: { figure: '\u22126', unit: 'min' },
+      lights: { figure: '+1', unit: 'light' },
+      distance: { figure: '+2.3', unit: 'mi' },
+    })
+  })
+
+  it('never compares lights unless both counts are full: partial and unknown give null, never 0', () => {
+    const best = route('a', 35 * 60, 9)
+    const partial = { ...route('b', 43 * 60, 9), signalCoverage: 'partial' as const }
+    expect(routeDelta(best, partial)!.lights).toBeNull()
+    expect(routeDelta(best, route('c', 43 * 60, null))!.lights).toBeNull()
+    expect(routeDelta(route('d', 35 * 60, null), route('e', 43 * 60, 9))!.lights).toBeNull()
+  })
+
+  it('a tie reads 0, not a signed zero', () => {
+    expect(routeDelta(route('a', 600, 5, 9000), route('b', 610, 5, 9010))).toEqual({
+      time: { figure: '0', unit: 'min' },
+      lights: { figure: '0', unit: 'lights' },
+      distance: { figure: '0', unit: 'mi' },
+    })
+  })
+
+  it('no figure from a travel time that is not a number', () => {
+    expect(routeDelta(route('a', Number.NaN), route('b', 600))).toBeNull()
   })
 })

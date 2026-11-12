@@ -93,7 +93,9 @@ export {
   DEFAULT_ETA_TIE_WINDOW_SEC,
   rankRoutes,
   recommendedRouteId,
+  routeDelta,
   type RankOptions,
+  type RouteDelta,
 } from './rank.ts'
 export {
   decideReroute,

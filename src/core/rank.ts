@@ -136,3 +136,40 @@ export function recommendedRouteId(
 ): string | null {
   return rankRoutes(routes, options)[0]?.route.id ?? null
 }
+
+const MINUS = '−'
+const M_PER_MILE = 1609.344
+
+/** "−8", "+2", "0": a whole number with its sign, the minus a real minus sign. */
+function signed(n: number): string {
+  return n < 0 ? `${MINUS}${-n}` : n > 0 ? `+${n}` : '0'
+}
+
+/**
+ * The delta row of the route list (design #21/#44: "−8 min · −2 lights ·
+ * −3 mi"): what the recommended route gives against another, each as a signed
+ * figure and its unit. Minutes and miles are rounded (miles to a whole one
+ * from 10 up, to a tenth below). Lights are compared only when both counts
+ * are full; otherwise `lights` is null and the row says "Lights: can't
+ * compare". Unknown is never zero.
+ */
+export interface RouteDelta {
+  readonly time: { readonly figure: string; readonly unit: 'min' }
+  readonly lights: { readonly figure: string; readonly unit: 'light' | 'lights' } | null
+  readonly distance: { readonly figure: string; readonly unit: 'mi' }
+}
+
+export function routeDelta(recommended: RouteCandidate, other: RouteCandidate): RouteDelta | null {
+  if (!Number.isFinite(recommended.durationSec) || !Number.isFinite(other.durationSec)) return null
+  const minutes = Math.round((recommended.durationSec - other.durationSec) / 60)
+  const a = knownSignals(recommended)
+  const b = knownSignals(other)
+  const miles = (recommended.distanceM - other.distanceM) / M_PER_MILE
+  const roundedMiles = Math.abs(miles) >= 10 ? Math.round(miles) : Math.round(miles * 10) / 10
+  const lights = a === null || b === null ? null : a - b
+  return {
+    time: { figure: signed(minutes), unit: 'min' },
+    lights: lights === null ? null : { figure: signed(lights), unit: Math.abs(lights) === 1 ? 'light' : 'lights' },
+    distance: { figure: signed(roundedMiles === 0 ? 0 : roundedMiles), unit: 'mi' },
+  }
+}
