@@ -1770,7 +1770,7 @@ final class LiveSwitchMomentTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertNil(s.state.engine.pending)
         XCTAssertEqual(try item(s.state.engine.declined, 0).untilSec, 662, accuracy: 0.5)
-        XCTAssertEqual(s.view().moment, .kept(title: "Keeping the previous route.", detail: "Won't offer that route again for 10 min."))
+        XCTAssertEqual(s.view().moment, .kept(title: "Staying on your route.", detail: "Won't offer that route again for 10 min."))
         XCTAssertEqual(s.view().moment?.canKeep, false)
         // B stays five minutes faster: it is never switched to while declined.
         cruise(s, 300, faster)
