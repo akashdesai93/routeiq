@@ -12,7 +12,7 @@ job is named `required`, and that is the only check branch protection asks for.
 | job in `gate.yml` | runs | what it does |
 | --- | --- | --- |
 | `web` (`ci.yml`) | always | typecheck, lint, unit tests (with the counted-work guards), production build, bundle-size budget, the iPhone shell's web side on Linux (its unit tests, the web app built into `www/` with no token and the bridge script, the Xcode project generated and patched, a token search), `npm audit` (warns only) |
-| `e2e` (`e2e.yml`) | always | the end-to-end scenarios, dealt over six runners (`e2e/shard.mjs`: each scenario in exactly one shard, weighted by their measured CI seconds in `e2e/durations.json`); fails when any shard fails |
+| `e2e` (`e2e.yml`) | always | the end-to-end scenarios, dealt over eight runners (`e2e/shard.mjs`: each scenario in exactly one shard, weighted by their measured CI seconds in `e2e/durations.json`); fails when any shard fails |
 | `e2e-report` (`e2e-report.yml`) | after `e2e`, also when it failed | merges the shards' reports into the one `e2e-report` artifact; evidence only, not part of `required` |
 | `native-core` (`native-core.yml`) | when the Swift package, `native/scripts`, the signal tiles or `tests/fixtures` change | `swift build`, `swift test`, the packer's test |
 | `native-app` (`native-app.yml`) | when the native app or what it bundles changes | unsigned `.ipa` on macOS (`RouteIQ-native-unsigned`) |
