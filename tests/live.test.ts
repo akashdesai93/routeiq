@@ -1225,6 +1225,66 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.view().heldTurnText).toBeNull()
   })
 
+  it('confirmed: a shared turn before the turn-off keeps its own distance; only the turn-off itself is held', () => {
+    const withShared = (xM: number) =>
+      faster(xM).map((c) => ({
+        ...c,
+        guidance: [
+          { atDistanceM: 400, location: at(xM + 400, 0), type: 'turn', modifier: 'right', primaryText: 'Shared bend', secondaryText: null, announcements: [], synthesized: true },
+          ...c.maneuvers.slice(1).map((m) => ({ atDistanceM: m.atDistanceM, location: m.location, type: m.kind, modifier: 'left', primaryText: 'Turn-off', secondaryText: null, announcements: [], synthesized: true })),
+        ],
+      }))
+    const s = driving()
+    cruise(s, 120, withShared)
+    expect(s.spoken().at(-1)).toMatch(/Turn in 1\.9 miles\.$/)
+    expect(s.view().nextTurn).toMatchObject({ primaryText: 'Shared bend' })
+    expect(s.view().nextTurn!.distanceM).toBeLessThan(500)
+    expect(s.view().heldTurnText).toBeNull()
+  })
+
+  it('pending: an offer while off the route is not shown', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    expect(s.view().moment).toMatchObject({ stage: 'pending' })
+    // Off the line long enough for the tracker to say so (the replan it asks for stays unanswered).
+    for (let t = 61; t <= 75; t++) {
+      s.setTime(t)
+      s.fix(15 * t, 200)
+    }
+    expect(s.view().offRoute).toBe(true)
+    expect(s.view().moment).toBeNull()
+  })
+
+  it('"Keep my route" while pending drops the side-street via being confirmed, so no probe is spent on it', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    const kept = liveStep({ ...s.state, probes: { ...s.state.probes, keep: at(2000, 300) } }, { type: 'keep-previous', nowMs: s.nowMs() })
+    expect(kept.state.probes.keep).toBeNull()
+  })
+
+  it('a new offer replaces the calm "kept" banner at once', () => {
+    // Checks every 10 s and a 30 s banner, so the next offer comes while "kept" still shows.
+    const s = driving({ pollIntervalSec: 10, switchBannerSec: 30 })
+    cruise(s, 10, faster)
+    expect(s.view().moment).toMatchObject({ stage: 'pending' })
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    expect(s.view().moment).toMatchObject({ stage: 'kept' })
+    // C turns up at the next check: a different route, not the one turned down.
+    cruise(s, 20, (xM) => routesAt(xM, { A: 1300, C: 1000 }))
+    expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
+    expect(s.state.kept).toBeNull()
+    expect(s.view().moment).toMatchObject({ stage: 'pending', title: 'Checking a faster route' })
+  })
+
+  it('a different route offered after one was turned down is a first offer, not "Still faster"', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    cruise(s, 121, (xM) => routesAt(xM, { A: 1300, C: 1000 }))
+    expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
+    expect(s.view().moment).toMatchObject({ stage: 'pending', title: 'Checking a faster route' })
+  })
+
   it('"Keep my route" while pending: nothing to undo, the confirmation is dropped and that route is not taken', () => {
     const s = driving()
     cruise(s, 60, faster)
