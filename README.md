@@ -207,9 +207,11 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
 
 The shapes the Swift port and the iPhone shell depend on (routes, signal tiles and index, the
 place book, the reroute options and state, the live events and effects, the native plugin) are
-versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 1. What is in it,
+versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 6. What is in it,
 the JSON Schemas, and how to change a contract are in [docs/contracts.md](docs/contracts.md).
-`tests/contracts.test.ts` fails on a change of shape without a version bump.
+`tests/contracts.test.ts` fails on a change of shape until the snapshot is regenerated and a file in
+`docs/contracts/changes/` describes it for the Swift port. The version is bumped once per Swift
+port, not in every pull request (#169).
 
 ## Layout
 
