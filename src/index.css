@@ -54,7 +54,7 @@ button:hover { background: #eaeef2; }
 .route-distance { grid-column: 1 / -1; }
 .route-signals { grid-column: 1 / -1; }
 .route-delay { grid-column: 1 / -1; color: #57606a; }
-.route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 12px; font-weight: 400; color: #57606a; }
+.route-badge { margin-left: 6px; padding: 1px 6px; border: 1px solid #d0d7de; border-radius: 10px; font-size: 13px; font-weight: 400; color: #57606a; }
 .route-source { margin-left: 2px; font-size: 12px; font-weight: 400; font-style: italic; color: #57606a; }
 .route-reasons { grid-column: 1 / -1; color: #57606a; font-size: 13px; }
 .hint { color: #57606a; font-size: 13px; }
