@@ -144,7 +144,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         : null,
     )
     const speaker = (speakerRef.current ??= native?.speaker ?? createSpeaker())
-    const replaySource = replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
+    // Development only: the production build leaves the replay out (import.meta.env.DEV is false there).
+    const replaySource = !import.meta.env.DEV || replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
     const source: PositionSource = replaySource ?? native?.source ?? geolocationSource()
     // The session clock never steps back with the wall clock (#30); the GPS sources stamp with it too.
     const now = replaySource === null ? sessionNow : replaySource.now

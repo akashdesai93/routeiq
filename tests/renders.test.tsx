@@ -63,6 +63,11 @@ vi.mock('mapbox-gl/esm', () => {
     fitBounds() {}
     easeTo() {}
     setPaintProperty() {}
+    getStyle() {
+      return { layers: [] }
+    }
+    getLayoutProperty() {}
+    setLayoutProperty() {}
     resize() {}
     remove() {}
   }
@@ -153,6 +158,8 @@ it('during a live drive, a fix and the clock render only the drive view and the 
   vi.stubGlobal('isSecureContext', true)
 
   const { default: App } = await import('../src/App.tsx')
+  // The map's chunk, loaded after the first screen in the app (#97): here before the clock is faked.
+  await import('../src/map/MapView.tsx')
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
@@ -161,6 +168,14 @@ it('during a live drive, a fix and the clock render only the drive view and the 
     root.render(<App status={{ kind: 'ok', token: 'pk.test' }} />)
     await vi.advanceTimersByTimeAsync(3000)
   })
+  // The map loads after the first screen (#97): wait for it, so its own first renders (the
+  // map's load) are not counted as the drive's.
+  for (let i = 0; i < 50 && container.querySelector('.map[aria-busy="true"]') !== null; i++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+  }
+  expect(container.querySelector('.map[aria-busy="true"]'), 'the map still loading').toBeNull()
   const button = (text: string) => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)
   expect(button('Start drive'), 'the Start drive button').toBeDefined()
   await act(async () => {

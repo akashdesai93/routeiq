@@ -93,7 +93,9 @@ export {
   DEFAULT_ETA_TIE_WINDOW_SEC,
   rankRoutes,
   recommendedRouteId,
+  routeDelta,
   type RankOptions,
+  type RouteDelta,
 } from './rank.ts'
 export {
   decideReroute,
@@ -129,11 +131,13 @@ export {
 } from './guidance.ts'
 export {
   arrivalLine,
+  cardDistance,
   DEFAULT_LIVE_OPTIONS,
   LIVE_IDLE,
   livePollGate,
   liveStep,
   liveView,
+  OFFER_TITLE,
   POSITION_ERROR_MESSAGES,
   REQUEST_TIMED_OUT,
   SPOKEN,
@@ -151,6 +155,7 @@ export {
   type LiveView,
   type PositionErrorKind,
   type RequestPurpose,
+  type SwitchMoment,
   type WakeLockStatus,
 } from './live.ts'
 export {

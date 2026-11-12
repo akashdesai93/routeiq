@@ -36,15 +36,18 @@ same JSON fixtures straight from `tests/fixtures`.
 
 The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/contract.ts`, and
 [docs/contracts.md](../../docs/contracts.md)). `Contract.coreContractVersion` is the version this
-port was brought up to: **5**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
+port was brought up to: **6**. `ContractVersionTests` reads `docs/contracts/core-contract.json`
 and fails when the web app's version moves on, so a bump is never missed here. Version 2 differed
 from version 1 only in the iPhone shell's plugin, which this package does not contain; version 3
 adds the reroute changes of #74 and #68 (`matchStartSearchM`, `routeLostWindowSec`, `lostAtSec`); version 4
 changed only live-drive shapes (`LiveOptions.requestTimeoutSec`, `LiveState.pickedAtMs`, the Start
-event's `routeFetchedAtMs`) and version 5 only `LiveSwitch.savingSec` and the drive log (`DriveLog`):
-neither the live drive nor the drive log is ported yet.
+event's `routeFetchedAtMs`), version 5 only `LiveSwitch.savingSec` and the drive log (`DriveLog`, not
+ported), and version 6 only the live drive's switch moment (#84): `LiveOptions.heldTurnMatchM`,
+`LiveState.offer`, `kept` and `declinedTurns`, the switch banner's `atMs`, `beforeSec`, `afterSec`
+and `turnInM` (its text is now the spoken line), "Keep my route" while a switch is still being
+confirmed, and `LiveView.moment` (`SwitchMoment`) and `heldTurnText`.
 
-What of version 5 is ported (#33, in stages):
+What of version 6 is ported (#33, in stages):
 - **Routes:** `RouteCandidate` with `guidance`, `source`, `via` and `segmentTraffic`;
   `GuidanceStep`, `GuidanceAnnouncement`, `SegmentTraffic`, `CongestionLevel`, `RouteSource`.
 - **Signal tiles and bundle:** `SignalBundle` (RouteIQKit). OpenStreetMap only: the City of
@@ -57,7 +60,8 @@ What of version 5 is ported (#33, in stages):
   `CheckProbeMemory`, `DriveProbeBudget` (stage B).
 - **Live drive:** `LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect` (with `LiveStatus`,
   `LiveSwitch`, `LiveSummary`, `PositionErrorKind`, `RequestPurpose`, `WakeLockStatus`), and
-  `Live.liveStep`, `Live.livePollGate`, `Live.liveView` (stage C).
+  `Live.liveStep`, `Live.livePollGate`, `Live.liveView` (stage C), with the switch moment of
+  version 6 (#84: `LiveSwitchMomentTests`).
 
 When the version changes, compare `docs/contracts/core-contract.json` (`declarations`, one line
 per type) with the Swift types. The `history` there lists every version with its hash.

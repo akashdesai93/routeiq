@@ -15,7 +15,7 @@ import {
   trackedRoute,
   trackFix,
 } from '../../src/core/index.ts'
-import { driveFeatures } from '../../src/map/driveFeatures.ts'
+import { driveMarkerFeatures } from '../../src/map/driveFeatures.ts'
 import { parseDirections } from '../../src/providers/mapbox/adapter.ts'
 import { bench, fixesAlong, report, summarize, syntheticDirections } from './lib.mjs'
 
@@ -48,14 +48,14 @@ function replay() {
     tickTimes.push(performance.now() - t0)
 
     // What the UI works out from the new state: the view model (useLiveDrive.ts) and the
-    // map overlay (App.tsx liveOverlay, then MapView's driveFeatures for setData).
+    // map overlay (App.tsx liveOverlay, then MapView's driveMarkerFeatures for setData; the
+    // route line goes to the map once per route since #94, not per fix).
     t0 = performance.now()
     liveView(state, fix.timeMs + 500)
     viewTimes.push(performance.now() - t0)
 
     t0 = performance.now()
-    const ahead = lineFrom(state.route.geometry, state.tracking.alongRouteM)
-    const collection = driveFeatures({ car: state.tracking.position, routeAhead: ahead, turn: null })
+    const collection = driveMarkerFeatures({ car: state.tracking.position, route: state.route.geometry, alongM: state.tracking.alongRouteM, turn: null })
     JSON.stringify(collection) // setData hands the collection to the map's worker as text
     overlayTimes.push(performance.now() - t0)
   }
@@ -82,7 +82,7 @@ const rows = [
   bench('nextTurn', () => nextTurn(route.guidance, 20_000), { batch: 200 }),
   bench('armGuidance', () => armGuidance(route.guidance, 20_000, false), { batch: 200 }),
   { name: 'liveView (the drive view model)', ...summarize(run.viewTimes) },
-  { name: 'map overlay: lineFrom + driveFeatures + stringify', ...summarize(run.overlayTimes) },
+  { name: 'map overlay per fix: driveMarkerFeatures + stringify', ...summarize(run.overlayTimes) },
   bench('lineFrom alone (rest of the route, from 1 km in)', () => lineFrom(route.geometry, 1000)),
 ]
 report('Per-tick work, per call', rows, TICK_BUDGET_MS)
@@ -91,7 +91,7 @@ const at = (times, q) => summarize(times)[q]
 const total = (q) => at(run.fixTimes, q) + at(run.tickTimes, q) + at(run.viewTimes, q) + at(run.overlayTimes, q)
 console.log(`\nOne second of driving (fix + tick + view + overlay): median ${total('medianMs').toFixed(2)} ms, p95 ${total('p95Ms').toFixed(2)} ms.`)
 
-// 3. What one fix allocates: the overlay copies the rest of the route twice.
+// 3. What one fix hands to the map: the car (and a switch's turn-off) only.
 const ahead = lineFrom(route.geometry, 1000)
-const text = JSON.stringify(driveFeatures({ car: ahead[0], routeAhead: ahead, turn: null }))
-console.log(`Overlay handed to the map per fix at the start of the drive: ${ahead.length} points, ${(text.length / 1024).toFixed(1)} kB of GeoJSON.`)
+const text = JSON.stringify(driveMarkerFeatures({ car: ahead[0], route: route.geometry, alongM: 1000, turn: null }))
+console.log(`Overlay handed to the map per fix: ${(text.length / 1024).toFixed(2)} kB of GeoJSON.`)
