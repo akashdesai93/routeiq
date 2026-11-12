@@ -166,3 +166,51 @@
   .live-more { animation: none; }
   .live-toggle::after { transition: none; }
 }
+
+/* ---------- a phone on its side (#131) ----------
+   A landscape dash mount: the turn card and the sheet stack in a column on the left,
+   the map fills the right, so the car and the road ahead stay in view and nothing
+   covers the switch. The sheet scrolls inside its column; More and End stay pinned
+   at its foot. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .app.live .main {
+    display: grid;
+    grid-template-columns: min(380px, 46%) 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .app.live .map { grid-column: 2; grid-row: 1 / 3; }
+  .app.live .live-top {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    top: auto;
+    left: auto;
+    right: auto;
+    max-width: none;
+    min-height: 0;
+    margin: max(8px, env(safe-area-inset-top, 0px)) 8px 0 max(8px, env(safe-area-inset-left, 0px));
+    padding-block: 6px;
+    box-shadow: none;
+  }
+  .live-turn-distance { font-size: 60px; }
+  .live-turn-road { font-size: 26px; }
+  .turn-arrow { width: 54px; height: 54px; }
+  .app.live .live-bottom, .app.live .live-summary {
+    grid-column: 1;
+    grid-row: 2;
+    max-height: none;
+    min-height: 0;
+    margin-top: 8px;
+    padding: 20px 12px 0 max(12px, env(safe-area-inset-left, 0px));
+    overflow-y: auto;
+    border-radius: 24px 24px 0 0;
+  }
+  .live-controls {
+    position: sticky;
+    bottom: 0;
+    margin-top: 10px;
+    padding: 0 0 max(8px, env(safe-area-inset-bottom, 0px));
+    background: var(--glass);
+  }
+  .sim-badge { top: auto; bottom: 12px; right: 12px; }
+}

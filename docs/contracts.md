@@ -109,7 +109,7 @@ the declarations that changed.
 | Side | Matches | Notes |
 | --- | --- | --- |
 | Web app (`src/`) | 6 | by definition |
-| Swift port (`native/RouteIQCore`) | 5, in part: routes, signal tiles and bundle, reroute engine (#33 stage A) | live drive, drive log and place book not yet (versions 4 to 6 changed only live-drive and drive-log shapes); see its README and #33 |
+| Swift port (`native/RouteIQCore`) | 5, for everything but the drive log and the place book: routes, signal tiles and bundle, reroute engine, live drive at version 5 (#33) | the switch moment's live-drive fields (version 6, #84), drive log (`driveLog.ts`, #107) and place book (`places.ts`) not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
