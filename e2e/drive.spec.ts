@@ -58,6 +58,55 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   await expect(page.getByLabel('Drive summary')).toBeVisible()
 })
 
+test('when a route check never answers, it gives up on it and the next checks still find the faster route', async ({ app }) => {
+  // The drive's first check (request 2, a minute in) hangs, as a request can in a dead zone.
+  // From the second check on, the direct route jams; the East Loop goes round it.
+  app.outside.hangRequests = [2]
+  app.outside.traffic = JAM_ON_A_FROM_SECOND_CHECK
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ snapAtSec: [70, 92] })
+  await app.snap('arrived: the summary lists the switch')
+
+  // The page itself cancelled the hung check (after requestTimeoutSec), and kept checking.
+  expect(app.cancelledHanging).toEqual([2])
+  expect(app.directionsRequests).toBeGreaterThanOrEqual(4)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switched to a faster route')
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toHaveLength(1)
+  expect(spoken).toContain('Turn left onto East Loop.')
+  expect(spoken).not.toContain(OFF_ROUTE)
+})
+
+test('when the phone clock is put back half a minute mid-drive, the car keeps moving and every turn is spoken', async ({ app }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // Three minutes in, just before the first turn prompt, the wall clock goes back 30 s (#30).
+  const log = await app.drive({ clockBackAtSec: 180, snapAtSec: [200], readTurnAtSec: [178, 188, 198, 208] })
+  await app.snap('arrived: the summary')
+
+  // The next turn keeps coming nearer through the half minute the clock went back: the car never stood still.
+  const meters = log.turnDistances.map((d) => d.meters)
+  expect(meters).toHaveLength(4)
+  expect(meters.every((m) => m !== null)).toBe(true)
+  for (let i = 1; i < meters.length; i++) expect(meters[i]!).toBeLessThan(meters[i - 1]!)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toEqual([])
+  expect(await app.spoken()).toEqual([
+    STARTED,
+    'In half a mile, turn left onto Cross Street.',
+    'Turn left onto Cross Street.',
+    'Turn right onto Main Corridor.',
+    'In half a mile, turn right onto Cross Street.',
+    'Turn right onto Cross Street.',
+    'Turn left onto Main Corridor.',
+    'Your destination is ahead.',
+    'You have arrived. Trip time 17 minutes.',
+  ])
+})
+
 test('when a block ahead is closed, it reroutes around it', async ({ app }) => {
   // From the second check on, a block of Main Corridor's own stretch (60 to 70 % of the way) is
   // closed. Traffic flows freely, so no route is faster by time: only the closure can move the drive.
@@ -122,6 +171,26 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
 })
 
+test('right after Start, "checked" says how old the plan is, not 0 s', async ({ app, page }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // The trip was planned, then the driver waited 40 s before tapping Start drive (#71).
+  await page.clock.fastForward(40_000)
+  // And the machine running this is slow at the wrong moment: the clock flake of #71 stays covered.
+  app.slowMomentAtStartMs = 1500
+  await app.drive({ maxSec: 6 })
+  // The status line, with "checked N s ago", is behind More on the driving screen (#106).
+  await page.getByRole('button', { name: 'More' }).click()
+  await app.snap('just after Start: checked about 45 s ago')
+
+  const text = (await page.getByLabel('Live drive').getByText(/checked \d+ s ago/).textContent()) ?? ''
+  const seconds = Number(/checked (\d+) s ago/.exec(text)?.[1])
+  expect(seconds).toBeGreaterThanOrEqual(45)
+  expect(seconds).toBeLessThan(60)
+  // The first check is still to come: it is due a minute after the plan, not after the tap.
+  expect(app.directionsRequests).toBe(1)
+})
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
 
@@ -130,7 +199,7 @@ test.describe('on a phone', () => {
     await app.routesReady()
     const turnCard = page.getByLabel('Next turn')
     const sheet = page.getByLabel('Live drive')
-    const mute = page.getByRole('button', { name: 'Mute' })
+    const voice = page.getByRole('switch', { name: /^Voice/ })
 
     const log = await app.drive({
       maxSec: 70,
@@ -145,7 +214,7 @@ test.describe('on a phone', () => {
             // One line: the time left, and the arrival time.
             await expect(sheet.locator('.live-eta')).toHaveText(/^\d+ minArrive \d{1,2}:\d{2} AM$/)
             // Two figures at a glance: the lights, the distance left and the voice are not on this screen.
-            await expect(mute).toHaveCount(0)
+            await expect(voice).toHaveCount(0)
             await expect(sheet).not.toContainText('Lights')
             await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
             // The turn card and the sheet leave the car, in the middle of the map, in view.
@@ -162,16 +231,18 @@ test.describe('on a phone', () => {
             await expect(sheet.locator('[data-tile="distance"]')).toHaveText(/^Distance\d+ mi$/)
             await expect(sheet.locator('[data-tile="auto-switch"]')).toHaveText('Auto-switchOn')
             await expect(sheet).toContainText('Staying: current route is still the fastest · checked')
-            await expect(mute).toHaveAttribute('aria-pressed', 'false')
+            await expect(voice).toBeChecked()
             await app.snap('More: lights, distance, the automatic switch and the voice')
             // Everything tapped is 44px or more.
             for (const button of await sheet.getByRole('button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
 
-            await mute.click()
-            await expect(page.getByRole('button', { name: 'Unmute' })).toHaveAttribute('aria-pressed', 'true')
-            await page.getByRole('button', { name: 'Unmute' }).click()
+            await voice.click()
+            await expect(voice).not.toBeChecked()
+            await expect(voice).toHaveText(/^Voice\s*Off/)
+            await voice.click()
+            await expect(voice).toBeChecked()
             await page.getByRole('button', { name: 'Less' }).click()
-            await expect(mute).toHaveCount(0)
+            await expect(voice).toHaveCount(0)
           },
         },
       ],

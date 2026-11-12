@@ -7,9 +7,14 @@ name: Gate
 #
 # - The cheap checks always run: web (typecheck, lint, unit tests, build, bundle budget)
 #   and the end-to-end scenarios.
-# - The Swift package tests and the two macOS builds run only when their paths change.
+# - The Swift package tests and the two macOS builds run only when their paths change
+#   (the shell's .ipa build: see `changes`).
 # - `required` passes when every job that had to run succeeded, and fails when one failed,
 #   was cancelled, or was skipped although it had to run.
+# - On a push to main, the unit tests of every area run whatever the push touched (#140):
+#   native-core (Swift on Linux, about 1 to 1.5 min) and shell-unit (the shell's Node tests).
+#   Two pull requests that were each green can still break main together, and the merge
+#   commit after them may not touch the area they broke. The macOS builds stay filtered.
 #
 # The checks themselves live in the workflows called below; each can also be started by
 # hand (workflow_dispatch). Do not add `paths` or `paths-ignore` to this file: a required
@@ -39,7 +44,7 @@ jobs:
     outputs:
       native-core: ${{ steps.filter.outputs.native-core }}
       native-app: ${{ steps.filter.outputs.native-app }}
-      shell-ios: ${{ steps.filter.outputs.shell-ios }}
+      shell-ios: ${{ steps.shell.outputs.shell-ios }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,28 +70,115 @@ jobs:
               - 'native/RouteIQCore/Sources/**'
               - '.github/workflows/native-app.yml'
               - '.github/workflows/gate.yml'
-            shell-ios:
+            # What goes into the iPhone shell's .ipa. shell-native: the shell's own inputs,
+            # which the macOS build compiles. shell-webapp: the web app, which the shell only
+            # bundles as files; the web job (ci.yml) checks that side on every change.
+            shell-native:
               - 'native/shell/**'
-              - 'src/**'
-              - 'public/**'
-              - 'index.html'
               - 'package.json'
               - 'package-lock.json'
               - 'vite.config.ts'
               - 'tsconfig*.json'
               - '.github/workflows/shell-ios.yml'
               - '.github/workflows/gate.yml'
+            shell-webapp:
+              - 'src/**'
+              - 'public/**'
+              - 'index.html'
+
+      # shell-ios (the macOS .ipa build, about 90 s) runs on a pull request only when the
+      # shell's own inputs change, and on a push to main also when the web app changes, so
+      # the newest green main run always has a current RouteIQ-unsigned build.
+      - id: shell
+        env:
+          NATIVE: ${{ steps.filter.outputs.shell-native }}
+          WEBAPP: ${{ steps.filter.outputs.shell-webapp }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          ios=$NATIVE
+          if [ "$EVENT" = push ] && [ "$WEBAPP" = true ]; then ios=true; fi
+          echo "shell-ios=$ios" >> "$GITHUB_OUTPUT"
+          echo "shell: native inputs $NATIVE, web app $WEBAPP, event $EVENT -> shell-ios $ios"
 
   web:
     uses: ./.github/workflows/ci.yml
 
+  # Sharded over several runners (e2e.yml); fails when any shard fails.
   e2e:
     uses: ./.github/workflows/e2e.yml
 
+  # Merges the shards' reports into the one `e2e-report` artifact, also when a shard
+  # failed. Evidence, not a check: `required` does not wait for it.
+  e2e-report:
+    needs: e2e
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/e2e-report.yml
+
   native-core:
     needs: changes
-    if: needs.changes.outputs.native-core == 'true'
+    if: github.event_name == 'push' || needs.changes.outputs.native-core == 'true'
     uses: ./.github/workflows/native-core.yml
+
+  # The shell's Node unit tests (native/shell, npm test) on Linux, on every push to main.
+  # On pull requests they run inside shell-ios, which is path-filtered (macOS, minutes).
+  shell-unit:
+    name: shell unit tests (main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: native/shell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/shell/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  # A squash merge takes its message from the pull request's commits. If one of them says
+  # [skip ci] (or another skip marker), GitHub starts no workflow at all for the merge
+  # commit on main: no Gate, nothing to go red. That is how 31e9433 (#91) got no run (#140).
+  merge-message:
+    name: no skip-ci marker in the merge message
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # lists the commits of the pull request
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # The markers GitHub honours in a pushed commit's message (docs: "Skipping workflow runs").
+          markers='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks: *true'
+          found=0
+          if grep -qiE "$markers" <<<"$TITLE"; then
+            echo "::error title=skip-ci marker::the pull request title contains a skip-ci marker"
+            found=1
+          fi
+          while IFS=$'\t' read -r sha subject; do
+            echo "::error title=skip-ci marker::commit ${sha:0:7} ($subject) contains a skip-ci marker"
+            found=1
+          done < <(gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[] | [.sha, (.commit.message | split("\n")[0]), .commit.message] | @json' |
+                   jq -r --arg re "$markers" 'select(.[2] | test($re; "i")) | [.[0], .[1]] | @tsv')
+          if [ "$found" -ne 0 ]; then
+            echo "The squash merge would carry the marker to main and skip every workflow there."
+            echo "Reword the commit(s) to drop it (or merge with an explicit --body without it)."
+          else
+            echo "no skip-ci marker in the title or the commits"
+          fi
+          exit "$found"
 
   native-app:
     needs: changes
@@ -101,11 +193,12 @@ jobs:
     if: needs.changes.outputs.shell-ios == 'true'
     uses: ./.github/workflows/shell-ios.yml
 
-  # The single required status check. `if: always()` matters: without it a failed job above
+  # The single required status check. It does not list e2e-report (see above).
+  # `if: always()` matters: without it a failed job above
   # would skip this one, and GitHub counts a skipped required check as passed.
   required:
     name: required
-    needs: [changes, web, e2e, native-core, native-app, shell-ios]
+    needs: [changes, web, e2e, native-core, native-app, shell-ios, shell-unit, merge-message]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -114,12 +207,15 @@ jobs:
       - name: Every job that had to run succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
-          # Which jobs had to run: the three below always, the others when their paths changed.
-          must_run=$(jq -r '
+          # Which jobs had to run: the three below always, the others when their paths changed,
+          # plus the unit tests of every area on a push and the merge-message check on a PR.
+          must_run=$(jq -r --arg event "$EVENT" '
             ["changes", "web", "e2e"]
             + [.changes.outputs // {} | to_entries[] | select(.value == "true") | .key]
-            | join(" ")' <<<"$NEEDS")
+            + (if $event == "push" then ["native-core", "shell-unit"] else ["merge-message"] end)
+            | unique | join(" ")' <<<"$NEEDS")
 
           {
             echo "| job | had to run | result |"

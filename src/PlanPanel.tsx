@@ -32,6 +32,10 @@ interface PlanPanelProps {
   onPlace: (role: PinRole, place: Place, from: PlaceOrigin) => void
   onSwap: () => void
   onReset: () => void
+  /** Opens the Drives screen (the private drive log). Left out: no Drives button. */
+  onOpenDrives?: () => void
+  /** Drives in the log, shown on the button. */
+  driveCount?: number
   /** Asks the device where it is. Swapped out in tests; called only from the button. */
   locate?: () => Promise<LocationResult>
 }
@@ -233,7 +237,7 @@ function shortcutOf(saved: SavedPlace): Shortcut {
  * found by the Mapbox search provider, the place book's rules are in
  * src/core/places.ts, and the trip itself belongs to App.
  */
-export function PlanPanel({ pins, token, places, getProximity, onPlace, onSwap, onReset, locate = locateDevice }: PlanPanelProps) {
+export function PlanPanel({ pins, token, places, getProximity, onPlace, onSwap, onReset, onOpenDrives, driveCount = 0, locate = locateDevice }: PlanPanelProps) {
   const { book } = places
   const [locating, setLocating] = useState(false)
   const [locationProblem, setLocationProblem] = useState<string | null>(null)
@@ -344,6 +348,11 @@ export function PlanPanel({ pins, token, places, getProximity, onPlace, onSwap, 
         <button type="button" onClick={onReset}>
           Reset to test points
         </button>
+        {onOpenDrives !== undefined && (
+          <button type="button" onClick={onOpenDrives}>
+            Drives{driveCount > 0 ? ` (${driveCount})` : ''}
+          </button>
+        )}
       </div>
 
       <details className="plan-more" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>

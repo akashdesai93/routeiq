@@ -578,6 +578,7 @@ function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions,
     farthestM: options.matchMaxDivergenceM,
   }
   const reachM = Math.max(options.matchToleranceM, options.matchMaxDivergenceM)
+  let grids: { readonly ofRest: SegmentGrid; readonly ofFresh: SegmentGrid } | undefined
   return {
     fresh,
     rest,
@@ -585,9 +586,12 @@ function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions,
     limits,
     lengthsApartM: Math.abs(freshM - restM),
     endsTogether: apart(fresh.at(-1)!, rest.at(-1)!) <= options.matchToleranceM,
-    grids: () => ({ ofRest: segmentGrid(rest, reachM, meter), ofFresh: segmentGrid(fresh, reachM, meter) }),
+    grids: () => (grids ??= { ofRest: segmentGrid(rest, reachM, meter), ofFresh: segmentGrid(fresh, reachM, meter) }),
   }
 }
+
+/** What setUp measured for one pair of lines; its grids are built once, when first asked for. */
+type SetUp = NonNullable<ReturnType<typeof setUp>>
 
 /**
  * Compares `fresh` (a route from the driver's position to the destination)
@@ -610,8 +614,13 @@ function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions,
  * everything (baselineProbe needs every stretch apart); matchRest decides
  * `same` the same way and stops as soon as it is decided.
  */
-function compareRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions, meter?: MatchMeter): RestComparison | null {
-  const s = setUp(path, fresh, options, meter)
+function compareRest(
+  path: readonly XY[],
+  fresh: readonly XY[],
+  options: MatchOptions,
+  meter?: MatchMeter,
+  s: SetUp | null = setUp(path, fresh, options, meter),
+): RestComparison | null {
   if (s === null) return null
   const { ofRest, ofFresh } = s.grids()
   const freshApart = stretchesApart(s.fresh, ofRest, s.ignoreM, options.matchToleranceM)!
@@ -629,8 +638,13 @@ function compareRest(path: readonly XY[], fresh: readonly XY[], options: MatchOp
  * out, so a route that parts from the path costs about as much as the shared
  * part up to where it leaves.
  */
-function matchRest(path: readonly XY[], fresh: readonly XY[], options: MatchOptions, meter?: MatchMeter): number | null {
-  const s = setUp(path, fresh, options, meter)
+function matchRest(
+  path: readonly XY[],
+  fresh: readonly XY[],
+  options: MatchOptions,
+  meter?: MatchMeter,
+  s: SetUp | null = setUp(path, fresh, options, meter),
+): number | null {
   if (s === null || !s.endsTogether || s.lengthsApartM > options.matchMaxGapM) return null
   const { ofRest, ofFresh } = s.grids()
   const freshApart = stretchesApart(s.fresh, ofRest, s.ignoreM, options.matchToleranceM, s.limits)
@@ -656,10 +670,12 @@ function closestToPath(
   project: (p: LngLat) => XY,
   options: MatchOptions,
   meter?: MatchMeter,
+  match: (route: RouteCandidate) => number | null = (route) =>
+    matchRest(path, route.geometry.filter(isValidLngLat).map(project), options, meter),
 ): RouteCandidate | null {
   let best: { route: RouteCandidate; differenceM: number } | null = null
   for (const route of routes) {
-    const differenceM = matchRest(path, route.geometry.filter(isValidLngLat).map(project), options, meter)
+    const differenceM = match(route)
     if (differenceM === null) continue
     if (best === null || differenceM < best.differenceM) best = { route, differenceM }
   }
@@ -675,20 +691,96 @@ interface Plane {
 }
 
 /**
- * The current route from a little behind the reported position on
- * (`slackM`), so that fresh routes fetched a moment before the position was
- * taken, which start slightly behind the driver, still start on the line.
+ * Matches already worked out (matchRest's answer), by the geometry of the route being
+ * driven, then the geometry of the fresh route, then where the road ahead was cut and the
+ * thresholds. A check matches the same fresh routes against the same road ahead in
+ * baselineProbe (when the answer arrives) and again in decideReroute (#96); the answer
+ * depends on nothing else, so the second time it is looked up. Geometry arrays are never
+ * changed in place (as trackedRoute assumes too), and a WeakMap lets go of them with the
+ * routes. Not used while a MatchMeter counts the work, so the counts stay what they were.
  */
-function aheadOf(geometry: readonly LngLat[], positionAlongM: number, slackM: number): LngLat[] {
-  return lineFrom(geometry.filter(isValidLngLat), Math.max(0, positionAlongM - slackM))
+/**
+ * Every threshold a match depends on, so that each is part of the key. A Record over
+ * MatchOptions: a new match* option that is left out here does not compile.
+ */
+const MATCH_OPTION_FIELDS: Record<keyof MatchOptions, true> = {
+  matchToleranceM: true,
+  matchMinOverlap: true,
+  matchMaxGapM: true,
+  matchMaxDivergenceM: true,
+  matchIgnoreStartM: true,
+  matchStartSearchM: true,
+}
+const MATCH_OPTION_KEYS = Object.keys(MATCH_OPTION_FIELDS) as (keyof MatchOptions)[]
+
+const restMatches = new WeakMap<readonly LngLat[], WeakMap<readonly LngLat[], Map<string, number | null>>>()
+
+/**
+ * The road ahead: the current route from a little behind the reported position on
+ * (`slackM`), so that fresh routes fetched a moment before the position was taken, which
+ * start slightly behind the driver, still start on the line. On its own flat plane, with
+ * how each fresh route matches it.
+ */
+interface AheadMatcher {
+  readonly line: readonly LngLat[]
+  readonly project: (p: LngLat) => XY
+  readonly ahead: readonly XY[]
+  /** matchRest of the fresh route against `ahead`. */
+  readonly match: (fresh: Pick<RouteCandidate, 'geometry'>) => number | null
+  /** compareRest of the fresh route against `ahead`, on the same set-up as `match` when that ran. */
+  readonly compare: (fresh: Pick<RouteCandidate, 'geometry'>) => RestComparison | null
 }
 
-function planeOf(observation: RerouteObservation, toleranceM: number, slackM: number): Plane | null {
-  const ahead = aheadOf(observation.route.geometry, observation.positionAlongM, slackM)
-  const origin = ahead[0]
+function aheadMatcher(
+  geometry: readonly LngLat[],
+  positionAlongM: number,
+  slackM: number,
+  options: MatchOptions,
+  meter?: MatchMeter,
+): AheadMatcher | null {
+  const fromM = Math.max(0, positionAlongM - slackM)
+  const line = lineFrom(geometry.filter(isValidLngLat), fromM)
+  const origin = line[0]
   if (origin === undefined) return null
   const project = localProjector(origin)
-  return { project, ahead: ahead.map(project), toleranceM }
+  const ahead = line.map(project)
+  // One set-up per fresh route for this road ahead: matching it and then comparing it in full
+  // (baselineProbe) share the lines' cuts, lengths and grids.
+  const prepared = new Map<readonly LngLat[], { xy: XY[]; s: SetUp | null }>()
+  const prepare = (fresh: Pick<RouteCandidate, 'geometry'>) => {
+    let p = prepared.get(fresh.geometry)
+    if (p === undefined) {
+      const xy = fresh.geometry.filter(isValidLngLat).map(project)
+      prepared.set(fresh.geometry, (p = { xy, s: setUp(ahead, xy, options, meter) }))
+    }
+    return p
+  }
+  const compute = (fresh: Pick<RouteCandidate, 'geometry'>) => {
+    const p = prepare(fresh)
+    return matchRest(ahead, p.xy, options, meter, p.s)
+  }
+  const compare = (fresh: Pick<RouteCandidate, 'geometry'>) => {
+    const p = prepare(fresh)
+    return compareRest(ahead, p.xy, options, meter, p.s)
+  }
+  if (meter !== undefined) return { line, project, ahead, match: compute, compare }
+  const key = [fromM, ...MATCH_OPTION_KEYS.map((k) => options[k])].join('|')
+  let byFresh = restMatches.get(geometry)
+  if (byFresh === undefined) restMatches.set(geometry, (byFresh = new WeakMap()))
+  const known = byFresh
+  const match = (fresh: Pick<RouteCandidate, 'geometry'>): number | null => {
+    let byKey = known.get(fresh.geometry)
+    if (byKey === undefined) known.set(fresh.geometry, (byKey = new Map()))
+    if (!byKey.has(key)) byKey.set(key, compute(fresh))
+    return byKey.get(key)!
+  }
+  return { line, project, ahead, match, compare }
+}
+
+function planeOf(observation: RerouteObservation, toleranceM: number, slackM: number, options: MatchOptions): (Plane & { readonly match: AheadMatcher['match'] }) | null {
+  const m = aheadMatcher(observation.route.geometry, observation.positionAlongM, slackM, options)
+  if (m === null) return null
+  return { project: m.project, ahead: m.ahead, toleranceM, match: m.match }
 }
 
 /**
@@ -711,11 +803,9 @@ export function findCurrentRoute(
   meter?: MatchMeter,
 ): RouteCandidate | null {
   const opts = resolveOptions(options)
-  const ahead = aheadOf(route.geometry, positionAlongM, opts.offRouteM)
-  const origin = ahead[0]
-  if (origin === undefined) return null
-  const project = localProjector(origin)
-  return closestToPath(ahead.map(project), candidates, project, opts, meter)
+  const m = aheadMatcher(route.geometry, positionAlongM, opts.offRouteM, opts, meter)
+  if (m === null) return null
+  return closestToPath(m.ahead, candidates, m.project, opts, meter, m.match)
 }
 
 /** A point for the provider to route through, with the direction of travel there. */
@@ -752,17 +842,15 @@ export function baselineProbe(
   const opts = resolveOptions(options)
   const usable = candidates.filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
   if (usable.length === 0) return null
-  const aheadLine = aheadOf(route.geometry, positionAlongM, opts.offRouteM)
-  const origin = aheadLine[0]
-  if (origin === undefined) return null
-  const project = localProjector(origin)
-  const ahead = aheadLine.map(project)
-  if (closestToPath(ahead, usable, project, opts) !== null) return null
+  const m = aheadMatcher(route.geometry, positionAlongM, opts.offRouteM, opts)
+  if (m === null) return null
+  const { line: aheadLine, project, ahead } = m
+  if (closestToPath(ahead, usable, project, opts, undefined, m.match) !== null) return null
 
   // Where along the current path (in meters before its end) a via point is wanted.
   const wanted: number[] = []
   for (const { route: fresh } of rankRoutes(usable, { etaTieWindowSec: opts.etaTieWindowSec })) {
-    const compared = compareRest(ahead, fresh.geometry.filter(isValidLngLat).map(project), opts)
+    const compared = m.compare(fresh)
     if (compared === null) continue
     const restM = lengthOf(compared.rest)
     for (const [fromM, toM] of compared.restApart) {
@@ -778,10 +866,11 @@ export function baselineProbe(
   // In driving order; too many: every n-th, so that they stay spread over the whole way.
   wanted.sort((x, y) => y - x)
   const keep = Math.min(wanted.length, opts.baselineMaxViaPoints)
-  const aheadM = alongRouteM(aheadLine).at(-1) ?? 0
+  const aheadAlong = alongRouteM(aheadLine)
+  const aheadM = aheadAlong.at(-1) ?? 0
   const via: BaselineViaPoint[] = []
   for (let k = 0; k < keep; k++) {
-    const on = pointAtDistance(aheadLine, aheadM - wanted[Math.floor(((k + 0.5) * wanted.length) / keep)]!)
+    const on = pointAtDistance(aheadLine, aheadM - wanted[Math.floor(((k + 0.5) * wanted.length) / keep)]!, aheadAlong)
     if (on !== null) via.push({ point: on.point, bearingDeg: on.bearingDeg })
   }
   return via.length === 0 ? null : { via }
@@ -1040,7 +1129,7 @@ export function decideReroute(
 
   // Rule 2.
   const candidates = observation.candidates.filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
-  const plane = planeOf(observation, opts.sameRouteToleranceM, opts.offRouteM)
+  const plane = planeOf(observation, opts.sameRouteToleranceM, opts.offRouteM, opts)
   if (candidates.length === 0 || plane === null) return stay('no-routes', 'no routes available right now', noWinner)
   // A route without a travel time ranks last (see rankRoutes) and is never switched to.
   const ranked = rankRoutes(candidates, { etaTieWindowSec: opts.etaTieWindowSec }).map((r) => r.route)
@@ -1109,14 +1198,16 @@ export function decideReroute(
     `${what} turns off in ${spokenDistance(a.turnInM)}, too late to take safely`
   const turnPhrase = (a: RerouteAlternative) => `turn in ${spokenDistance(a.turnInM)}`
 
-  // Rule 4.
-  const isCurrent = (c: RouteCandidate) => continuesPath(plane.ahead, c.geometry.filter(isValidLngLat).map(plane.project), opts)
-  const offered = closestToPath(plane.ahead, provided, plane.project, opts)
+  // Rule 4. Each fresh route is matched against the road ahead once (#96): the same
+  // comparison answers "which is the current route" and "is this one the current route".
+  const restMatch = plane.match
+  const isCurrent = (c: RouteCandidate) => restMatch(c) !== null
+  const offered = closestToPath(plane.ahead, provided, plane.project, opts, undefined, restMatch)
   // Rule 5: not offered, so the answer to the request for the current path itself, if there is one.
   const baseline = Array.isArray(observation.baseline)
     ? (observation.baseline as readonly RouteCandidate[]).filter((c) => c.geometry.filter(isValidLngLat).length >= 2)
     : null
-  const current = offered ?? (baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts))
+  const current = offered ?? (baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts, undefined, restMatch))
 
   if (current === null) {
     // Only "no route that way" is evidence against the road ahead, and adds to the count.
@@ -1176,7 +1267,7 @@ export function decideReroute(
   // The current path's time asked through via points, like a probe's: the answer for the current
   // path itself when it was asked for. Probes are compared with it and nothing else.
   const comparableEta = (c: RouteCandidate) => usableEta(c) && (!opts.requireTypicalDuration || c.typicalDurationSec !== null)
-  const asked = current !== offered ? current : baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts)
+  const asked = current !== offered ? current : baseline === null ? null : closestToPath(plane.ahead, baseline, plane.project, opts, undefined, restMatch)
   const viaCurrent = asked !== null && comparableEta(asked) ? asked : null
 
   // Rule 6.

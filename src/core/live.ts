@@ -84,6 +84,12 @@ export interface LiveOptions {
   readonly replanGapSec: number
   /** Below this speed the device's heading is not sent with a request, in meters per second: standing still it points anywhere. */
   readonly minHeadingSpeedMps: number
+  /**
+   * A route request (the first route, a check with everything it asks, a search for a new
+   * route) not answered within this long is given up, in seconds: cancelled and counted as a
+   * failed answer, so a hung connection cannot hold back the checks after it.
+   */
+  readonly requestTimeoutSec: number
   readonly tracking: Partial<TrackingOptions>
   readonly reroute: Partial<RerouteOptions>
   /** Side-street probes during the checks (probe.ts, DEFAULT_DRIVE_PROBE_BUDGET); they share maxRequests. */
@@ -102,6 +108,7 @@ export const DEFAULT_LIVE_OPTIONS: LiveOptions = {
   pausedNoteSec: 15,
   replanGapSec: 30,
   minHeadingSpeedMps: 2,
+  requestTimeoutSec: 30,
   tracking: {},
   reroute: {},
   probes: {},
@@ -132,6 +139,12 @@ export interface LiveSwitch {
   readonly code: RerouteCode
   /** The engine's sentence for it. */
   readonly reason: string
+  /**
+   * The time the engine said the switch saves, in seconds: the fresh time of
+   * the route left minus that of the new one. Null when it claimed none (a
+   * closure ahead, a new route after leaving the old one).
+   */
+  readonly savingSec: number | null
 }
 
 export interface LiveSummary {
@@ -156,6 +169,12 @@ export interface LiveState {
    * until then only.
    */
   readonly picked: RouteCandidate | null
+  /**
+   * When the plan screen's answer with the picked route's travel times came,
+   * on the session's clock. A drive that starts on the pick counts
+   * that as its last check (#71). Null: not known, the start counts instead.
+   */
+  readonly pickedAtMs: number | null
   /** Why the drive failed. Null otherwise. */
   readonly message: string | null
   /** A passing note about the position (no fix yet, poor accuracy). Null when there is none. */
@@ -226,6 +245,7 @@ export const LIVE_IDLE: LiveState = {
   destination: null,
   startedAtMs: null,
   picked: null,
+  pickedAtMs: null,
   message: null,
   gpsNote: null,
   lastFix: null,
@@ -261,8 +281,16 @@ export type LiveEvent =
   /**
    * The Start tap. `route`: the route picked on the plan screen, to be driven
    * (see LiveState.picked). Left out or null: the drive asks for its own.
+   * `routeFetchedAtMs`: when the answer with that route's travel times came, on
+   * the same clock as `nowMs` (see LiveState.pickedAtMs). Left out: unknown.
    */
-  | { readonly type: 'start'; readonly nowMs: number; readonly destination: LngLat; readonly route?: RouteCandidate | null }
+  | {
+      readonly type: 'start'
+      readonly nowMs: number
+      readonly destination: LngLat
+      readonly route?: RouteCandidate | null
+      readonly routeFetchedAtMs?: number | null
+    }
   | { readonly type: 'fix'; readonly nowMs: number; readonly fix: PositionFix }
   | { readonly type: 'position-error'; readonly nowMs: number; readonly kind: PositionErrorKind }
   /**
@@ -395,6 +423,8 @@ function resolve(options: Partial<LiveOptions>): LiveOptions {
     pausedNoteSec: n(options.pausedNoteSec, d.pausedNoteSec),
     replanGapSec: Math.max(minRequestGapSec, n(options.replanGapSec, d.replanGapSec)),
     minHeadingSpeedMps: n(options.minHeadingSpeedMps, d.minHeadingSpeedMps),
+    // 0 would give up on every request before it could be answered.
+    requestTimeoutSec: options.requestTimeoutSec !== undefined && options.requestTimeoutSec > 0 ? n(options.requestTimeoutSec, d.requestTimeoutSec) : d.requestTimeoutSec,
     tracking: options.tracking ?? d.tracking,
     reroute: options.reroute ?? d.reroute,
     probes: options.probes ?? d.probes,
@@ -579,17 +609,29 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   return maybePoll({ state: next, effects }, nowMs, opts)
 }
 
-/** The drive begins on `route`, from `fix`. */
-function begin(state: LiveState, route: RouteCandidate, candidates: readonly RouteCandidate[], fix: PositionFix, nowMs: number, opts: LiveOptions): LiveStep {
+/**
+ * The drive begins on `route`, from `fix`. `checkedAtMs`: when its travel times
+ * came, the drive's last check (the plan's answer for a picked route).
+ */
+function begin(
+  state: LiveState,
+  route: RouteCandidate,
+  candidates: readonly RouteCandidate[],
+  fix: PositionFix,
+  nowMs: number,
+  opts: LiveOptions,
+  checkedAtMs: number = nowMs,
+): LiveStep {
   const started: LiveState = {
     ...state,
     status: 'driving',
     picked: null,
+    pickedAtMs: null,
     route,
     tracking: null,
     request: null,
     candidates,
-    lastCheckedAtMs: nowMs,
+    lastCheckedAtMs: checkedAtMs,
     eta: { durationSec: route.durationSec, remainingM: route.distanceM },
     guidance: armGuidance(route.guidance, 0, true),
     lastDecision: null,
@@ -609,7 +651,11 @@ function startOnPicked(state: LiveState, fix: PositionFix, nowMs: number, opts: 
   if (picked === null) return null
   const onIt = trackFix(null, trackedRoute(picked.geometry), fix, opts.tracking)
   if (onIt === null || onIt.offFixes > 0) return null
-  return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts)
+  // The plan's answer is the last check, as old as it is (#71): "checked N s ago" tells the
+  // truth from the start, and a plan older than the poll interval is checked at once.
+  const askedAt = state.pickedAtMs
+  const checkedAtMs = askedAt !== null ? Math.min(askedAt, nowMs) : nowMs
+  return begin({ ...state, lastFix: fix, gpsNote: null }, picked, [picked], fix, nowMs, opts, checkedAtMs)
 }
 
 /** The first route has come back. */
@@ -620,6 +666,27 @@ function planned(state: LiveState, routes: readonly RouteCandidate[] | null, mes
     return fail(state, `Could not find a route from here. ${message ?? 'Try again in a moment.'}`)
   }
   return begin(state, best, routes, fix, nowMs, opts)
+}
+
+/** What a request given up on (requestTimeoutSec) is answered with: the same as a failed answer. */
+export const REQUEST_TIMED_OUT = 'The route request timed out.'
+
+/**
+ * The request that is out has had requestTimeoutSec: it is cancelled, and its
+ * answer is taken to be a failure (no routes), exactly as if it had failed. A
+ * first route not found ends the drive as it would then; a check counts as a
+ * failed poll, and the checks go on at the usual times.
+ */
+function timedOut(state: LiveState, nowMs: number, opts: LiveOptions): LiveStep {
+  const cancel: LiveEffect = { type: 'cancel-request' }
+  if (state.request === null) return { state, effects: [] }
+  // planned's failure already cancels the request (STOP_EFFECTS).
+  if (state.request.purpose === 'plan') return planned(state, null, REQUEST_TIMED_OUT, nowMs, opts)
+  if (state.status !== 'driving' || state.route === null || state.tracking === null) return { state: { ...state, request: null }, effects: [cancel] }
+  // Its probes the shell reported sending are made and counted already; nothing more came of them.
+  const probesSent = state.request.probesSent ?? 0
+  const step = checked(state, null, REQUEST_TIMED_OUT, null, probesSent, probesSent, nowMs, opts)
+  return { state: step.state, effects: [cancel, ...step.effects] }
 }
 
 /** A check, or a search for a new route, has come back. */
@@ -687,7 +754,7 @@ function checked(
   const saving = decision.considered?.savingSec ?? null
   const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
-  const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason }
+  const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason, savingSec: offRoute ? null : saving }
   next = {
     ...next,
     route: chosen,
@@ -755,6 +822,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           destination: event.destination,
           startedAtMs: event.nowMs,
           picked: drivable(event.route) ? event.route : null,
+          pickedAtMs: drivable(event.route) && event.routeFetchedAtMs != null && Number.isFinite(event.routeFetchedAtMs) ? event.routeFetchedAtMs : null,
           muted: state.muted,
         },
         effects: [
@@ -883,6 +951,10 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       let next = state
       if (next.switchBanner !== null && event.nowMs >= next.switchBanner.untilMs) next = { ...next, switchBanner: null, undo: null }
       if (next.pausedNote !== null && event.nowMs >= next.pausedNote.untilMs) next = { ...next, pausedNote: null }
+      const request = next.request
+      if (request !== null && event.nowMs - request.sentAtMs >= opts.requestTimeoutSec * 1000) {
+        return maybePoll(timedOut(next, event.nowMs, opts), event.nowMs, opts)
+      }
       return maybePoll({ state: next, effects: [] }, event.nowMs, opts)
     }
   }

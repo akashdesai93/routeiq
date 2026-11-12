@@ -75,22 +75,44 @@ export interface LiveRunnerDeps {
   readonly onChange: (state: LiveState) => void
   /** Called when a route request goes out (true) and when it is over (false). The replay holds its clock meanwhile. */
   readonly onBusy?: (busy: boolean) => void
+  /** Told about the drive (the private drive log): after `onChange`, never before it. */
+  readonly observer?: LiveObserver
+}
+
+/**
+ * Something that watches a drive without steering it (the private drive log).
+ * Like every callback the runner is handed, it is isolated: if it throws, the
+ * failure is counted (`LiveRunner.callbackFailures`) and the drive goes on.
+ */
+export interface LiveObserver {
+  /** The Start tap: a new drive. */
+  start: () => void
+  /** After every change of the live state, ticks included: to be cheap. */
+  change: (state: LiveState, nowMs: number) => void
+  /** The drive is let go of (End, or Try again), with the last state before that. */
+  end: (state: LiveState, nowMs: number) => void
 }
 
 export interface LiveRunner {
   /**
    * The Start tap. Call it from inside the tap handler: the first words have to be spoken there.
-   * `route`: the route picked on the plan screen, to be driven (see LiveState.picked).
+   * `route`: the route picked on the plan screen, to be driven (see LiveState.picked);
+   * `routeFetchedAtMs`: when the answer with its travel times came, on `now`'s clock.
    */
-  start(destination: LngLat, route?: RouteCandidate | null): void
+  start(destination: LngLat, route?: RouteCandidate | null, routeFetchedAtMs?: number | null): void
   end(): void
   keepPrevious(): void
   setMuted(muted: boolean): void
   /** For the screen lock's own "released" event. */
   wakeLockReleased(): void
   state(): LiveState
-  /** Ends the drive and lets go of everything. */
-  dispose(): void
+  /** How many times a callback or the observer threw. Each failure was caught and the drive went on. */
+  callbackFailures(): number
+  /**
+   * Tells the observer the drive ended (unless `observe` is false: the page going away), ends it
+   * and lets go of everything. The observer hears nothing from this runner after that.
+   */
+  dispose(observe?: boolean): void
 }
 
 /** How often the session is asked whether anything is due, in milliseconds. */
@@ -105,12 +127,22 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
   // Events that arrive while one is being handled (a source that answers at once) wait their turn.
   const waiting: LiveEvent[] = []
   let handling = false
+  // A callback (the screen's state, the replay's clock, the drive log) can never stop or delay the drive.
+  let failures = 0
+  let disposed = false
+  const isolated = (call: () => void) => {
+    try {
+      call()
+    } catch {
+      failures++
+    }
+  }
 
   const endRequest = () => {
     if (inFlight === null) return
     inFlight.abort()
     inFlight = null
-    deps.onBusy?.(false)
+    isolated(() => deps.onBusy?.(false))
   }
 
   const run = (effect: LiveEffect) => {
@@ -150,7 +182,7 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
         if (destination === null) return
         const controller = new AbortController()
         inFlight = controller
-        deps.onBusy?.(true)
+        isolated(() => deps.onBusy?.(true))
         const { requestId, purpose, origin, headingDeg, baseline, probes } = effect
         const driving =
           state.route !== null && state.request !== null ? { route: state.route, alongM: state.request.alongM } : null
@@ -170,7 +202,7 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
           .then((answer) => {
             if (inFlight !== controller || controller.signal.aborted) return
             inFlight = null
-            deps.onBusy?.(false)
+            isolated(() => deps.onBusy?.(false))
             dispatch({
               type: 'routes',
               nowMs: deps.now(),
@@ -212,7 +244,11 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
         const step = liveStep(state, next, deps.options())
         state = step.state
         step.effects.forEach(run)
-        if (state !== before) deps.onChange(state)
+        if (state !== before) {
+          const changed = state
+          isolated(() => deps.onChange(changed))
+          if (!disposed) isolated(() => deps.observer?.change(changed, deps.now()))
+        }
       }
     } finally {
       handling = false
@@ -220,14 +256,21 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
   }
 
   return {
-    start: (destination, route = null) => dispatch({ type: 'start', nowMs: deps.now(), destination, route }),
+    start: (destination, route = null, routeFetchedAtMs = null) => {
+      if (!disposed) isolated(() => deps.observer?.start())
+      dispatch({ type: 'start', nowMs: deps.now(), destination, route, routeFetchedAtMs })
+    },
     end: () => dispatch({ type: 'end' }),
     keepPrevious: () => dispatch({ type: 'keep-previous', nowMs: deps.now() }),
     setMuted: (muted) => dispatch({ type: 'mute', muted }),
     wakeLockReleased: () => dispatch({ type: 'wake-lock', result: 'released' }),
     state: () => state,
-    dispose() {
+    callbackFailures: () => failures,
+    dispose(observe = true) {
+      const last = state
+      if (observe && !disposed) isolated(() => deps.observer?.end(last, deps.now()))
       dispatch({ type: 'end' })
+      disposed = true
       // An idle session answers 'end' with nothing; make sure nothing is left running either way.
       endRequest()
       stopWatching?.()

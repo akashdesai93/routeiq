@@ -8,6 +8,7 @@ import {
   type LiveView,
   type SignalCoverage,
 } from './core/index.ts'
+import { Figure } from './Figure.tsx'
 import { REPLAY_MULTIPLIERS, type ReplayMultiplier } from './drive/replay.ts'
 
 /** Development controls shown in the drive view during a replay. */
@@ -112,26 +113,6 @@ function clockTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-/**
- * A figure as it is typeset: the digits large, the unit small and dim beside
- * them. The text itself is unchanged ("0.8 mi" still reads "0.8 mi").
- */
-function Figure({ text }: { text: string }) {
-  return (
-    <>
-      {text.split(/(\d[\d.,:]*)/).map((part, i) =>
-        part === '' ? null : i % 2 === 1 ? (
-          part
-        ) : (
-          <span key={i} className="live-unit">
-            {part}
-          </span>
-        ),
-      )}
-    </>
-  )
-}
-
 interface TurnCardProps {
   /** Null: no maneuver to show, only `line`. */
   arrow: ArrowKind | null
@@ -158,7 +139,7 @@ const TurnCard = memo(function TurnCard({ arrow, distance, line, plain, spokenPr
       <div className="live-turn-text">
         {distance !== null && (
           <span className="live-turn-distance">
-            <Figure text={distance} />
+            <Figure text={distance} unitClass="live-unit" />
           </span>
         )}
         <span className={plain ? 'live-turn-road live-turn-plain' : 'live-turn-road'}>
@@ -178,7 +159,7 @@ const EtaLine = memo(function EtaLine({ left, arrive, fallback }: { left: string
       {left !== null && arrive !== null ? (
         <>
           <strong className="live-eta-left">
-            <Figure text={left} />
+            <Figure text={left} unitClass="live-unit" />
           </strong>
           <span className="live-eta-arrive">
             <span className="live-eta-label">Arrive </span>
@@ -230,18 +211,19 @@ const MoreSheet = memo(function MoreSheet({ lights, lightsHint, distance, muted,
         </div>
         <div className="live-tile" data-tile="distance">
           <span className="live-tile-label">Distance</span>
-          <span className="live-tile-word">{distance === null ? '—' : <Figure text={distance} />}</span>
+          <span className="live-tile-word">{distance === null ? '—' : <Figure text={distance} unitClass="live-unit" />}</span>
         </div>
         <div className="live-tile" data-tile="auto-switch">
           <span className="live-tile-label">Auto-switch</span>
           <span className="live-tile-word">On</span>
         </div>
+        {/* A switch named by its own words ("Voice On"), so "tap Voice" works with Voice Control (#133). */}
         <button
           type="button"
+          role="switch"
           className="live-tile live-voice"
           data-tile="voice"
-          aria-pressed={muted}
-          aria-label={muted ? 'Unmute' : 'Mute'}
+          aria-checked={!muted}
           onClick={() => onMute(!muted)}
         >
           <span className="live-tile-label">Voice</span>

@@ -61,8 +61,9 @@ extracts on disk); see Data sources.
 
 CI runs on every pull request and every push to `main` from one workflow,
 `.github/workflows/gate.yml`. It calls `ci.yml` (`npm ci`, typecheck, lint, tests, the
-production build and its size budget, on Node 24 on Ubuntu) and `e2e.yml` (the end-to-end
-scenarios, report uploaded as the `e2e-report` artifact) every time, and the Swift tests
+production build and its size budget, the iPhone shell's web build and Xcode project, on
+Node 24 on Ubuntu) and `e2e.yml` (the end-to-end scenarios, dealt over eight runners by
+`e2e/shard.mjs`, merged into the `e2e-report` artifact) every time, and the Swift tests
 and the two macOS builds when their paths change. Its last job, `required`, is the one
 status check `main` requires: `main` is protected and every change arrives through a pull
 request. See [docs/branch-protection.md](docs/branch-protection.md).
@@ -80,7 +81,8 @@ faster, it never switches", "a wrong turn: it says I am off the route, finds a n
 gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
 and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix",
 "when a side street saves time, it is offered and wins", "when a jam builds during the
-drive, a side street found mid-drive takes me round it".
+drive, a side street found mid-drive takes me round it", "after a drive, it shows how long
+it really took against what it predicted".
 
 ```powershell
 npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone smoke set
@@ -244,6 +246,10 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 removing, telling two places apart, the caps, and reading a stored
                 book back without trusting it. search.ts says when typed text is
                 worth a request and how requests are grouped into billing sessions.
+                driveLog.ts is the private drive log (#107): the recorder fed the live
+                drive's state (a record begins when the drive sets off, is written at a
+                switch and at the end), the coarse corridor key, the stored shape read
+                back without trusting it, the per-corridor summaries and the CSV export.
                 tracking.ts turns raw position fixes into a place on the route, with
                 an off-route verdict that takes patience. guidance.ts picks the turn
                 to show and the announcement that is due. speechQueue.ts is what is
@@ -306,6 +312,7 @@ src/storage/    kv.ts: the tiny key-value store the signal data on the device go
                 or memory without it; a full or blocked store reports the failed write.
                 placeBook.ts: loads, saves and clears the place book under one
                 versioned key (`routeiq.places.v1`); corrupt data is removed.
+                driveLog.ts: the same for the private drive log (`routeiq.drives.v1`).
 src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch)
                 and wires up the sources the app uses, the bundled tiles ahead of the
                 device cache and the network. askOnce wraps them for a drive that
@@ -354,6 +361,7 @@ src/DrivePanel.tsx The "Simulate drive" controls, the thresholds, the what-if co
 src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
                 typical time, the reason for its place, and a "Recommended" badge on
                 the top route. The highlight follows the selection, not the rank.
+                Under it the delta row (core routeDelta) and Start drive.
 src/config.ts   Reads and checks VITE_MAPBOX_TOKEN.
 src/App.tsx     Page shell; owns origin and destination (search, saved place, location,
                 drag, swap, reset) and restores the last trip. Shows setup
@@ -1066,9 +1074,37 @@ durations are carried but not used for the choice yet.
 | `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
 | `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
 
+### The plan and route screens (#85)
+
+Every screen is in the approved design (`design/README.md`, "The merged direction"), dark:
+black glass, Inter for words, Barlow Condensed for figures (the two faces the drive view
+bundles; no new fonts), a white button for the one primary action, amber only for news in
+the drive view. On a phone (up to 700 px) the map is on top and the trip and the routes
+sit in one sheet under it, its rounded top lapping over the map; on a wide screen the panel
+stays at the right.
+- **A route card** leads with its time, large; beside it the name with the "Recommended"
+  badge (filled white) and the "via side streets" tag (outlined) for a route a probe found,
+  then the distance and the light count. A count that is not whole says so under it in
+  words ("Signal data for part of this route is missing, so this is a lower bound."; "Signal
+  data for this route could not be loaded."), and is never shown as 0.
+- **The delta row**, under the list: what Route 1 gives against Route 2, "−8 min · −2 lights ·
+  −3 mi" (`routeDelta` in `src/core/rank.ts`). Minutes and miles are rounded (miles to a
+  tenth under 10). Lights are compared only when both counts are full; otherwise the cell
+  reads "Lights: can't compare".
+- **Start drive** is the white button under it, with "Switches by itself if a faster route
+  holds up".
+- **The iPhone shell**: the token screen and the top bar's "Change token" and "Drive
+  diagnostics" are unchanged in place, in the same dark theme.
+- **Safe areas.** The page asks to run edge to edge (`viewport-fit=cover`) and pads itself
+  with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
+  sits below the notch and the content clear of the home indicator and the rounded corners.
+  The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
+  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
+  gaps apply; the shell's layout is the same as before this change.
+
 ## Live drive
 
-"Start drive" at the top of the route list is the one tap. After it nothing needs
+"Start drive" under the route list is the one tap. After it nothing needs
 touching: RouteIQ asks for the location permission, starts on the route you picked,
 follows the car, checks Mapbox for faster routes,
 changes route by itself and announces it, speaks the turn prompts, and at the
@@ -1078,8 +1114,10 @@ destination stops and shows a short summary (trip time, the switches and why).
 with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
 route the plan's probes found (`source: 'probe'`). When the first good fix is on that
 route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
-request of its own, and the plan's answer counts as the first one: the first check goes
-out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+request of its own, and the plan's answer counts as the first one, as old as it is
+(#71): "checked N s ago" counts from when the plan's answer came, not from the Start
+tap, and the first check goes out a poll interval (60 s) after the plan, at once when
+the plan is older than that. A check alone never switches (confirmation needs two). A first fix that is not on it (the trip was planned
 from somewhere else) plans a route from there, as before. From then on the engine judges
 the picked route like any other. Mapbox does not offer a side street by itself, so a
 check from the car usually lacks it; the existing path check (`baselineProbe`, one more
@@ -1147,6 +1185,9 @@ plugin `RouteIQNative` is present, `src/device/native`):
   are discarded. The drive view shows a SIMULATED GPS badge and the diagnostics say so.
   Route requests are real and count against the request budget. The browser's
   development replay is separate and unchanged.
+- **Phone lab** (shell only, off unless started over USB with `-routeiqLab`): the PC runs
+  a drive on the real phone with nobody touching it, and checks what the app did while
+  it was in the background or the phone asleep. [docs/phone-lab.md](docs/phone-lab.md).
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
@@ -1166,6 +1207,9 @@ only for a full count, "≥ N data missing" for a partial one, "Unknown" otherwi
 with the engine's latest reason, "checked N s ago" and the request count, and in the
 iPhone app "Drive diagnostics". Every control is 44 px or more, the cards keep clear of
 the phone's safe areas, and the one animation is off under `prefers-reduced-motion`.
+On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
+the sheet stack in a column on the left and the map fills the right, so the car stays in
+view; the sheet scrolls in its column with More and End pinned at its foot (#131).
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
@@ -1216,6 +1260,30 @@ comes, the answer is taken like any check (minimum saving, confirmation, cooldow
 not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
 
+**A request that never answers** (#29). Only one route request is out at a time, so a
+connection that hangs (a dead zone) would hold back every check after it. A request not
+answered within 30 seconds (`requestTimeoutSec`, counted from when it was sent and
+covering everything one check asks) is given up: it is cancelled, and taken as a failed
+answer. A check then changes nothing but the engine's failed-poll counter, the quiet
+line says "Staying: could not check for faster routes (The route request timed out.)",
+and the next check goes out at the usual minute; an answer that turns up later is
+ignored. A search for a new route off the route is asked again after `replanGapSec`. A
+first route that never comes ends the start with "Could not find a route from here. The
+route request timed out.", as a failed one does. The limit is generous on purpose: a
+browser keeps a request going for minutes, while the iPhone shell's own limit is 20 s a
+request, and a check can be two or three requests one after another. In a replay the
+limit is stretched by the replay speed, like the request gap.
+
+**The drive's clock** (#30, `src/device/clock.ts`). Tracking only believes a fix that is
+newer than the last one, so every fix is stamped on arrival with one session clock, the
+same one the drive itself runs on (the browser's GPS, the iPhone shell's GPS and the
+session all share it). It follows the wall clock forward, so time with the phone asleep
+counts, but a step back of the wall clock (NTP or the carrier correcting it, or the time
+set by hand) is absorbed: the clock carries on from where it was. Before, a step back of
+30 s left every fix for 30 s "out of order" and the car stood still on the map, with no
+turn prompts. `performance.now()` was not used because it does not advance while an
+Apple device sleeps (w3c/hr-time#115). The arrival time is still shown on the wall clock.
+
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
 Nov 11, 2026: both instruction parameters need `steps=true`, no profile is excluded,
@@ -1261,6 +1329,58 @@ current route).
 positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audio over
 CarPlay or Bluetooth, and battery use have not been tried. The checklist for the first
 real-phone test is [docs/phone-testing.md](docs/phone-testing.md).
+
+## Drive log (private)
+
+RouteIQ's edge over the big navigation apps is the owner's own repeated drives, so each
+live drive is kept in a **private drive log** on the device (#107): what RouteIQ predicted
+at the start against what the drive really took. Rules: `src/core/driveLog.ts`; storage:
+`src/storage/driveLog.ts`; screen: `src/DrivesPanel.tsx`.
+
+- **What a drive records:** when it began (the moment it set off on its first route) and
+  ended; a coarse **corridor key** for its two ends (below); the first route's source
+  (`provider` for Mapbox, `probe` for a side street; not its id, which is a hash of the
+  exact geometry and could confirm a guessed route); the
+  first route's traffic-aware time then (the prediction), its length and its lights
+  (unknown stays unknown, a partial count is a lower bound); the actual time; each switch
+  with the saving the engine claimed and whether it was kept or turned down with "Keep
+  previous route"; how often it said "off the route"; the route requests used; and the
+  other app's ETA if one was noted.
+- **Saving actually made**, for the last kept switch of a drive: the time the route left was predicted to
+  take from there (the new route's time plus the claimed saving) minus the time the rest
+  of the drive really took. It is measured against a prediction, not against the road not
+  taken, and is unknown for an earlier switch (its window would take in the gains of the
+  later ones), a closure, a new route after leaving the route, and a drive that did not
+  arrive.
+- **Another app's ETA.** Under Start drive, "Other app's ETA (minutes)" takes what Google
+  Maps or Waze showed for the same trip at departure ("19", "19 min" or "1:05"), for a
+  side-by-side test. Optional; it is read when the drive sets off and kept with it only.
+- **When it writes:** when a switch is made or turned down (so a drive the app does not
+  see the end of is still kept, as "not finished") and when the drive arrives or End is
+  tapped. Nothing is written or computed on the 1-second tick. A development replay and the
+  iPhone app's test drive (simulated GPS) are not logged.
+- **Drives screen:** the Drives button on the plan screen. Newest drive first (predicted,
+  took, the difference, the other app's ETA, switches), then a summary per corridor
+  (Corridor A, B, ... by first drive): the median error overall, by hour of the start and
+  by route source ("Mapbox routes: under-estimated by 2 min"). Only arrived drives are
+  compared; a drive ended early or not finished is listed and counted, not compared.
+- **Export:** the log as CSV (one row per drive, start time in UTC, hour in local time),
+  through the share sheet (in the iPhone app, the app's own; in a browser, where it offers
+  one), or Copy. **Clear drive log** asks once,
+  then removes it from the device.
+- **Not yet:** the correction factor per corridor and route source used when ranking is a
+  later step (#115), behind a setting. It will never loosen the reroute thresholds.
+
+| Setting (`DEFAULT_DRIVE_LOG_OPTIONS`) | Value | Meaning |
+| --- | --- | --- |
+| `corridorGridDeg` | 0.01° | each end is rounded to this grid (about 1.1 km) before the corridor key is made |
+| `maxDrives` | 500 | drives kept; the oldest go first |
+| `maxOtherAppMin` | 600 | the largest other-app ETA accepted, in minutes |
+
+The stored shape is versioned: localStorage key `routeiq.drives.v1`, value
+`{ "version": 1, "drives": [...] }` (`DriveLog` in the core contract, docs/contracts.md). A
+value of another version, or text that is not one, is discarded; a damaged record is
+dropped by itself, and only known fields are read back.
 
 ## Pinned versions (checked Nov 11, 2026)
 
@@ -1331,6 +1451,17 @@ not written. It leaves the phone only if you share or copy it and send it yourse
 a test drive the positions are made up from the selected route; the phone's own
 position is discarded while one runs and reaches neither the drive nor Mapbox.
 
+**The phone lab** ([docs/phone-lab.md](docs/phone-lab.md)) is off unless the shell app is
+started over USB, from a computer the phone trusts, with the launch argument `-routeiqLab`;
+opened by hand, the app never has it. With it, a test hook presses the app's own buttons,
+and every few seconds one file in the app's temporary folder is replaced with a report for
+that computer to pull: the drive diagnostics and which screen is up, as counts, times and
+fixed words. No position, address, road name or token is written to it, and the lab makes
+no network request of its own. A lab drive over USB starts only where the computer put the
+simulated position: the hook asks the phone for its position once, compares it in memory,
+and on any other position does not start a drive and says only "not at the simulated
+start". In lab mode the web view can be inspected from that computer.
+
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for
 Google, the route's start and end and up to nine points along it; for Waze, the
@@ -1345,6 +1476,20 @@ with the centre of the map rounded to four decimals (to put nearby results first
 random session token that groups the requests for billing and says nothing about you.
 Picking a suggestion sends that suggestion's id. Nothing typed is logged or stored by
 RouteIQ; a destination picked from search is kept in the recent list (below).
+
+**The drive log** (Drives screen) lives only on the device, in localStorage under
+`routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
+holds times, durations, distances, light counts, switch savings, request counts and, for
+each drive, the route's source (Mapbox or side street, never the route itself or its
+id) and a corridor key: the drive's first position and its destination, each rounded
+to about a kilometre and hashed together, so a record holds no coordinate, address or
+place name. The rounding is what protects you; the hash only makes the key short. Someone
+holding the log and guessing a pair of 1 km squares could confirm the guess, so the log
+says roughly which areas you drive between and when, and is treated as private. It is
+never sent anywhere: the only way out is Export, which hands the CSV to the share sheet or
+the clipboard for you to send yourself. "Clear drive log" removes all of it, as does
+clearing the site's (or the app's) data. The other app's ETA you type is kept with its
+drive only.
 
 **Saved places, recent destinations and the last trip** live only in this browser's
 localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They

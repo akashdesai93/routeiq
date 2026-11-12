@@ -1,6 +1,7 @@
 import Capacitor
 import Foundation
 import UIKit
+import WebKit
 
 /// Thin Capacitor bridge over RouteIQEngine. The web app calls these methods
 /// and listens for the events "fix", "locationError", "tick" and "appState"
@@ -25,7 +26,9 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "httpCancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startSimulatedRoute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopSimulatedRoute", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lab", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "labReport", returnType: CAPPluginReturnPromise)
     ]
 
     private var engine: RouteIQEngine?
@@ -59,6 +62,7 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 self.appStateObservers.append(observer)
             }
+            self.setUpLab()
         }
         // CLLocationManager must be created on the main thread.
         if Thread.isMainThread {
@@ -256,6 +260,41 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             self.http?.cancel(id: id)
             call.resolve()
+        }
+    }
+
+    // MARK: - Phone lab (off unless started with the lab's launch argument)
+
+    /// With the launch argument only: lets the trusted computer inspect the
+    /// web view and, when asked, loads the web app the computer pushed.
+    private func setUpLab() {
+        guard RouteIQLab.scenario() != nil else { return }
+        if #available(iOS 16.4, *) {
+            self.bridge?.webView?.isInspectable = true
+        }
+        guard let folder = RouteIQLab.webDirectory() else { return }
+        // Later, not now: the view controller has no bridge yet while plugins load.
+        DispatchQueue.main.async {
+            (self.bridge?.viewController as? CAPBridgeViewController)?.setServerBasePath(path: folder)
+        }
+    }
+
+    /// Tells the web app whether the lab is on, and the scenario to run.
+    @objc func lab(_ call: CAPPluginCall) {
+        if let scenario = RouteIQLab.scenario() {
+            call.resolve(["enabled": true, "scenario": scenario])
+        } else {
+            call.resolve(["enabled": false])
+        }
+    }
+
+    /// Replaces the lab's report file. Refused when the lab is off.
+    @objc func labReport(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        if RouteIQLab.writeReport(text) {
+            call.resolve()
+        } else {
+            call.reject("The lab is off", "not-allowed")
         }
     }
 }
