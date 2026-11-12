@@ -1,5 +1,5 @@
 import { expect, test } from './harness.ts'
-import { JAM_ON_A_FROM_SECOND_CHECK, NOISY_BUT_NOTHING_FASTER } from './world/traffic.ts'
+import { BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK, JAM_ON_A_FROM_SECOND_CHECK, NOISY_BUT_NOTHING_FASTER } from './world/traffic.ts'
 
 // Live drives on the fake clock and fake GPS, through the real live-drive
 // code: the app asks for routes, decides, speaks, and the made-up driver does
@@ -56,6 +56,32 @@ test('when a faster route holds up, it switches by itself and tells me once', as
   expect(spoken).not.toContain(OFF_ROUTE)
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
   await expect(page.getByLabel('Drive summary')).toBeVisible()
+})
+
+test('when a block ahead is closed, it reroutes around it', async ({ app }) => {
+  // From the second check on, a block of Main Corridor's own stretch (60 to 70 % of the way) is
+  // closed. Traffic flows freely, so no route is faster by time: only the closure can move the drive.
+  app.outside.closed = BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ snapAtSec: [150] })
+  await app.snap('arrived: the summary lists the change')
+
+  expect(log.arrived).toBe(true)
+  // Mapbox stops offering A, and the drive's check of A itself comes back "no route" each time.
+  const closedChecks = app.pathChecks.filter((c) => c.road === 'NoRoute')
+  expect(closedChecks.length).toBeGreaterThanOrEqual(3)
+  // One change of route, made only once three checks in a row found no way along A (DEFAULT_REROUTE_OPTIONS.routeLostPolls).
+  expect(log.banners).toHaveLength(1)
+  const spoken = await app.spoken()
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toEqual([expect.stringMatching(/^Switching routes\. The road ahead on your route looks closed\. Turn in [\d.]+ miles\.$/)])
+  const statusBefore = log.statusLines.filter((l) => l.atSec < log.banners[0]!.atSec).map((l) => l.text)
+  expect(statusBefore).toEqual(expect.arrayContaining([expect.stringContaining('check 1 of 3'), expect.stringContaining('check 2 of 3')]))
+  // The driver takes one of the loops round the closed block and is never told to turn back.
+  expect(spoken.some((line) => line.includes('East Loop') || line.includes('West Loop'))).toBe(true)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
 })
 
 test('when nothing is faster, it never switches', async ({ app }) => {

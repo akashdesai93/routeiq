@@ -47,6 +47,12 @@ export interface RerouteOptions {
    * routed at all (a closure), and the best fresh route is taken.
    */
   readonly routeLostPolls: number
+  /**
+   * ...and those answers count only while they are this recent, in seconds: a
+   * "no route" answer from longer ago than this is about a road the driver
+   * may long since have passed, and is dropped from the count (#68).
+   */
+  readonly routeLostWindowSec: number
   /** The driver is off the current route when the fresh routes start farther than this from its line, in meters. */
   readonly offRouteM: number
   /**
@@ -90,6 +96,15 @@ export interface RerouteOptions {
    */
   readonly matchIgnoreStartM: number
   /**
+   * Where the fresh route starts is looked for on the first this many meters
+   * of the current path (which begins `offRouteM` behind the driver), and on
+   * the rest of it only when nothing there is within `offRouteM`. A route that
+   * crosses itself (a cloverleaf) passes the driver's spot again later, and
+   * the nearest point of the whole path can be that later pass (#74). It must
+   * be shorter than the shortest loop back to the same spot.
+   */
+  readonly matchStartSearchM: number
+  /**
    * Asking for the current path's own travel time (baselineProbe): a via
    * point at least every this many meters along each stretch of it that the
    * fresh routes do not share.
@@ -130,6 +145,7 @@ export const DEFAULT_REROUTE_OPTIONS: RerouteOptions = {
   minLeadTimeSec: 20,
   freewayLeadDistanceM: 1200,
   routeLostPolls: 3,
+  routeLostWindowSec: 900,
   offRouteM: 50,
   sameRouteToleranceM: SAME_ROUTE_TOLERANCE_M,
   matchToleranceM: 20,
@@ -137,6 +153,7 @@ export const DEFAULT_REROUTE_OPTIONS: RerouteOptions = {
   matchMaxGapM: 400,
   matchMaxDivergenceM: 50,
   matchIgnoreStartM: 150,
+  matchStartSearchM: 200,
   baselineViaSpacingM: 3000,
   baselineMaxViaPoints: 6,
   returnOverlapFraction: 0.5,
@@ -163,8 +180,16 @@ export interface RerouteState {
    * itself and found no route that way (see RerouteOptions.routeLostPolls).
    * A poll that could not ask leaves it as it is; one that finds the current
    * route, or is answered with any route at all, sets it back to 0.
+   * Answers older than `routeLostWindowSec` no longer count (see lostAtSec):
+   * this is always lostAtSec's length.
    */
   readonly lostPolls: number
+  /**
+   * When each of those "no route" answers came (the nowSec of its poll),
+   * oldest first. This is what the engine counts: an answer drops out once it
+   * is more than `routeLostWindowSec` old (#68).
+   */
+  readonly lostAtSec: readonly number[]
   /**
    * Routes the driver turned down ("Keep previous route"), each as the path
    * that was ahead at that moment and the time until which it is not to be
@@ -180,6 +205,7 @@ export const INITIAL_REROUTE_STATE: RerouteState = {
   abandoned: [],
   failedPolls: 0,
   lostPolls: 0,
+  lostAtSec: [],
 }
 
 /** What one poll found. */
@@ -316,6 +342,7 @@ function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
     minLeadTimeSec: numberOr(options.minLeadTimeSec, d.minLeadTimeSec),
     freewayLeadDistanceM: numberOr(options.freewayLeadDistanceM, d.freewayLeadDistanceM),
     routeLostPolls: Math.max(1, Math.round(numberOr(options.routeLostPolls, d.routeLostPolls))),
+    routeLostWindowSec: numberOr(options.routeLostWindowSec, d.routeLostWindowSec),
     offRouteM: numberOr(options.offRouteM, d.offRouteM),
     sameRouteToleranceM: numberOr(options.sameRouteToleranceM, d.sameRouteToleranceM),
     matchToleranceM: numberOr(options.matchToleranceM, d.matchToleranceM),
@@ -323,6 +350,7 @@ function resolveOptions(options: Partial<RerouteOptions>): RerouteOptions {
     matchMaxGapM: numberOr(options.matchMaxGapM, d.matchMaxGapM),
     matchMaxDivergenceM: numberOr(options.matchMaxDivergenceM, d.matchMaxDivergenceM),
     matchIgnoreStartM: numberOr(options.matchIgnoreStartM, d.matchIgnoreStartM),
+    matchStartSearchM: numberOr(options.matchStartSearchM, d.matchStartSearchM),
     baselineViaSpacingM: Math.max(1, numberOr(options.baselineViaSpacingM, d.baselineViaSpacingM)),
     baselineMaxViaPoints: Math.max(1, Math.round(numberOr(options.baselineMaxViaPoints, d.baselineMaxViaPoints))),
     returnOverlapFraction: numberOr(options.returnOverlapFraction, d.returnOverlapFraction),
@@ -354,17 +382,28 @@ export function spokenDistance(meters: number): string {
   return tenths === 1 ? '1 mile' : `${tenths} miles`
 }
 
-/** The closest point of a line to P: how far it is, and where along the line (as segment index and share of it). */
-function nearestOnLine(p: XY, line: readonly XY[], meter?: MatchMeter): { distanceM: number; index: number; t: number } {
+/**
+ * The closest point of a line to P: how far it is, and where along the line
+ * (as segment index and share of it). With `firstM`, only the segments that
+ * begin within the first `firstM` meters of the line are looked at.
+ */
+function nearestOnLine(
+  p: XY,
+  line: readonly XY[],
+  meter?: MatchMeter,
+  firstM = Infinity,
+): { distanceM: number; index: number; t: number } {
   let best = { distanceM: Infinity, index: 0, t: 0 }
   const only = line[0]
   if (line.length === 1 && only !== undefined) {
     return { distanceM: Math.hypot(p[0] - only[0], p[1] - only[1]), index: 0, t: 0 }
   }
-  if (meter !== undefined) meter.segmentChecks += line.length - 1
-  for (let i = 1; i < line.length; i++) {
+  let beginsAtM = 0
+  for (let i = 1; i < line.length && beginsAtM <= firstM; i++) {
+    if (meter !== undefined) meter.segmentChecks++
     const hit = pointToSegment(p, line[i - 1]!, line[i]!)
     if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, index: i - 1, t: hit.t }
+    beginsAtM += apart(line[i - 1]!, line[i]!)
   }
   return best
 }
@@ -545,7 +584,7 @@ function stretchesApart(
 /** The thresholds of compareRest: the match* part of RerouteOptions. */
 type MatchOptions = Pick<
   RerouteOptions,
-  'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchMaxDivergenceM' | 'matchIgnoreStartM'
+  'matchToleranceM' | 'matchMinOverlap' | 'matchMaxGapM' | 'matchMaxDivergenceM' | 'matchIgnoreStartM' | 'matchStartSearchM' | 'offRouteM'
 >
 
 /** How a fresh route compares with the rest of a path. */
@@ -571,7 +610,11 @@ function fromNearest(line: readonly XY[], at: { index: number; t: number }): XY[
 function setUp(path: readonly XY[], given: readonly XY[], options: MatchOptions, meter: MatchMeter | undefined) {
   const start = given[0]
   if (start === undefined || given.length < 2 || path.length < 2) return null
-  const at = nearestOnLine(start, path, meter)
+  // The start is near the beginning of the path, which is where the driver is (#74): the
+  // whole path is searched only when it is not, so that a later pass of the same spot
+  // (a cloverleaf) is never taken for where the driver is.
+  const near = nearestOnLine(start, path, meter, options.matchStartSearchM)
+  const at = near.distanceM <= options.offRouteM ? near : nearestOnLine(start, path, meter)
   const rest = fromNearest(path, at)
   // A fresh route that starts behind the path (fetched a moment before the position was
   // taken: see RerouteObservation.positionAlongM) is compared from where it reaches the
@@ -979,8 +1022,9 @@ function usableEta(route: RouteCandidate): boolean {
  *      not pin it): nothing is known; stay. The count of the next case is
  *      kept as it is, neither added to nor started over.
  *    - The provider found NO route through the points on the road ahead.
- *      Once that has happened `routeLostPolls` times, with no poll between
- *      that found the current route, the road ahead
+ *      Once that has happened `routeLostPolls` times within the last
+ *      `routeLostWindowSec` (older answers no longer count), with no poll
+ *      between that found the current route, the road ahead
  *      is taken to be closed, and the best-ranked fresh route that still
  *      passes the too-late guard is taken, once the cooldown is over. Until
  *      then: stay. (The no-return rule cannot be applied here, there being
@@ -1092,6 +1136,7 @@ export function decideReroute(
       abandoned: [...base.abandoned, { geometry: lineFrom(observation.route.geometry, observation.positionAlongM), atSec: nowSec }],
       failedPolls: 0,
       lostPolls: 0,
+      lostAtSec: [],
       declined: base.declined,
     },
   })
@@ -1142,8 +1187,11 @@ export function decideReroute(
     // Not asked, or answered with another path (the via points did not pin it, which says
     // nothing about the road between them, #41): no evidence either way, and the count is
     // kept. Only a poll that finds the current route again starts it over.
-    const lostPolls = baseline !== null && baseline.length === 0 ? base.lostPolls + 1 : base.lostPolls
-    const lost: RerouteState = { ...noWinner, lostPolls }
+    // Answers from longer ago than the window are about a road that may be well behind (#68).
+    const recent = base.lostAtSec.filter((atSec) => nowSec - atSec <= opts.routeLostWindowSec)
+    const lostAtSec = baseline !== null && baseline.length === 0 ? [...recent, nowSec] : recent
+    const lostPolls = lostAtSec.length
+    const lost: RerouteState = { ...noWinner, lostPolls, lostAtSec }
     if (baseline === null || baseline.length > 0) {
       return stay(
         'route-unconfirmed',
@@ -1181,7 +1229,7 @@ export function decideReroute(
       ? stay('route-lost', 'the road ahead can no longer be routed, and there is no other route to take', lost)
       : stay('too-late', tooLateReason(closest, 'the road ahead can no longer be routed, but the other route'), lost, closest)
   }
-  const found: RerouteState = { ...base, lostPolls: 0 }
+  const found: RerouteState = { ...base, lostPolls: 0, lostAtSec: [] }
   const foundNoWinner: RerouteState = { ...found, pending: null }
   // Only a time that may be compared (rule 6) is passed on as the current route's ETA.
   const known: RerouteDecision['current'] =
@@ -1318,6 +1366,7 @@ export function declineRoute(
     pending: null,
     // Counting lost polls is a confirmation in progress too: start it again.
     lostPolls: 0,
+    lostAtSec: [],
     declined: [...(state.declined ?? []), { geometry: geometryAhead, untilSec }],
   }
 }
