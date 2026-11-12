@@ -210,10 +210,11 @@ describe('DrivePanel', () => {
   const view: DriveView = {
     simTimeSec: 185,
     car: [-80.85, 35.2],
-    routeAhead: [
+    route: [
       [-80.85, 35.2],
       [-80.86, 35.0],
     ],
+    alongM: 0,
     remainingM: 24_140,
     requestsUsed: 3,
     polling: false,
@@ -438,7 +439,7 @@ describe('Start drive and the live drive view', () => {
       status: 'arrived',
       summary: {
         tripSec: 1500,
-        switches: [{ atMs: T0 + 600_000, code: 'faster-route', reason: 'Switching: saves 3 minutes, turn in 0.8 miles' }],
+        switches: [{ atMs: T0 + 600_000, code: 'faster-route', reason: 'Switching: saves 3 minutes, turn in 0.8 miles', savingSec: 180 }],
         declined: 1,
         requestsUsed: 26,
       },

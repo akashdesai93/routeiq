@@ -105,8 +105,8 @@ describe('the replayed driver', () => {
     expect(all.dropoutsSec).toHaveLength(2)
   })
 
-  it('at 20x real requests stay 5 real seconds apart and the banner stays up as long as in real time', () => {
-    expect(replayLiveOptions(20)).toEqual({ minRequestGapSec: 100, switchBannerSec: 160, pausedNoteSec: 300 })
+  it('at 20x real requests stay 5 real seconds apart, get 30 real seconds to answer, and the banner stays up as long as in real time', () => {
+    expect(replayLiveOptions(20)).toEqual({ minRequestGapSec: 100, switchBannerSec: 160, pausedNoteSec: 300, requestTimeoutSec: 600 })
     expect(replayLiveOptions(1).minRequestGapSec).toBe(10)
   })
 })

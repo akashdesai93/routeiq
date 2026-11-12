@@ -33,6 +33,8 @@ export const CONTRACT_ROOTS: readonly string[] = [
   'OsmBundleIndex',
   // The place book (localStorage routeiq.places.v1).
   'PlaceBook',
+  // The private drive log (localStorage routeiq.drives.v1, #107).
+  'DriveLog',
   // The reroute engine.
   'RerouteOptions',
   'RerouteState',
