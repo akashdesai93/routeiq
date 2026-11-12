@@ -59,8 +59,11 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
 
   expect(log.arrived).toBe(true)
   // The checks for a faster route went on while locked: the switch needs two of them in a row, after the lock.
-  expect(log.banners).toHaveLength(1)
-  expect(log.banners[0]!.text).toContain('Switched to a faster route')
+  // Nothing is drawn while the phone is locked (#98), so the driver hears it rather than sees a banner.
+  expect(log.heard).toHaveLength(1)
+  expect(log.heard[0]!.atSec).toBeGreaterThan(30)
+  expect(log.heard[0]!.text).toMatch(/^Switching to a faster route\. Saves /)
+  expect(log.banners).toEqual([])
   const spoken = await app.spoken()
   expect(spoken[0]).toBe('RouteIQ started')
   expect(spoken.filter((line) => line.startsWith('Switching to a faster route.'))).toHaveLength(1)
@@ -113,18 +116,20 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
   await page.getByRole('button', { name: 'Start drive' }).click()
   await app.settle()
 
-  const banners: { atSec: number; text: string }[] = []
-  let lastBanner = ''
+  // With the phone locked nothing is drawn (#98): the driver goes by what is said, and looks again on arrival.
+  const heard: { atSec: number; text: string }[] = []
+  let heardUpTo = 0
   let arrived = false
   for (let sec = 1; sec <= 1500 && !arrived; sec++) {
     if (sec === 5) {
-      // The phone is locked, and stays locked.
+      // The phone is locked, and stays locked until the drive is over.
+      heardUpTo = (await app.spoken()).length
       await page.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
         document.dispatchEvent(new Event('visibilitychange'))
       })
     }
-    if (sec === 8) {
+    if (sec === 3) {
       // The drive view says the position is made up, and has a way to the diagnostics without ending the drive.
       await expect(page.getByText('SIMULATED GPS', { exact: true })).toBeVisible()
       await page.getByRole('button', { name: 'More' }).click()
@@ -139,22 +144,27 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
     // The phone's real GPS (it is at home, far from the route) keeps reporting; none of it reaches the drive.
     if (sec % 10 === 0) await page.evaluate(() => (window as unknown as { __e2e: { fix: (...a: number[]) => void } }).__e2e.fix(-80.9, 35.3, 0, 0))
     await page.clock.fastForward(1000)
-    const state = await app.settle()
-    if (state.banner !== '' && state.banner !== lastBanner) {
-      banners.push({ atSec: sec, text: state.banner })
-      await app.snap(`second ${sec}: ${state.banner}`)
+    await app.settle()
+    const said = (await app.spoken()).slice(heardUpTo)
+    heardUpTo += said.length
+    for (const text of said) if (text.startsWith('New route.')) heard.push({ atSec: sec, text })
+    if (said.some((text) => text.startsWith('You have arrived'))) {
+      // The driver picks the phone up: the screen catches up at once.
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      arrived = (await app.settle()).arrived
+      expect(arrived, 'the drive summary, drawn as soon as the phone is unlocked').toBe(true)
     }
-    lastBanner = state.banner
-    arrived = state.arrived
   }
   await app.snap('arrived, after the test drive')
 
   // The wrong turn came 20 s in (a minute of road at 3x), was called, and a new route was found; then the car followed it there.
   expect(arrived).toBe(true)
-  expect(banners).toHaveLength(1)
-  expect(banners[0]!.text).toContain('New route')
-  expect(banners[0]!.atSec).toBeGreaterThan(20)
-  expect(banners[0]!.atSec).toBeLessThan(45)
+  expect(heard).toHaveLength(1)
+  expect(heard[0]!.atSec).toBeGreaterThan(20)
+  expect(heard[0]!.atSec).toBeLessThan(45)
   const spoken = await app.spoken()
   expect(spoken.slice(0, 3)).toEqual([
     'RouteIQ started',
@@ -212,7 +222,8 @@ test('in a browser the same lock pauses the checks for a faster route: that rule
   // The fake GPS keeps sending here, which a real hidden page would not get; the session still must not ask for routes.
   const log = await app.drive({ hideAtSec: 30, maxSec: 600 })
   const afterLock = app.directionsRequests
-  expect(log.banners).toEqual([])
+  // Nothing is drawn while hidden (#98), so a banner could not show either way: what the driver would hear is checked.
+  expect(log.heard).toEqual([])
   expect((await app.spoken()).filter((line) => line.startsWith('Switching'))).toEqual([])
   expect(afterLock).toBeLessThanOrEqual(3)
 })
