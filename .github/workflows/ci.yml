@@ -11,6 +11,10 @@ name: CI
 
 on:
   workflow_call:
+    outputs:
+      size-growth:
+        description: What a pull request adds to the bundle against the main it was tested on (JSON, scripts/bundle-size.mjs growthReport); empty when not measured. Read by gate.yml's required job.
+        value: ${{ jobs.check.outputs.size-growth }}
   workflow_dispatch:
 
 permissions:
@@ -21,10 +25,15 @@ jobs:
     name: typecheck, lint, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      size-growth: ${{ steps.growth.outputs.growth }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A pull request run tests the merge of the PR into main; its first parent is that main,
+          # which the bundle growth step builds too.
+          fetch-depth: 2
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -45,8 +54,31 @@ jobs:
           VITE_MAPBOX_TOKEN: pk.test
         run: npm run build
 
-      - name: Bundle size budget (scripts/bundle-budget.json)
+      # The owner's ceiling (scripts/bundle-budget.json, #170). Fails the job when over it; no label passes it.
+      - name: Bundle size against the ceiling (scripts/bundle-budget.json)
         run: npm run size
+
+      # What this pull request adds: main as this run saw it (the merge commit's first parent) is
+      # built the same way and measured with this PR's script. The step reports only; the growth
+      # limit is applied by gate.yml's required job (scripts/orch/gates.mjs), so the size-ok label
+      # can pass it by re-running that job alone. A failure here leaves the output empty, which the
+      # gate reads as "not measured" and fails.
+      - name: Bundle growth against main (pull requests)
+        id: growth
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          VITE_MAPBOX_TOKEN: pk.test
+        run: |
+          base="$RUNNER_TEMP/main"
+          git worktree add --detach "$base" HEAD^1
+          if cmp -s package-lock.json "$base/package-lock.json"; then
+            ln -s "$PWD/node_modules" "$base/node_modules"
+          else
+            (cd "$base" && npm ci --ignore-scripts)
+          fi
+          (cd "$base" && npx vite build --logLevel warn)
+          node scripts/check-bundle-size.mjs --against "$base/dist"
 
       # What a change to the web app can break in the iPhone shell, checked here in seconds:
       # the shell's unit tests (Info.plist patch, bridge script, token search), the web app

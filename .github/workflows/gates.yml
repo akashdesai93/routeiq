@@ -3,7 +3,7 @@ name: Gates re-check
 # Keeps the PR gates in the Gate's `required` job current (scripts/orch/gates.mjs,
 # docs/orchestrator.md). `required` reads labels, body and main when it runs; this re-runs just
 # that job (seconds, not the whole Gate) when
-#   - a PR gains or loses needs-phone, phone-verified, do-not-merge or needs-human, or its body
+#   - a PR gains or loses needs-phone, phone-verified, do-not-merge, needs-human or size-ok, or its body
 #     is edited (PHONE CHECK NEEDED), and
 #   - main moves on in an area an open PR also changes, so a PR whose checks ran before that
 #     change turns red until its branch is updated (case (d) of the first night).
@@ -27,7 +27,7 @@ jobs:
   recheck:
     if: >-
       github.event_name == 'push' || github.event.action == 'edited' ||
-      contains(fromJSON('["needs-phone","phone-verified","do-not-merge","needs-human"]'), github.event.label.name)
+      contains(fromJSON('["needs-phone","phone-verified","do-not-merge","needs-human","size-ok"]'), github.event.label.name)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

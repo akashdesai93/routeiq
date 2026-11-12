@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { renderAlert, renderBoard, renderMorning } from '../../scripts/orch/board.mjs'
-import { derive, mergeLocal, type Json } from '../../scripts/orch/derive.mjs'
+import { bundleHeadroom, derive, mergeLocal, type Json } from '../../scripts/orch/derive.mjs'
 import { parseDecision, parseHeartbeat, parseLabWindow, parseStatus } from '../../scripts/orch/lib/status.mjs'
 import { outputs } from '../../scripts/orch/state.mjs'
 
@@ -258,5 +258,32 @@ describe('CRLF in comment bodies', () => {
     const crlf: Json = JSON.parse(JSON.stringify(night, (_k, v) => (typeof v === 'string' ? v.replace(/\n/g, '\r\n') : v)))
     const now = '2026-11-12T11:33:00Z'
     expect(outputs(derive(crlf, { now }))).toEqual(outputs(derive(night, { now })))
+  })
+})
+
+// #170: the board flags main above 90 % of the owner's ceiling, so the ceiling is raised or code
+// is cut by decision, before PRs start failing at night (main was at 99.6 % at 05:33).
+describe('bundle headroom (#170)', () => {
+  const notice = (appJs: number, css = 60_000) => ({ alertAt: 0.9, appJs: { size: appJs, ceiling: 460_000 }, css: { size: css, ceiling: 80_000 }, head_sha: 'abcdef1234', url: 'u' })
+  const withBundle = (bundle: Json | null) => board([], { main: { newest_completed: { conclusion: 'success', head_sha: 'abcdef1234', html_url: 'u', created_at: '2026-11-12T11:00:00Z' }, bundle } })
+
+  it('alerts when main is above 90 % of a ceiling, and names the measure and the sizes', () => {
+    const h = derive(withBundle(notice(414_001))).health
+    expect(h.bundle.state).toBe('high')
+    expect(h.alerts.filter((a: Json) => a.key.startsWith('bundle-'))).toEqual([
+      { key: 'bundle-appJs', text: expect.stringContaining("main's appJs is 90.0 % of its bundle ceiling (414.0 of 460.0 kB)") },
+    ])
+  })
+
+  it('does not alert at 90 % or below', () => {
+    const h = derive(withBundle(notice(414_000))).health
+    expect(h.bundle.state).toBe('ok')
+    expect(h.alerts.filter((a: Json) => a.key.startsWith('bundle-'))).toEqual([])
+  })
+
+  it('no size notice on main is unknown: no alert, and no 0 %', () => {
+    expect(bundleHeadroom(null)).toEqual({ state: 'unknown', measures: [], high: [] })
+    expect(bundleHeadroom({ alertAt: 0.9, appJs: { size: null, ceiling: 460_000 } })).toMatchObject({ state: 'unknown' })
+    expect(derive(withBundle(null)).health.alerts.filter((a: Json) => a.key.startsWith('bundle-'))).toEqual([])
   })
 })

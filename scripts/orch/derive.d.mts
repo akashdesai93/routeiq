@@ -14,3 +14,4 @@ export function prStage(p: { labels: string[]; draft: boolean; needsPhone: boole
 export function sessionGroup(s: Json, openPrs: Json[]): 'done' | 'phone' | 'blocked' | 'review' | 'working'
 export function derive(raw: Json, opts?: { now?: string; [k: string]: unknown }): FleetState
 export function mergeLocal(state: FleetState, local: { sessions?: Json[]; events?: Json[]; health?: Record<string, unknown> }): FleetState
+export function bundleHeadroom(notice: Json): { state: 'unknown' | 'ok' | 'high'; alert_at?: number; sha?: string | null; url?: string | null; measures: Json[]; high: Json[] }
