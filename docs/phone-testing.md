@@ -78,3 +78,45 @@ URL restriction stops other sites from using the token, not people visiting this
 The hosted site behaves exactly like local development: what goes to Mapbox (route
 endpoints, the live-drive position, typed searches) is the same, and GitHub Pages only
 serves the app's static files. See README, Privacy.
+
+## Notes from the phone lab's first night (2026-11-11)
+
+The phone lab ([phone-lab.md](phone-lab.md)) runs the installed app from the PC over USB. These
+are the things that went wrong or surprised on its first night, so that nobody learns them twice.
+
+- **`PasswordProtected` does not say whether the phone has a passcode.** The lockdown value
+  (`pymobiledevice3 lockdown info`) read `false` all evening and was taken to mean "no passcode".
+  It means "not locked right now": it turned `true` the moment the phone locked. Read it only as
+  "is the phone locked at this moment". The owner's phone has a passcode.
+- **A locked phone starts nothing.** Once it is locked with its passcode, no app can be started
+  from the PC, so no scenario can run. Builds can still be installed. Only the owner can unlock
+  it; the lab never tries to.
+- **Do not force the phone to sleep, and never press its side button from the PC.**
+  `diagnostics sleep` turned the display off and it did not come back when the app was started:
+  every screenshot afterwards was black, though the app ran. Pressing the side button over USB
+  (possible once the developer disk image is mounted) woke the display on the lock screen, and
+  the phone then locked. That ended the night's testing.
+- **So: test "locked" with the app in the background, not with a forced sleep**, unless the owner
+  is there to wake the phone. Starting another app puts RouteIQ in the background with the
+  screen on, which is the state iOS treats almost the same way (the app is not active, the web
+  view's own timers are held back), and the lab can still see the screen afterwards.
+  `--lock` refuses to run without `--owner-unlocks-after`, and cannot be put in a queue.
+- **The 39 s stall.** Right after the forced sleep nothing ran in the app for 39 s (no position,
+  no tick); it carried on when the PC next asked the phone for the lab's report, and then ran
+  for three minutes with the screen off. Whether pressing the side button during a real drive
+  does the same is not known: the owner's own locked drive that evening had no such wait. The
+  lab records the longest stop while away in every run (limit 5 s).
+- **Sideloadly sits at "Installing… 88 %" for minutes.** Four installs took 4 to 10 minutes,
+  most of it at 88 %, and each finished soon after the lab next started an app on the phone. Two
+  installs with the phone locked and idle took 4 seconds. The cause is not established; if an
+  install hangs at 88 %, starting any app on the phone from the PC
+  (`node scripts/phone/lab/run.mjs --scenario starts-and-plans`) has got it moving every time.
+- **The simulated position belongs to one connection.** Separate tool commands each open their
+  own tunnel to the phone, and between them the phone fell back to its real GPS. The first drive
+  run started on the phone's real position because of that. The lab now keeps one connection for
+  a whole run, and the app starts a lab drive only where the simulated position is.
+- **The phone talks.** A drive scenario speaks 12 to 16 lines at the phone's media volume. Turn
+  it down before a night run.
+- **The new driving screen was black on the phone** (#136) though every check in CI was green.
+  A screenshot of the real phone is now checked in every drive run: a screen that is 97 % or
+  more one flat colour fails.

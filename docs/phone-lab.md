@@ -213,6 +213,40 @@ The phone is the owner's. It must never be left without a RouteIQ that works.
    once, run `starts-and-plans` to see it start, and report what failed.
 6. **Always end with the simulated position cleared** and RouteIQ started normally, in front.
 
+### A queue of builds, one report
+
+`queue.mjs` does the rule above for several builds in a row and writes one report
+(`phone-lab/queue-<time>/report.md`):
+
+```powershell
+node scripts/phone/lab/queue.mjs plan.json                      # now
+node scripts/phone/lab/queue.mjs plan.json --wait-unlocked 12   # when the phone is next unlocked
+```
+
+```json
+{
+  "rollback": "C:/Users/me/dev/routeiq-builds/known-good-123/RouteIQ-unsigned.ipa",
+  "builds": [
+    { "name": "main + lab", "ipa": "C:/Users/me/dev/routeiq-builds/lab-main-456/RouteIQ-unsigned.ipa" },
+    { "name": "PR 127 + lab", "ipa": "C:/.../RouteIQ-unsigned.ipa", "keep": false,
+      "runs": [["--scenario", "starts-and-plans"], ["--scenario", "locked-wrong-turn", "--in-app"]] }
+  ]
+}
+```
+
+For each build: install it over the app, then its runs (by default `starts-and-plans`,
+`drive-screen` and `locked-wrong-turn --in-app`; a build that does not start gets no drive). At
+the end the phone is left on the last build that passed every run, or, when none did, on the
+rollback build, which is then started to see its routes. A build with `"keep": false` is a
+throwaway (a pull request's code plus the lab, built only to be measured) and is never the one
+left on the phone. A run with `--lock` is refused.
+
+`--wait-unlocked` reads one value from the phone every 10 minutes, presses nothing and starts
+nothing while it is locked. When the phone is unlocked it waits two more minutes and looks again
+before it begins, because someone who has just picked the phone up is using it. The queue's
+default drive is the in-app test drive, so the phone's own position is not changed; the phone
+does speak.
+
 ## Limits, said plainly
 
 - A locked phone with a passcode cannot be opened from the PC: no app can be started on it. Builds
