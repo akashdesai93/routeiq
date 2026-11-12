@@ -4,10 +4,17 @@ export const PHONE_LABEL: string
 export const PHONE_VERIFIED: string
 export const PHONE_MARKER: RegExp
 export const COMPARE_FILE_LIMIT: number
+export const SIZE_OK_LABEL: string
+export const BUDGET_FILE: string
 export function areasOf(path: string): string[]
+/** The size job's report (scripts/bundle-size.mjs, growthReport); null when not measured; undefined to skip. */
+export type SizeGrowth = Record<string, { base: number | null; pr: number | null; limit: number }> | null | undefined
+export function sizeFailures(pr: { labels: string[]; files: string[] }, growth: SizeGrowth | unknown): { gate: string; message: string }[]
+export function sizeGrowthArg(argv: string[]): unknown
 export function evaluate(
   pr: { labels: string[]; body: string; files: string[] },
   main: { aheadBy: number; files: string[] } | null,
+  growth?: SizeGrowth | unknown,
 ): { ok: boolean; failures: { gate: string; message: string }[] }
 export const RERUN_WAIT: Readonly<{ pollMs: number; maxMs: number }>
 type Gh = (path: string, method?: string) => any

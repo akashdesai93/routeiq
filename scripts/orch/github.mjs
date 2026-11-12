@@ -96,9 +96,32 @@ export function collect({ repo, board = 17, windowHours, now = new Date(), log =
   const main = {
     newest: slimRun(gateRuns[0] || null),
     newest_completed: slimRun(gateRuns.find((r) => r.status === 'completed') || null),
+    bundle: null,
+  }
+  log('bundle size on main')
+  for (const run of gateRuns.filter((r) => r.status === 'completed')) {
+    main.bundle = bundleNotice(R, run)
+    if (main.bundle) break
   }
 
   return { repo, board, fetched_at: now.toISOString(), window_hours: windowHours, board_comments: boardComments, issues, issue_comments: issueComments, pulls, merged, main }
+}
+
+/**
+ * Main's bundle sizes and ceiling from a Gate run: the `bundle-size` notice that
+ * scripts/check-bundle-size.mjs writes in the web job (#170), or null when that run has none.
+ */
+function bundleNotice(R, run) {
+  const job = (ghJson(`${R}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []).find((j) => /typecheck, lint, test, build$/.test(j.name))
+  if (!job) return null
+  const notes = ghJson(`${R}/check-runs/${job.id}/annotations?per_page=50`) || []
+  const note = notes.find((a) => a.title === 'bundle-size')
+  if (!note) return null
+  try {
+    return { ...JSON.parse(note.message), head_sha: run.head_sha, url: run.html_url }
+  } catch {
+    return null
+  }
 }
 
 /** The newest successful Gate run of this commit that has the iPhone build, or null. */
