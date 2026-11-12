@@ -290,15 +290,19 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       Probe back-off and skip reasons (#183, items 2 and 4): after 3 losses in a row (a side
       street found, compared like for like, not holding up) the checks stop probing until the
       slowdown ahead changes by 0.1 (`probeBackoffHolds`, `DriveProbeBudget.losingChecks`,
-      `rearmSlowdownChange`), and a
+      `rearmSlowdownChange`; a loss only when the engine compared the side street like for
+      like, `RerouteDecision.probeCompared`, with a known slowdown), and a
       check that sent no probe says why in the shell's diagnostics (`checkProbePlan`,
       `ProbeSkip`). e2e: "when the side streets keep losing, it stops asking after three
-      losses". Open for later: the six unexplained checks of the desk drive (item 4) are read
+      losses" and "after it stops asking, a jam that gets worse makes it try the side streets
+      again". Open for later: the six unexplained checks of the desk drive (item 4) are read
       from the next phone drive's "probes skipped" line; the likely reasons there are
       "nothing to probe" (the stretches ahead were freeway) and "route not found" (the
       route being driven was not among Mapbox's answers and the path check was not made).
       The back-off has no time or distance decay, and it watches only the route being driven:
-      a side street that clears (a train crossing) does not re-arm it.
+      a side street that clears (a train crossing) does not re-arm it. With the development
+      what-if delay on, the plan reads the slowdown without the delay and the loss with it,
+      so a delay of 10 % or more re-arms the probes on every check (development only).
       11d (#183, desk-drive findings): the drive never goes blind. A probe goes out only
       from what is left after one request per poll interval until the expected arrival
       (times `arrivalReserve`, 1.5) is kept back for the plain checks

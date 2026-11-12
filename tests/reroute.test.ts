@@ -1529,6 +1529,20 @@ describe('side streets found by probes during a drive (PLAN step 11c, #5)', () =
     expect(memory).toMatchObject({ round: 5, losing: 3, losingSlowdown: 2000 / 1700 })
   })
 
+  it('says whether a side street was compared like for like, for the back-off (#183)', () => {
+    // Found and compared with the current path asked through via points: true.
+    const compared = probedDrive({ polls: 4, etaA: 2000, etaS: 1940, budget: { losingChecks: 1e9 } })
+    expect(compared.records.map((r) => r.decision.probeCompared === true)).toEqual(compared.records.map((r) => r.found))
+    // No path check, so no like-for-like time: never, though S comes back and looks faster.
+    const unlike = probedDrive({ polls: 4, etaA: 2000, etaS: 1500, unlike: true, budget: { losingChecks: 1e9 } })
+    expect(unlike.records.some((r) => r.found)).toBe(true)
+    expect(unlike.records.some((r) => r.decision.probeCompared === true)).toBe(false)
+    // Its path check failed on one check: not compared on that one.
+    const failed = probedDrive({ polls: 4, etaA: 2000, etaS: 1940, pathCheckFailsAt: [0], budget: { losingChecks: 1e9 } })
+    expect(failed.records[0]!.found).toBe(true)
+    expect(failed.records[0]!.decision.probeCompared === true).toBe(false)
+  })
+
   it('probes that failed or found no road are not losses: a side street found later still switches (#183)', () => {
     // The first and third probes fail (no answer): with them counted as losses the back-off would
     // hold before S was ever confirmed.

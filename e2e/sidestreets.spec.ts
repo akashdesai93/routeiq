@@ -592,3 +592,30 @@ test('with the freeway-jam probes off, a freeway jam sends no probe beside the f
   expect(spoken.some((line) => line.includes('Service Road'))).toBe(false)
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })
+
+test('after it stops asking, a jam that gets worse makes it try the side streets again', async ({ app }) => {
+  // As above, every road 1.6 times slower, until the drive's later checks (request 15 on), when
+  // every road gets 2.2 times slower: the slowdown ahead moves by 0.6, far past the 0.1 that
+  // ends the back-off, so the side streets are worth another look.
+  const CHANGE_AT = 15
+  const worse: Traffic = (route, at, n) => FREE_FLOW(route, at, n) * (n >= CHANGE_AT ? 2.2 : n >= 2 ? 1.6 : 1)
+  app.outside.sideStreet = true
+  app.outside.traffic = worse
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A' })
+  await app.snap('arrived: the probes stopped, then came back once the jam got worse')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const losses = driveProbes.filter((p) => p.road === 'S')
+  expect(losses.length).toBeGreaterThanOrEqual(3)
+  const thirdAt = losses[2]!.forRequest
+  expect(thirdAt).toBeLessThan(CHANGE_AT)
+  // Nothing between the third loss and the change; a probe again after it.
+  expect(driveProbes.filter((p) => p.forRequest > thirdAt && p.forRequest < CHANGE_AT)).toEqual([])
+  expect(driveProbes.filter((p) => p.forRequest >= CHANGE_AT).length).toBeGreaterThanOrEqual(1)
+  expect(log.banners).toEqual([])
+})
