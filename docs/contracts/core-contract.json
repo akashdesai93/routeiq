@@ -1,6 +1,5 @@
 {
-  "version": 7,
-  "hash": "8a70d7669ad3c9264cfba400b13c358967fb2292054ae6f49665d0528b8b12cc",
+  "version": 6,
   "history": [
     {
       "version": 1,
@@ -25,10 +24,6 @@
     {
       "version": 6,
       "hash": "d94f8991775aada140c52bbc2c950effc74ed8892e178fb6ca508a9ae5cc6dfd"
-    },
-    {
-      "version": 7,
-      "hash": "8a70d7669ad3c9264cfba400b13c358967fb2292054ae6f49665d0528b8b12cc"
     }
   ],
   "declarations": {
