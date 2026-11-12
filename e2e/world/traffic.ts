@@ -8,7 +8,7 @@
 // check it belongs to. The drive's check of its own path (also with vias)
 // does count.
 
-import { FREE_FLOW, type Traffic } from './roads.ts'
+import { FREE_FLOW, type Closure, type Traffic } from './roads.ts'
 
 /** A jam on the middle of the direct route (A) from the second check of the drive on. Route B goes round it. */
 export const JAM_ON_A_FROM_SECOND_CHECK: Traffic = (route, at, n) => {
@@ -54,6 +54,17 @@ export function jamWhereAllThreeShare(factor: number, fromRequest = 2): Traffic 
     return FREE_FLOW(route, at, n) * (jammed ? factor : 1)
   }
 }
+
+/**
+ * A block of Main Corridor closed from the drive's second check (request 3) on:
+ * the middle of its own stretch (60 to 70 % of the trip), where neither East
+ * Loop nor West Loop runs. From then on Mapbox no longer offers A, and asked
+ * for A itself (the drive's check of its own path) it answers NoRoute. Traffic
+ * stays free flowing, so no other route is faster by time alone: in free flow
+ * A is the fastest, and only the closure makes the drive leave it.
+ */
+export const BLOCK_OF_A_CLOSED_FROM_SECOND_CHECK: Closure = (at, n) =>
+  n >= 3 && Math.abs(at.side - 300) < 50 && at.f > 0.6 && at.f < 0.7
 
 /**
  * A jam on the direct route (A) from the second check of the drive on, only where the East Loop

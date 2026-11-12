@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 3** (Nov 12, 2026: version 2 plus the switch moment's fields on `LiveState`, #84). The Swift port does not match it yet;
+**Current version: 4** (Nov 12, 2026: version 3 plus the switch moment's fields on `LiveState`, #84). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -107,9 +107,9 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 3 | by definition |
+| Web app (`src/`) | 4 | by definition |
 | Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| iPhone shell plugin (`native/shell`) | 3 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
@@ -121,8 +121,12 @@ the declarations that changed.
   `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
   `startSimulatedRoute`, `stopSimulatedRoute` and `share`. The bridge schema gains
   `simulatedRouteRequest`, `simulatedStep` and `shareRequest`.
-- **3** (Nov 12, 2026, #84): the live drive's switch moment, display data only; the reroute
+- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.
+- **4** (Nov 12, 2026, #84): the live drive's switch moment, display data only; the reroute
   engine is unchanged. `LiveState.switchBanner` gains `atMs`, `beforeSec`, `afterSec` and
   `turnInM`, and its `text` is now the spoken line; `LiveState` gains `offer` (a faster route
-  being confirmed) and `kept` (the calm banner after "Keep my route"). The `keep-previous`
+  being confirmed) and `kept` (the calm banner after "Keep my route") and `declinedTurns`; `LiveOptions` gains `heldTurnMatchM`. The `keep-previous`
   event now also turns down a route that is still being confirmed.

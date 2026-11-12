@@ -76,7 +76,7 @@ export interface LiveOptions {
   readonly offRouteReserve: number
   /** No check is sent from a position older than this, in seconds (a tunnel): it would be asked from the wrong place. */
   readonly maxFixAgeSec: number
-  /** How long the "switched route" banner and its "Keep previous route" button stay, in seconds. */
+  /** How long the "switched route" banner and its "Keep my route" button stay, in seconds. */
   readonly switchBannerSec: number
   /**
    * While the switch banner shows, the turn card holds the distance the spoken line named only
@@ -150,7 +150,7 @@ export interface LiveSummary {
   readonly tripSec: number
   /** The route changes that were made and kept, in order. */
   readonly switches: readonly LiveSwitch[]
-  /** Switches the driver turned down with "Keep previous route". */
+  /** Switches the driver turned down with "Keep my route". */
   readonly declined: number
   readonly requestsUsed: number
 }
@@ -246,7 +246,7 @@ export interface LiveState {
   readonly kept: { readonly untilMs: number; readonly noReturnSec: number } | null
   /** Where the routes the driver turned down on this drive turn off: a new offer that turns off there is "still faster". */
   readonly declinedTurns: readonly LngLat[]
-  /** What "Keep previous route" goes back to, while the banner is up. */
+  /** What "Keep my route" goes back to, while the banner is up. */
   readonly undo: {
     readonly route: RouteCandidate
     readonly alongM: number
@@ -342,7 +342,7 @@ export type LiveEvent =
   | { readonly type: 'tick'; readonly nowMs: number }
   | { readonly type: 'visibility'; readonly nowMs: number; readonly hidden: boolean }
   | { readonly type: 'wake-lock'; readonly result: 'held' | 'unavailable' | 'released' }
-  /** The driver pressed "Keep previous route". */
+  /** The driver pressed "Keep my route": turns down the switch just made, or the faster route still being confirmed. */
   | { readonly type: 'keep-previous'; readonly nowMs: number }
   | { readonly type: 'mute'; readonly muted: boolean }
   /** The End tap, or the drive view being closed. */
