@@ -1,4 +1,5 @@
 import { isValidLngLat, type LngLat, type PositionFix } from '../core/index.ts'
+import { sessionNow } from './clock.ts'
 
 export type LocationErrorKind =
   /** The user, or the browser's settings, said no. */
@@ -136,7 +137,7 @@ export const WATCH_TIMEOUT_MS = 20_000
 
 export interface WatchOptions extends Omit<CurrentPositionOptions, 'timeoutMs'> {
   timeoutMs?: number
-  /** The clock every fix is stamped with on arrival. Defaults to Date.now. */
+  /** The clock every fix is stamped with on arrival. Defaults to the session clock (clock.ts), which never steps back. */
   now?: () => number
 }
 
@@ -156,7 +157,7 @@ export function geolocationSource(options: WatchOptions = {}): PositionSource {
     geolocation = defaultGeolocation(),
     secureContext = globalThis.isSecureContext ?? true,
     timeoutMs = WATCH_TIMEOUT_MS,
-    now = Date.now,
+    now = sessionNow,
   } = options
   return {
     start(onFix, onError) {

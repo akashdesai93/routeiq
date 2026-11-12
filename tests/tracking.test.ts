@@ -108,6 +108,22 @@ describe('snapping and progress', () => {
     expect(trackFix(null, loop, fix(500, 1, 0), {}, 480)!.alongRouteM).toBeCloseTo(500, 0)
   })
 
+  it('at a cloverleaf it stays on the pass being driven, even with a fix nearer the later pass (#74)', () => {
+    // East along y = 0 under a bridge at (3000, 0), round a loop of 600 m, then north over the
+    // bridge along x = 3000: the same spot is 3000 m and 3600 m along.
+    const clover = trackedRoute([at(0, 0), at(3000, 0), at(3150, 0), at(3150, -150), at(3000, -150), at(3000, 0), at(3000, 3000)])
+    // Fixes 0.8 m beside the first pass and 0.3 m beside the later one, as a fix under the bridge can be.
+    const through = follow(clover, [fix(2970, 0.8, 0), fix(2985, 0.8, 1), fix(2999.7, 0.8, 2), fix(3015, 0.8, 3)])
+    expect(through.map((s) => Math.round(s.alongRouteM))).toEqual([2970, 2985, 3000, 3015])
+    // After a gap long enough to have driven the loop, the pass reached first is still the one taken.
+    const gap = follow(clover, [fix(2900, 0.8, 0), fix(2999.7, 0.8, 30)])
+    expect(Math.round(gap[1]!.alongRouteM)).toBe(3000)
+    // The first fix of a drive, with nothing to go on: of passes about as near, the first in driving order.
+    expect(Math.round(trackFix(null, clover, fix(2999.7, 0.8, 0))!.alongRouteM)).toBe(3000)
+    // A hint still decides: the route taken up again on the bridge.
+    expect(Math.round(trackFix(null, clover, fix(2999.7, 0.8, 0), {}, 3590)!.alongRouteM)).toBe(3601)
+  })
+
   it('carries on after a gap in the fixes (a tunnel), as far as the car could have driven', () => {
     const states = follow(MAIN, [fix(1000, 0, 0), fix(2500, 0, 60)])
     expect(states[1]!.alongRouteM).toBeCloseTo(2500, 0)

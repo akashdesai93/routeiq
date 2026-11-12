@@ -1,7 +1,13 @@
-# Weekly dependency updates, grouped so each project gets at most a couple of pull
-# requests: one for all minor and patch updates, and major updates one at a time.
-# Security updates come separately (Dependabot alerts) and are not limited by this.
-# Every pull request goes through the `required` check like any other.
+# Dependency updates, tuned to cost as little CI and review time as possible:
+# - Weekly on Monday, so a week's bumps arrive together.
+# - Per folder, one grouped PR for all minor and patch updates. Packages that only
+#   work in lockstep (React + its types, Capacitor) form their own group across
+#   every update type, so a major never arrives half-done (see #103).
+# - A cooldown skips versions until they have been out a few days (a month for
+#   majors), so a release that is quickly patched costs one PR, not two.
+# - A low open-PR limit per folder. A new PR waits until an old one is closed.
+# Security updates come separately (Dependabot alerts), are not limited by any of
+# this and skip the cooldown. Every PR goes through the `required` check.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -9,8 +15,20 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+    ignore:
+      # @types/node must match the Node major the project runs on, and every
+      # workflow (ci, e2e, pages, shell-ios) runs Node 24. Types for a newer Node
+      # describe APIs that don't exist on 24 (#102). Remove this when the
+      # workflows move to a newer Node, together with the @types/node bump.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
+      web-react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       web-minor-and-patch:
         update-types: [minor, patch]
 
@@ -19,8 +37,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
     groups:
+      # The CLI and the runtime must be the same Capacitor version.
+      shell-capacitor:
+        patterns: ["@capacitor/*"]
       shell-minor-and-patch:
         update-types: [minor, patch]
 
@@ -29,8 +53,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
     groups:
+      # react-dom 19 needs react 19 (and @types/react-dom 19 needs @types/react 19).
+      design-react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       design-minor-and-patch:
         update-types: [minor, patch]
 
@@ -40,7 +70,9 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 5
     groups:
       actions:
         patterns: ["*"]
