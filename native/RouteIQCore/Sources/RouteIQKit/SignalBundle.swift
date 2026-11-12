@@ -164,7 +164,7 @@ public struct SignalBundle: Sendable {
 
     /// What the signal counting needs for some routes, and what it could not have.
     public struct Loaded: Sendable {
-        /// What Signals.withSignalCounts takes. No gap-fill source in the app.
+        /// What Signals.withSignalCounts takes.
         public let data: SignalData
         /// Tiles the routes need that the bundle does not cover. Empty when every count will be full.
         public let missingTileIds: [String]
@@ -203,8 +203,7 @@ public struct SignalBundle: Sendable {
         return Loaded(
             data: SignalData(
                 primary: Self.signalPoints(withNodes + partial),
-                primaryTileIds: Set(loaded),
-                gapFill: nil
+                primaryTileIds: Set(loaded)
             ),
             missingTileIds: missing,
             dataDate: loaded.isEmpty ? nil : dataDate
