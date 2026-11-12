@@ -71,6 +71,7 @@ stopped one is restarted by its next firing; nobody has to notice.
 | `needs-phone` | PR | must be checked on the real iPhone. **Fails `required` until `phone-verified` is added** | the author or reviewer; also implied by a line of the PR body that starts with `PHONE CHECK NEEDED` |
 | `phone-verified` | PR | the phone lab passed this PR | the phone lab or the owner only |
 | `do-not-merge` | PR | not finished. **Fails `required`.** Use it instead of a draft | the author |
+| `size-ok` | PR | passes the bundle growth limit (4 kB JS, 2 kB CSS per PR) and a change of `scripts/bundle-budget.json` (#170). **Without it those fail `required`** | the reviewer, with the reason in the verdict (an owner decision for the ceiling file) |
 | `status-board` | #17 | the board | — |
 | `orch-alert` | one issue | the fleet alert (below) | `board.yml` only |
 
@@ -156,6 +157,7 @@ protection asks for the one check `required` (`docs/branch-protection.md`).
 | hold labels | `gate.yml` `required` (`scripts/orch/gates.mjs`) | the PR has `do-not-merge` or `needs-human` |
 | phone | same | the PR has `needs-phone`, or a line of its body starts with `PHONE CHECK NEEDED`, and has no `phone-verified` |
 | up to date by area | same | `main` changed an area this PR also changes (web app, iPhone shell, Swift core, native app, design, CI) after the PR's base: **update the branch** |
+| bundle growth (#170) | same | the PR adds more than `growthPerPr` to the app JS or the CSS against the main it was tested on, the growth was not measured, or the PR changes `scripts/bundle-budget.json`; and it has no `size-ok`. (Above the owner's ceiling fails the `web` job itself; no label passes that) |
 | re-check when things change | `gates.yml` | re-runs `required` of a PR when its labels or body change, and of every PR in an area `main` just changed |
 | main red | `main-red.yml` | opens the `main is red` issue (p1) |
 | fleet health | `board.yml` | opens the `orch-alert` issue (below) |
@@ -170,8 +172,8 @@ where two changes can break each other (#91 and #121 were different files in one
 repos/akashdesai93/routeiq/actions/workflows/board.yml/dispatches -f ref=main`). It runs
 `state.mjs`, rewrites the body of #17 (and nothing else there), uploads the JSON as the
 `orch-state` artifact, and keeps one `orch-alert` issue open while health is bad:
-orchestrator heartbeat older than 3 h, `main` red, orphaned PRs, sessions silent for 2 h
-with work in flight, stray decisions. It comments there only when the list changes, and
+orchestrator heartbeat older than 3 h, `main` red, `main` above 90 % of the bundle ceiling
+(#170), orphaned PRs, sessions silent for 2 h with work in flight, stray decisions. It comments there only when the list changes, and
 closes it when health is good. At its 11:23 UTC run it also posts the **morning report** on #17:
 phone results first, then what needs the owner, in plain words.
 
