@@ -68,9 +68,13 @@ and the two macOS builds when their paths change. Its last job, `required`, is t
 status check `main` requires: `main` is protected and every change arrives through a pull
 request. See [docs/branch-protection.md](docs/branch-protection.md).
 
-`npm run size` (after a build) checks the bundle-size budget in
-`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, and the CSS
-may each grow 10 % before CI fails.
+`npm run size` (after a build) checks the bundle against the owner's ceiling in
+`scripts/bundle-budget.json` (#170): the app's own JavaScript, without Mapbox GL JS, and the CSS.
+On a pull request CI also builds the `main` it was tested on, and the Gate fails a PR that adds
+more than 4 kB of JavaScript or 2 kB of CSS unless the reviewer adds the label `size-ok` with a
+reason. The fleet board flags `main` above 90 % of the ceiling, so the ceiling is raised (or code
+cut) by decision. Feature PRs never change the ceiling. See
+[docs/branch-protection.md](docs/branch-protection.md#bundle-size).
 
 ## End-to-end scenarios
 
