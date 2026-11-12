@@ -6,6 +6,17 @@ name: E2E
 #
 # Called by gate.yml on every pull request and every push to main (it has no triggers
 # of its own, so each change runs once); it can also be started by hand.
+#
+# The scenarios are CPU-bound (Mapbox GL drawn in software, plus the video of every
+# scenario), so they are spread over several runners, two browsers on each runner's four
+# cores. e2e/shard.mjs deals every scenario to exactly one shard, weighted by its measured
+# seconds (e2e/durations.json) so that no runner gets more than its share of the long
+# drives, and checks that Playwright selects exactly what it was dealt. Each shard uploads
+# a blob report; e2e-report.yml merges them into the one `e2e-report`. In gate.yml that
+# merge runs after the shards but is not part of `required`, so it adds no waiting time.
+#
+# To change the number of shards, change the list under `matrix.shard` only: the
+# total comes from `strategy.job-total`, so the deal always covers every scenario.
 
 on:
   workflow_call:
@@ -16,9 +27,15 @@ permissions:
 
 jobs:
   e2e:
-    name: e2e scenarios
+    name: e2e scenarios (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # Every shard finishes, so the report shows every broken scenario, not just the first.
+      # Any failed shard still fails this workflow, and with it `required`.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,21 +52,63 @@ jobs:
         id: pw
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache the browser
+      # The exact runner image: the packages below are the ones install-deps adds on it.
+      - name: Runner image
+        id: image
+        run: echo "id=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      # The browser, and the .deb files of the system packages `--with-deps` installs on this
+      # image (on the measured runs: fonts only, ~22 MB from an Ubuntu mirror that took 1-12 s,
+      # after a 6 s apt-get update). A new key: the old one (playwright-Linux-<version>) was
+      # never restored on the Gate runs measured on 2026-11-12, and every save failed with
+      # "another job may be creating this cache".
+      - name: Cache the browser and its system packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-shell-${{ steps.image.outputs.id }}-${{ steps.pw.outputs.version }}
 
-      # Headless Chromium only (no full browser), plus the system libraries it needs.
-      - run: npx playwright install --with-deps --only-shell chromium
+      # Headless Chromium only (no full browser), plus the system packages it needs. With the
+      # cache, the same packages are installed from their saved .deb files (no apt-get update,
+      # no download); without it, as before, and the .deb files are kept for the next run.
+      # Either way Playwright checks the browser's libraries when it starts it.
+      - name: Headless Chromium and its system packages
+        run: |
+          debs=~/.cache/playwright-debs
+          # Package triggers rebuild the man page index otherwise (seconds, never used here).
+          sudo rm -f /var/lib/man-db/auto-update
+          if compgen -G "$debs/*.deb" > /dev/null && { ls "$debs"; sudo dpkg -i "$debs"/*.deb; }; then
+            echo "installed the $(ls "$debs"/*.deb | wc -l) cached packages install-deps added on this image"
+            npx playwright install --only-shell chromium
+          else
+            # No cache, or its packages would not install: the full install, as before.
+            npx playwright install --with-deps --only-shell chromium
+            mkdir -p "$debs"
+            cp /var/cache/apt/archives/*.deb "$debs"/ 2>/dev/null || true
+            echo "kept $(ls "$debs" | wc -l) .deb files for the cache"
+          fi
 
-      - run: npm run e2e
+      - run: npm run e2e:build
 
-      - name: Upload the report
+      - name: Run this shard's scenarios
+        env:
+          PLAYWRIGHT_BLOB_OUTPUT_FILE: blob-report/report-${{ matrix.shard }}.zip
+        run: node e2e/shard.mjs ${{ matrix.shard }} ${{ strategy.job-total }} --workers=2 --reporter=blob,list
+
+      - name: Upload the shard's blob report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-report
-          path: e2e-report/
-          retention-days: 14
+          name: e2e-blob-${{ matrix.shard }}
+          path: blob-report/
+          if-no-files-found: error
+          retention-days: 3
+
+  # Started by hand, this workflow merges its own report. Called from gate.yml (where
+  # github.event_name is the gate's event), gate.yml runs the merge itself, outside `required`.
+  report:
+    needs: e2e
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+    uses: ./.github/workflows/e2e-report.yml
