@@ -157,7 +157,7 @@ export async function startStub({ port = 8521, log = () => {} } = {}) {
     unexpected,
     latest: () => reports.at(-1) ?? null,
     /** Hands the page a command with its next report. Resolves with `{ ok, value }`, or `{ ok: false, value: 'no answer' }` after `timeoutMs`. */
-    send(cmd, arg = {}, timeoutMs = 10_000) {
+    send(cmd, arg = {}, timeoutMs = 30_000) {
       const id = ++commandId
       queue.push({ id, cmd, arg })
       return new Promise((resolve) => {

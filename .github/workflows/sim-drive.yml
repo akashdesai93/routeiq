@@ -152,12 +152,19 @@ jobs:
           if [ "$status" -ge 2 ]; then echo "::error::The drive could not be made (see the summary and the screenshots)."; fi
           exit "$status"
 
-      - name: Simulator log of the app (on failure)
-        if: failure()
+      - name: Simulator log of the app
+        if: always()
         run: |
           mkdir -p build/sim-drive
-          xcrun simctl spawn "$SIM_UDID" log show --last 15m --style compact --predicate 'process == "App"' 2>/dev/null | tail -400 > build/sim-drive/app-log.txt || true
-          xcrun simctl io "$SIM_UDID" screenshot build/sim-drive/zz-at-failure.png || true
+          # The web view logs every bridge call; those lines are left out so the rest is readable.
+          xcrun simctl spawn "$SIM_UDID" log show --last 30m --style compact \
+            --predicate 'process == "App" AND NOT (eventMessage CONTAINS "runJavaScriptInFrameInScriptWorld")' \
+            2>/dev/null | tail -4000 > build/sim-drive/app-log.txt || true
+          # Why a page might load twice: the web content process ending or being reloaded.
+          grep -iE 'terminat|crash|jetsam|reload|didFailNavigation|WebContent\[[0-9]+\].*(exit|kill)' build/sim-drive/app-log.txt | head -60 || true
+          if [ "${{ job.status }}" != success ]; then
+            xcrun simctl io "$SIM_UDID" screenshot build/sim-drive/zz-at-failure.png || true
+          fi
 
       - name: Upload the evidence
         if: always()

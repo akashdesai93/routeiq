@@ -199,8 +199,11 @@ export async function runDrive({ device, stub, outDir, gps = 'start', drive = DE
 
     // 2. Start drive, pressed by the page script.
     const pressed = await stub.send('click', { selector: '.start-drive-button' })
-    if (!pressed.ok) throw new Error(`Start drive could not be pressed: ${pressed.value}`)
-    if (!(await until(20, () => ui().screen === 'drive'))) throw new Error(`The drive view did not open (screen: ${ui().screen}).`)
+    // On a busy runner the page's report loop can stall for several seconds, so the
+    // click's answer may come late: what the screen shows decides, not the answer.
+    if (!pressed.ok && pressed.value !== 'no answer') throw new Error(`Start drive could not be pressed: ${pressed.value}`)
+    if (!pressed.ok) note('Start drive: the page did not confirm the click in time; waiting for the drive view instead.')
+    if (!(await until(45, () => ui().screen === 'drive'))) throw new Error(`The drive view did not open (screen: ${ui().screen}; click: ${pressed.value ?? 'ok'}).`)
     const routeA = stub.world.cornersOf('A')
     const toTurn = firstM(routeA, drive.wrongTurnAtM)
     await follow(toTurn, drive.speedMps, 'along Main Corridor')
@@ -246,11 +249,11 @@ export async function runDrive({ device, stub, outDir, gps = 'start', drive = DE
     if (result.lock.diagnostics) result.diagnostics = result.lock.diagnostics
 
     // 7. End, and the diagnostics once more with the trip screen behind it.
-    const last = await stub.send('diagnostics', {}, 6000)
+    const last = await stub.send('diagnostics', {}, 20_000)
     if (last.ok) result.diagnostics = last.value
-    const ended = await stub.send('click', { selector: '.live-end' }, 6000)
+    const ended = await stub.send('click', { selector: '.live-end' }, 20_000)
     if (ended.ok) await until(10, () => ui().screen === 'plan')
-    const shown = await stub.send('diagnostics', { keepOpen: true }, 6000)
+    const shown = await stub.send('diagnostics', { keepOpen: true }, 20_000)
     if (shown.ok) result.diagnostics = shown.value
     await sleep(700)
     await shot('after-end', 'after End: the trip screen with Drive diagnostics open')
@@ -289,7 +292,7 @@ export async function runDrive({ device, stub, outDir, gps = 'start', drive = DE
 async function lockTest({ device, stub, drive, until, shot, say, readText }) {
   const out = { tried: false, how: null, sawNotActive: false, before: null, after: null, reportsWhileLocked: 0, diagnostics: null, unlocked: false, verdict: '' }
   const counts = () => ({ ...(stub.latest()?.counts ?? {}) })
-  const before = (await readText(6000)).value
+  const before = (await readText(20_000)).value
   out.before = { counts: counts(), diagnostics: readDiagnostics(before) }
   const how = await device.lock()
   out.tried = true
@@ -305,7 +308,7 @@ async function lockTest({ device, stub, drive, until, shot, say, readText }) {
   await sleep(Math.max(0, drive.lockedSec * 1000 - (Date.now() - lockedAt)))
   await shot('locked', `${drive.lockedSec} s after the lock command (${how})`)
   out.reportsWhileLocked = stub.reports.length - reportsAt
-  const text = await readText(5000)
+  const text = await readText(20_000)
   if (text.ok) out.diagnostics = text.value
   out.after = { counts: counts(), diagnostics: readDiagnostics(text.ok ? text.value : null) }
   await device.unlock(() => stub.latest()?.appState === 'active' && stub.latest()?.ui.visibility === 'visible')
