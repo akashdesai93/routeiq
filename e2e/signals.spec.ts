@@ -1,6 +1,6 @@
 import { EMPTY_PLACE_BOOK, serializePlaceBook, setLastTrip, type Place } from '../src/core/index.ts'
 import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
-import { expect, test } from './harness.ts'
+import { expect, test, type App } from './harness.ts'
 import { World, type LngLat } from './world/roads.ts'
 
 // Light counts outside North and South Carolina, where no signal data ships
@@ -10,8 +10,8 @@ import { World, type LngLat } from './world/roads.ts'
 const STONE_MOUNTAIN: Place = { id: 'e2e:stone-mountain', label: 'Stone Mountain Park', position: [-84.1455, 33.8053] }
 const CAPITOL: Place = { id: 'e2e:ga-capitol', label: 'Georgia State Capitol', position: [-84.388, 33.749] }
 
-test('a route outside NC/SC shows a partial light count, never 0, and still ranks by time', async ({ app, page }) => {
-  // The device's last trip was in Georgia, so the app opens with it.
+/** The device's last trip was in Georgia, and Overpass knows only part of it: what to open the app with. */
+function georgiaTrip(app: App): Record<string, string> {
   const book = setLastTrip(EMPTY_PLACE_BOOK, { origin: STONE_MOUNTAIN, destination: CAPITOL })
   // Overpass answers for the eastern part of the trip and is busy for the western part.
   // The two signals it knows are on the made-up Main Corridor, at its first two corners.
@@ -27,7 +27,11 @@ test('a route outside NC/SC shows a partial light count, never 0, and still rank
       .map(([lng, lat], i) => ({ type: 'node', id: 900 + i, lat, lon: lng, tags: { highway: 'traffic_signals' } }))
     return { status: 200, body: { version: 0.6, generator: 'e2e', elements } }
   }
-  await app.open({ storage: { [PLACE_BOOK_KEY]: JSON.stringify(serializePlaceBook(book)) } })
+  return { [PLACE_BOOK_KEY]: JSON.stringify(serializePlaceBook(book)) }
+}
+
+test('a route outside NC/SC shows a partial light count, never 0, and still ranks by time', async ({ app, page }) => {
+  await app.open({ storage: georgiaTrip(app) })
   await expect(page.getByRole('combobox', { name: 'Destination' })).toHaveValue('Georgia State Capitol')
   await app.routesReady()
   await app.snap('a Georgia trip: partial counts')
@@ -49,4 +53,29 @@ test('a route outside NC/SC shows a partial light count, never 0, and still rank
   // the harness no longer answers its server, so a request to it would fail the scenario.
   await expect(page.getByText('© OpenStreetMap contributors').first()).toBeVisible()
   await expect(page.getByText('City of Charlotte')).toHaveCount(0)
+})
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+
+  test('driving where light data is missing, More shows a lower bound that says so, never 0', async ({ app, page }) => {
+    await app.open({ fakeClock: true, storage: georgiaTrip(app) })
+    await app.routesReady()
+    const lights = page.getByLabel('Live drive').locator('[data-tile="lights"]')
+    await app.drive({
+      maxSec: 40,
+      lookAtSec: [
+        {
+          atSec: 30,
+          look: async () => {
+            await page.getByRole('button', { name: 'More' }).click()
+            await page.clock.runFor(50)
+            // Part of this route has no light data: what is known is a lower bound, and the tile says so.
+            await expect(lights).toHaveText(/^Lights on route≥ [1-9]\d* data missing$/)
+            await app.snap('More on a route with missing light data: a lower bound')
+          },
+        },
+      ],
+    })
+  })
 })

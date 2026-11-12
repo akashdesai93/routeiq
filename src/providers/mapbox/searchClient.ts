@@ -1,5 +1,5 @@
 import { isValidLngLat, SEARCH_RESULT_LIMIT, searchQuery, type LngLat } from '../../core/index.ts'
-import { tokenErrorHelp } from '../../config.ts'
+import { mapboxGet, redactToken, type MapboxFailure } from './http.ts'
 import {
   parseRetrieved,
   parseSuggestions,
@@ -92,51 +92,23 @@ export interface FetchPlaceOptions extends RequestOptions {
   id: string
 }
 
-const ABORTED: SearchFailure = { ok: false, kind: 'aborted', message: 'Search cancelled.' }
+type Outcome = { readonly status: number; readonly body: unknown } | MapboxFailure
 
-type Outcome = { readonly status: number; readonly body: unknown } | SearchFailure
-
-/** One GET. Never rejects, and turns the answers every Mapbox API shares (401, 403, 429) into readable failures. */
-async function request(url: string, { signal, fetchImpl = fetch }: RequestOptions): Promise<Outcome> {
-  let status: number
-  let body: unknown = null
-  try {
-    const response = await fetchImpl(url, { signal })
-    status = response.status
-    body = await response.json().catch(() => null)
-  } catch {
-    if (signal?.aborted) return ABORTED
-    // The thrown error is deliberately not shown: it adds nothing for the user, and can quote the URL.
-    return {
-      ok: false,
-      kind: 'network',
-      message: 'Could not reach Mapbox search. Check your internet connection, or drag a pin instead.',
-    }
-  }
-  if (signal?.aborted) return ABORTED
-  const tokenHelp = tokenErrorHelp(status)
-  if (tokenHelp !== null) return { ok: false, kind: 'token', message: tokenHelp }
-  if (status === 429)
-    return {
-      ok: false,
-      kind: 'rate-limit',
-      message: 'Mapbox is rate limiting search requests (429). Wait a minute, then try again.',
-    }
-  return { status, body }
-}
-
-/** Belt and braces: an API message that echoes the request must not show the token. */
-function redact<T extends SuggestResult | RetrieveResult>(result: T, token: string): T {
-  if (result.ok || token === '' || !result.message.includes(token)) return result
-  return { ...result, message: result.message.replaceAll(token, '[token]') }
+/** One GET (see mapboxGet), worded for search. */
+function request(url: string, { signal, fetchImpl = fetch }: RequestOptions): Promise<Outcome> {
+  return mapboxGet(url, signal, fetchImpl, {
+    aborted: 'Search cancelled.',
+    network: 'Could not reach Mapbox search. Check your internet connection, or drag a pin instead.',
+    rateLimit: 'Mapbox is rate limiting search requests (429). Wait a minute, then try again.',
+  })
 }
 
 function settle<T extends SuggestResult | RetrieveResult>(outcome: Outcome, parse: (body: unknown) => T, token: string): T | SearchFailure {
   if ('ok' in outcome) return outcome
   const result = parse(outcome.body)
-  if (outcome.status >= 200 && outcome.status < 300) return redact(result, token)
+  if (outcome.status >= 200 && outcome.status < 300) return redactToken(result, token)
   // Non-2xx: keep Mapbox's own explanation when it sent one (400 Bad request).
-  if (!result.ok && result.kind === 'api') return redact(result, token)
+  if (!result.ok && result.kind === 'api') return redactToken(result, token)
   return {
     ok: false,
     kind: 'api',

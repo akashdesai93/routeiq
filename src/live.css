@@ -1,0 +1,143 @@
+/* The live drive (LiveDriveView.tsx), in the approved design (design/README.md, "The merged
+   direction"): black glass on the map, condensed figures, and amber kept for news (the
+   switch banner, #84). A turn card floats over the top of the map; the sheet sits under the
+   map, lapping over its bottom edge, so the map's own centre (the car) and its attribution
+   stay in view. Full screen, one column at every width.
+
+   Built for the once-a-second tick: every figure has tabular digits and a fixed line height
+   in a box that does not grow, the two cards are their own layout islands (contain), and the
+   only motion is a transform. */
+.app.live {
+  --bg: #050607;
+  --glass: #0b0d10;
+  --raised: #171a1f;
+  --hair: #2c3138;
+  --hair2: #59616c;
+  --fg: #f2f4f6;
+  --dim: #9aa1ab;
+  --figure: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+.app.live .bar, .app.live .side { display: none; }
+.app.live .main { position: relative; flex-direction: column; overflow: hidden; background: var(--bg); }
+/* The map keeps its own ink: its attribution is dark text on a light ground. The ground colour
+   is what shows for the one frame the map takes to redraw after the sheet changes height. */
+.app.live .map { order: 2; flex: 1; height: auto; min-height: 0; background: #eceae4; color: #1f2328; font-weight: 400; letter-spacing: normal; }
+.app.live .map .mapboxgl-ctrl-top-right { display: none; }
+/* Clear of the sheet's rounded top, which laps 24px over the map. */
+.app.live .map .mapboxgl-ctrl-bottom-left, .app.live .map .mapboxgl-ctrl-bottom-right { bottom: 30px; }
+/* Everything that is tapped is 44px or more; the two controls are 60px. */
+.app.live button { min-height: 44px; border-color: var(--hair); background: var(--raised); color: var(--fg); font-family: inherit; font-weight: 600; }
+.app.live button:hover { background: #20242b; }
+.app.live button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.app.live .hint { color: var(--dim); }
+
+/* ---------- the turn card ---------- */
+.live-top {
+  position: absolute;
+  z-index: 3;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  max-width: 448px;
+  margin-inline: auto;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 124px;
+  padding: 10px 18px 10px 12px;
+  border: 1.5px solid var(--hair);
+  border-radius: 24px;
+  background: var(--glass);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  contain: layout paint;
+}
+/* Words only (finding a position, off the route): a lower card. */
+.live-top:not(:has(.turn-arrow)) { min-height: 72px; padding-left: 18px; }
+.turn-arrow { flex: none; width: 68px; height: 68px; }
+.live-turn-text { display: flex; flex: 1; flex-direction: column; justify-content: center; min-width: 0; }
+.live-turn-distance { font-family: var(--figure); font-size: 76px; font-weight: 600; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-turn-distance .live-unit { color: var(--dim); font-size: 28px; font-weight: 500; }
+.live-turn-road { display: -webkit-box; margin-top: 4px; overflow: hidden; font-family: var(--figure); font-size: 30px; font-weight: 600; line-height: 1.05; letter-spacing: 0.005em; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+/* A plain instruction rather than a street name: the text face, like every sentence. */
+.live-turn-plain { font-family: inherit; font-size: 20px; line-height: 1.2; letter-spacing: -0.01em; }
+.live-turn-secondary { overflow: hidden; margin-top: 2px; color: var(--dim); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- the sheet ---------- */
+.live-bottom, .live-summary {
+  position: relative;
+  z-index: 2;
+  order: 3;
+  flex: none;
+  margin-top: -24px;
+  /* On a wide screen the sheet spans the window and its content stays a phone's width. */
+  padding: 27px max(16px, env(safe-area-inset-right, 0px), calc(50% - 224px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px), calc(50% - 224px));
+  border-top: 1.5px solid var(--hair);
+  border-radius: 28px 28px 0 0;
+  background: var(--glass);
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.22);
+}
+/* The grabber is the sheet's own mark, not content. */
+.live-bottom::before { content: ''; position: absolute; top: 10px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: var(--hair2); }
+.live-eta { display: flex; gap: 12px; justify-content: space-between; align-items: center; height: 58px; margin: 0 2px; contain: layout paint; }
+.live-eta-left { font-family: var(--figure); font-size: 54px; font-weight: 600; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-eta-left .live-unit { color: var(--dim); font-size: 23px; font-weight: 500; }
+/* The arrival time is smaller and dimmer on purpose: two figures read at a glance, not three. */
+.live-eta-arrive { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; color: var(--dim); }
+.live-eta-label { font-size: 14.5px; }
+.live-eta-clock { font-family: var(--figure); font-size: 26px; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-eta-place { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.live-controls { display: flex; gap: 12px; margin-top: 14px; }
+.app.live .live-button { display: inline-flex; flex: 1; gap: 10px; justify-content: center; align-items: center; min-height: 60px; padding: 8px 14px; border: 0; border-radius: 16px; font-size: 18px; }
+.live-more-toggle::before { content: ''; width: 9px; height: 9px; border-top: 2.5px solid currentColor; border-left: 2.5px solid currentColor; transform: translateY(3px) rotate(45deg); }
+.live-more-toggle[aria-expanded='true']::before { transform: translateY(-3px) rotate(225deg); }
+.live-end::before { content: '×'; font-size: 28px; font-weight: 500; line-height: 0.7; }
+/* The one filled button is white: amber never means anything but news. */
+.app.live .live-primary { background: var(--fg); color: var(--bg); }
+.app.live .live-primary:hover { background: #ffffff; }
+.app.live .live-keep { flex: none; width: 100%; border: 2px solid var(--fg); background: transparent; }
+/* Neutral until the switch itself is designed in (#84). */
+.live-banner { display: flex; flex-direction: column; gap: 10px; margin: 0 0 10px; padding: 12px 14px; border: 1.5px solid var(--hair2); border-radius: 16px; font-size: 18px; line-height: 1.28; }
+.live-warning { margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; background: var(--raised); font-size: 14.5px; font-weight: 500; line-height: 1.35; }
+
+/* ---------- behind More ---------- */
+.live-more { animation: live-rise 0.28s cubic-bezier(0.25, 0.8, 0.25, 1); }
+@keyframes live-rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
+.live-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 12px; }
+.live-tile, .app.live button.live-tile { position: relative; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: flex-start; height: 68px; padding: 8px 14px; border: 0; border-radius: 16px; background: var(--raised); text-align: left; contain: layout paint; }
+.live-tile-label { color: var(--dim); font-size: 14.5px; line-height: 1.2; }
+.live-tile-word { font-family: var(--figure); font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-tile-word .live-unit { color: var(--dim); font-size: 19px; font-weight: 500; }
+.live-tile-hint { color: var(--dim); font-family: 'Inter', system-ui, sans-serif; font-size: 12.5px; font-weight: 500; letter-spacing: -0.01em; }
+.live-toggle { position: absolute; right: 14px; bottom: 12px; width: 50px; height: 30px; border-radius: 15px; background: var(--fg); }
+.live-toggle::after { content: ''; position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--glass); transition: transform 0.2s ease; }
+/* Pressed is muted: the voice is off. The word beside it says so too. */
+.live-voice[aria-pressed='true'] .live-toggle { background: var(--hair2); }
+.live-voice[aria-pressed='true'] .live-toggle::after { transform: translateX(-20px); }
+/* Two lines kept, so "checked 9 s ago" becoming "10 s" never moves the sheet. */
+.live-status { min-height: 2.7em; margin: 10px 2px 0; color: var(--dim); font-size: 14px; font-weight: 500; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.live-dev { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; padding: 6px; border: 1px dashed var(--hair2); border-radius: 12px; }
+.app.live .live-dev button[aria-pressed='true'] { background: var(--fg); color: var(--bg); }
+.live-extra { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.app.live .live-extra button { flex: 1; border: 0; border-radius: 12px; font-size: 15px; }
+
+/* ---------- arrival and failure ---------- */
+.live-summary { max-height: 75%; overflow-y: auto; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.live-summary h2 { margin: 0 0 6px; font-family: var(--figure); font-size: 38px; font-weight: 600; line-height: 1.05; letter-spacing: 0; }
+.live-summary p { margin: 0 0 10px; }
+.live-summary-place { color: var(--dim); }
+.live-summary-time { font-size: 20px; font-weight: 600; }
+.live-summary-switches { margin: 0 0 10px; padding-left: 20px; }
+.live-summary > .live-button { width: 100%; margin-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-more { animation: none; }
+  .live-toggle::after { transition: none; }
+}
