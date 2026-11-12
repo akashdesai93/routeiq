@@ -7,8 +7,9 @@ name: Gates re-check
 #     is edited (PHONE CHECK NEEDED), and
 #   - main moves on in an area an open PR also changes, so a PR whose checks ran before that
 #     change turns red until its branch is updated (case (d) of the first night).
-# A Gate run still in progress needs nothing: its `required` reads the gates when it gets there.
-# About 15 s per event on ubuntu-latest.
+# A Gate run still in progress is waited for and then re-run anyway: its `required` finishes
+# before e2e-report, so it may already have read the labels (scripts/orch/gates.mjs, rerunRequired).
+# About 15 s per event on ubuntu-latest, up to 4 min when a Gate run is still going.
 on:
   pull_request:
     types: [labeled, unlabeled, edited]
@@ -27,7 +28,7 @@ jobs:
       github.event_name == 'push' || github.event.action == 'edited' ||
       contains(fromJSON('["needs-phone","phone-verified","do-not-merge","needs-human"]'), github.event.label.name)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: write # re-runs the required job of a Gate run
       contents: read # sparse checkout of scripts/orch; compares commits
