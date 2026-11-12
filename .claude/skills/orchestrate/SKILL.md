@@ -19,7 +19,9 @@ gh api -X PATCH repos/akashdesai93/routeiq/issues/comments/$id -F body=@heartbea
 ```
 
 with `heartbeat: orchestrator`, `session: <name>`, `state: active` (or `away until <UTC>`
-before the owner shuts the PC down: the understudy then acts at once), `next tick: <min>`.
+before the owner shuts the PC down: the understudy then acts at once), `next tick: <min>`,
+`tick: <now, UTC>` (`date -u +%FT%RZ`). The tick line is what makes each edit count: GitHub
+does not move `updated_at` when the body is unchanged.
 If another session's heartbeat is fresher than 90 min and it isn't you, stop: there is
 already an orchestrator.
  `gh issue edit` and `gh pr edit` fail on a Projects-classic
@@ -182,12 +184,13 @@ Mission Control is https://claude.ai/artifact/QmpSPnjR6uT7ooaS12GG6U, a Data-typ
   Set `status` to `sent` or `done` and write a one-line `reply`. A command that needs
   something risky (deleting, force-pushing, spending money, publishing) gets
   `reply: "needs confirmation in the terminal"`; ask the owner there.
-- **Refresh the data.** The files come from step 1's `tmp/orch/` (`sessions.json`,
-  `prs.json`, `issues.json`, `events.json`, `decisions.json`); no ad hoc scripts. Add the
-  local roster and the fleet events with
-  `node scripts/orch/state.mjs --out tmp/orch --local tmp/orch/local.json` (a JSON file
-  `{ "sessions": [...], "events": [...] }` in the same shapes) so they merge in, with their
-  own `at`, without duplicates. Upload each one with `Artifact` `asset: true`, then
+- **Refresh the data.** The six files come from
+  `node scripts/orch/state.mjs --out tmp/orch --dashboard tmp/orch/dashboard --local tmp/orch/local.json`
+  (`sessions.json`, `prs.json`, `issues.json`, `events.json`, `decisions.json`, `health.json`
+  in `tmp/orch/dashboard/`, already in the page's shapes); no ad hoc scripts and no hand-kept
+  session list. `local.json` is `{ "sessions": [...], "events": [...], "health": {...} }`: the
+  local roster and fleet events in the state's shapes, merged in with their own `at` without
+  duplicates, and the health fields only the PC knows (`phone_build`, `phone_state`, `notes`). Upload each one with `Artifact` `asset: true`, then
   `update` its `datasets/<id>` with the new `source.url`, `updated: {at, by: "Orchestrator session"}` and
   `edit`, pinned with `if_version`. Keep the field names the page reads (see the
   dataset files).
