@@ -160,6 +160,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    determinism, and 40 seeded random drives in which switches are never closer
    together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
    request budget, the what-if delay and a whole simulated drive offline.
+   Follow-ups (#74, #68): the match looks for the fresh route's start near the car
+   first (`matchStartSearchM`), so a cloverleaf no longer loses the current route; "no
+   route" answers older than `routeLostWindowSec` (15 min) no longer count toward a
+   closure switch; and the e2e world has road closures, with the scenario "when a block
+   ahead is closed, it reroutes around it". Open for later: whether the side-street
+   probes of #23 shorten the wait for a closure between via points (#68, item 3).
 8. **Done: go anywhere.** The web version of the phone app's Plan screen
    (`src/PlanPanel.tsx`). Search for either end of the trip through the Mapbox Search
    Box API (`/suggest` + `/retrieve` on a session token; chosen over Geocoding v6,

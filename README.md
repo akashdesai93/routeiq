@@ -589,8 +589,11 @@ engine, and applies a switch by itself. The event log lists every decision with 
 simulated time and the engine's reason, newest first. Pause, Resume and Stop are next to
 it; moving a pin, Swap and Reset end the drive. While a drive is on, the route list and
 the map show what the last check returned from the car's position, the route being
-driven is drawn in green with the car on it, and an amber dot marks where a switch
+driven is drawn in black on a white casing with the car on it, and an amber dot marks where a switch
 leaves the old route (hollow while the switch is still waiting to be confirmed).
+The map gets the route's line only when the route changes; on each fix it gets the car
+(a few hundred bytes) and the part behind the car is trimmed off the line
+(`line-trim-offset`, src/map/driveLayers.ts), for the live drive too (#94).
 
 The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
 
@@ -653,12 +656,14 @@ faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 
 | `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
 | `freewayLeadDistanceM` | 1200 m |
 | `routeLostPolls` (checks with no route along the road ahead, none between them finding the current route) | 3 |
+| `routeLostWindowSec` (a "no route" answer older than this no longer counts) | 900 s |
 | `offRouteM` | 50 m |
 | `sameRouteToleranceM` (a point is on the current route: where an alternative turns off) | 10 m |
 | `matchToleranceM`, `matchMinOverlap` (a fresh route IS the current one) | 20 m, 0.95 |
 | `matchMaxGapM` (longest stretch apart, and largest difference in length) | 400 m |
 | `matchMaxDivergenceM` (farthest a point of a stretch apart may be from the other line) | 50 m |
 | `matchIgnoreStartM` (not compared after the query point) | 150 m |
+| `matchStartSearchM` (where the fresh route starts is looked for on this first stretch of the path ahead, first) | 200 m |
 | `baselineViaSpacingM`, `baselineMaxViaPoints` (asking for the current path) | 3000 m, 6 |
 | `returnOverlapFraction` | 0.5 |
 | `requireTypicalDuration` | true |
@@ -776,6 +781,30 @@ be, so such a closure never added up). The closure is taken only once three chec
 have put a point on it; until then, or if none does, the driver finds out at the closure
 and the off-route rule takes over from there. `tests/reroute.test.ts` pins these cases.
 
+**Old "no route" answers age out (#68).** Each "no route" answer is kept with the time
+of its check, and only those from the last 15 minutes (`routeLostWindowSec`) count
+toward the three. Without it, one answer early in a long drive, then a quarter of an
+hour of "another road" answers, then two more, made three, though the first was about a
+road long since passed. The window only ever takes answers away, so it can delay a
+closure switch, never bring one sooner: three answers within 15 minutes switch exactly
+as before. At the 60 s check interval that is room for 15 checks; a poll interval set
+above 7.5 minutes would let no three answers fit, and a closure would then be found at
+the closure itself (off route). The e2e scenario "when a block ahead is closed, it
+reroutes around it" drives it end to end: a block of Main Corridor closes, Mapbox stops
+offering it, the drive's check of its own path comes back "no route" three times, and
+the drive changes to East Loop with "The road ahead on your route looks closed."
+
+**Routes that cross themselves (#74).** Where the fresh route starts is looked for on the
+first 200 m of the path ahead (`matchStartSearchM`, from 50 m behind the car), and on the
+rest only when nothing there is within 20 m (`matchToleranceM`). It used to be the nearest point of the whole
+path: under a cloverleaf bridge the later pass over it can be a meter nearer the snapped
+start than the road being driven, the comparison then started after the loop, the
+lengths differed by more than 400 m, and the current route went "unconfirmed" (a spent
+check, and a lost confirmation). 200 m is shorter than a cloverleaf loop; a loop back to the same spot within 150 m of the car would still be in the window.
+The tracker had the same flaw on a drive's first fix only (later fixes already take the
+pass that fits the progress so far): of passes about as near (15 m), it now takes the
+first in driving order.
+
 **Matching cost (#51).** The comparison walks both lines in 10 m steps. Each step looks
 only at the segments of the other line in the 3 x 3 grid cells (50 m wide, a bounding-box
 index built per comparison) around it, and the match stops at the first stretch that
@@ -891,6 +920,12 @@ is marked "via side streets" in the route list.
   plus a spur or loop out to the via: never faster, and not a side street. `coversRoute`
   checks one way only, so the probe's extra roads are allowed, and the sampling between
   vertices keeps a real cut-through that leaves a long straight segment.
+- **The comparison is linear.** Both tests walk along the line and look at the few
+  segments after the last one a point was near; only a miss measures further (the whole
+  line for the first 8 misses, then a segment grid, `segmentGrid` in src/core/geo.ts, the
+  one the reroute matcher uses). A point counts as near only when a segment really is
+  within 10 m, so the answers are those of measuring every segment (#93: a 60 km plan
+  went from about 0.4 s to under 5 ms on a desktop).
 
 | `DEFAULT_PROBE_BUDGET` | Default | Meaning |
 | --- | --- | --- |
@@ -1088,19 +1123,43 @@ plugin `RouteIQNative` is present, `src/device/native`):
   messages, an abort cancels the native request. The native side takes
   `https://api.mapbox.com/` addresses only, follows no redirect, gives up after 20 s
   and never logs an address. Search and map tiles stay on the web view.
-- **Drive diagnostics** (top bar, shell only): an in-memory log with a Copy button of
-  what iOS let the app do: fixes and ticks received and the longest wait between them,
-  route requests with their times, spoken lines started and finished, and when the app
-  went to the background. Counts and timings only (`src/device/native/diagnostics.ts`).
+- **Drive diagnostics** (top bar, and behind More in the drive view; shell only): a log
+  with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
+  ticks received and the longest wait between them, route requests with their times,
+  spoken lines started and finished, and when the app went to the background. Counts and
+  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  storage when a drive ends and every 30 s during one, and shown as "Last drive" after
+  the app was closed (`src/device/native/lastDrive.ts`).
+- **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
+  selected route in place of the GPS, so a drive can be tried at home with the phone
+  locked. Presets: follow the route, a wrong turn after 1 min (a made-up side street
+  square to the route, at least 600 m and 45 s long, so the tracker calls it off the
+  route), turn around after 1 min; at 1x (15 m/s) or 3x speed, on the real clock. The
+  web side writes the script (`src/drive/testDrive.ts`, `DEFAULT_TEST_DRIVE_OPTIONS`);
+  the plugin's `startSimulatedRoute` moves the car on a native timer, one fix a second
+  marked `simulated`. The real GPS stays on to keep the app running, and its positions
+  are discarded. The drive view shows a SIMULATED GPS badge and the diagnostics say so.
+  Route requests are real and count against the request budget. The browser's
+  development replay is separate and unchanged.
 
 The unsigned `.ipa` is built by `.github/workflows/shell-ios.yml`, which fails if a
 Mapbox token is found anywhere in the app.
 
-**The drive view** replaces the planning layout, full screen: the next turn (arrow,
-distance, road) on top; the map following the car, heading up, with the route being
-driven, the car and the turn-off of a switch; below it the arrival time, the minutes
-and miles left, one quiet line with the engine's latest reason, "checked N s ago" and
-the request count; and two large buttons, Mute and End. Every control is 56 px or more.
+**The drive view** replaces the planning layout, full screen, in the approved design
+(`design/README.md`): black glass on the map, condensed figures (Barlow Condensed, with
+Inter for sentences; both bundled with the app, never fetched). A turn card sits over
+the top of the map: the distance to the next maneuver is the hero, with its arrow and
+the street to turn onto under it. Where the road just carries on it reads "Continue on
+<road>", and "Continue straight" when no turn is listed at all; the hero is a distance
+either way. The map follows the car, heading up, with the route being driven, the car
+and the turn-off of a switch. The sheet below has one line, the minutes left (large)
+and the arrival time (smaller), and two 60 px buttons, More and End: two figures read
+at a glance. **More** opens the rest: the lights on the route being driven (a number
+only for a full count, "≥ N data missing" for a partial one, "Unknown" otherwise, never
+0 when unsure), the miles left, the automatic switch, the voice (Mute), one quiet line
+with the engine's latest reason, "checked N s ago" and the request count, and in the
+iPhone app "Drive diagnostics". Every control is 44 px or more, the cards keep clear of
+the phone's safe areas, and the one animation is off under `prefers-reduced-motion`.
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
@@ -1271,9 +1330,12 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings in memory (fixes, ticks, route requests, spoken lines, app in front or
-not): no position, no address, no token. It leaves the phone only if you copy it and
-send it yourself.
+and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
+position, no address, no token. The last drive's text is also kept in the app's storage
+on the phone, and a text that looked as if it held a position, a token or an address is
+not written. It leaves the phone only if you share or copy it and send it yourself. In
+a test drive the positions are made up from the selected route; the phone's own
+position is discarded while one runs and reaches neither the drive nor Mapbox.
 
 **Opening a route in Google Maps or Waze.** Nothing is sent until you tap one of the two
 links. The tap opens a Google or Waze page (or app) with the trip in its address: for

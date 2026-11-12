@@ -1,4 +1,4 @@
-import { boundsOf, distanceM, isValidLngLat, localProjector, pointToSegment, type XY } from './geo.ts'
+import { boundsOf, distanceM, isValidLngLat, lngDegreesFor, localProjector, M_PER_DEGREE, pointToSegment, type XY } from './geo.ts'
 import { tileIdAt, tilesForRoute } from './tiles.ts'
 import type {
   DistanceSpanM,
@@ -113,7 +113,6 @@ export interface RouteSignals {
 }
 
 const NONE: RouteSignals = { signals: [], count: 0 }
-const M_PER_DEGREE = (6_371_008.8 * Math.PI) / 180
 
 /** Side of a lookup grid cell for the route matching, in meters. Only affects speed. */
 const CELL_M = 250
@@ -144,7 +143,7 @@ function pointGrid<T>(radiusM: number, points: readonly LngLat[]) {
   for (const [, lat] of points) widestLat = Math.max(widestLat, Math.abs(lat))
   // A little over the radius, so rounding at a cell edge cannot hide a neighbor.
   const cellLat = Math.max((radiusM * 1.01) / M_PER_DEGREE, 1e-9)
-  const cellLng = cellLat / Math.max(0.01, Math.cos((Math.min(89.9, widestLat) * Math.PI) / 180))
+  const cellLng = lngDegreesFor(cellLat, widestLat)
   const cells = new Map<string, { at: LngLat; value: T }[]>()
   const cellOf = ([lng, lat]: LngLat): [number, number] => [Math.floor(lng / cellLng), Math.floor(lat / cellLat)]
   return {

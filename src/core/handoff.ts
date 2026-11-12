@@ -1,4 +1,4 @@
-import { alongRouteM, boundsOf, distanceM, isValidLngLat, localProjector, pointAtDistance, pointToSegment, type XY } from './geo.ts'
+import { alongRouteM, boundsOf, distanceM, isValidLngLat, localProjector, nearLine, pointAtDistance } from './geo.ts'
 import { sameRouteGeometry } from './select.ts'
 import type { LngLat, RouteCandidate } from './types.ts'
 
@@ -85,13 +85,6 @@ interface Divergence {
 }
 
 const usable = (line: readonly LngLat[]) => line.length >= 2 && line.every(isValidLngLat)
-
-function nearLine(p: XY, line: readonly XY[], toleranceM: number): boolean {
-  for (let i = 1; i < line.length; i++) {
-    if (pointToSegment(p, line[i - 1]!, line[i]!).distanceM <= toleranceM) return true
-  }
-  return false
-}
 
 /** Stretches of the accepted route (sampled at `samplesM`) where `off[i]` holds, merged across short shared gaps. */
 function divergences(samplesM: readonly number[], off: readonly boolean[], routeId: string, o: HandoffOptions): Divergence[] {

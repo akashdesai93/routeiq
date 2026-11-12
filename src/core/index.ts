@@ -28,6 +28,7 @@ export {
   isValidLngLat,
   lineFrom,
   localProjector,
+  nearestAlongM,
   pointAtDistance,
   pointToSegment,
   type PointOnLine,

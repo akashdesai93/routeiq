@@ -1,5 +1,5 @@
-import { alongRouteM, isValidLngLat, localProjector, pointAtDistance, pointToSegment, type LngLat, type PositionFix } from '../core/index.ts'
-import type { LocationErrorKind, PositionSource } from '../device/geolocation.ts'
+import { alongRouteM, isValidLngLat, nearestAlongM, pointAtDistance, type LngLat, type PositionFix } from '../core/index.ts'
+import type { PositionSource } from '../device/geolocation.ts'
 
 /**
  * GPS replay (development only): a made-up driver whose position fixes go
@@ -106,18 +106,6 @@ function offset(p: LngLat, eastM: number, northM: number): LngLat {
   return [p[0] + eastM / (M_PER_DEGREE * Math.cos((p[1] * Math.PI) / 180)), p[1] + northM / M_PER_DEGREE]
 }
 
-/** Meters along `route` of its point closest to `p`. */
-function nearestAlongM(route: readonly LngLat[], p: LngLat): number {
-  const project = localProjector(p)
-  const along = alongRouteM(route)
-  let best = { distanceM: Infinity, alongM: 0 }
-  for (let i = 1; i < route.length; i++) {
-    const hit = pointToSegment([0, 0], project(route[i - 1]!), project(route[i]!))
-    if (hit.distanceM < best.distanceM) best = { distanceM: hit.distanceM, alongM: along[i - 1]! + hit.t * (along[i]! - along[i - 1]!) }
-  }
-  return best.alongM
-}
-
 /**
  * The driver is given a route to follow (the session's first route, or the
  * one it switched to): it carries on from the point of that route nearest
@@ -217,8 +205,6 @@ export interface ReplaySourceOptions {
   readonly realNow?: () => number
   /** Calls `fn` every `ms` real milliseconds; returns the function that stops it. */
   readonly every?: (ms: number, fn: () => void) => () => void
-  /** When set, the replay fails like a device would instead of giving fixes. */
-  readonly failWith?: LocationErrorKind | null
 }
 
 /**
@@ -248,7 +234,6 @@ export function createReplaySource(options: ReplaySourceOptions): ReplaySource {
       const id = setInterval(fn, ms)
       return () => clearInterval(id)
     },
-    failWith = null,
   } = options
   // Drive time starts at the wall clock's time, so arrival times read like real ones.
   const startMs = Date.now()
@@ -265,11 +250,7 @@ export function createReplaySource(options: ReplaySourceOptions): ReplaySource {
     follow(geometry) {
       state = replayFollow(state, geometry)
     },
-    start(onFix, onError) {
-      if (failWith !== null) {
-        onError(failWith)
-        return () => {}
-      }
+    start(onFix) {
       let last = realNow()
       // The first fix at once, like a device that already knows where it is.
       const first = replayStep(state, 0, startMs + driveMs, plan)
