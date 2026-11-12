@@ -1166,6 +1166,9 @@ only for a full count, "≥ N data missing" for a partial one, "Unknown" otherwi
 with the engine's latest reason, "checked N s ago" and the request count, and in the
 iPhone app "Drive diagnostics". Every control is 44 px or more, the cards keep clear of
 the phone's safe areas, and the one animation is off under `prefers-reduced-motion`.
+On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
+the sheet stack in a column on the left and the map fills the right, so the car stays in
+view; the sheet scrolls in its column with More and End pinned at its foot (#131).
 After a switch a banner stays for 8 seconds with one large button, "Keep previous
 route". Doing nothing accepts the switch. Pressing it goes back to the route just left
 and tells the engine not to offer the other one again for `noReturnSec` (10 minutes).
