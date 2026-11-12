@@ -46,8 +46,15 @@ public enum GeoError: Error, Equatable {
 /// Geometry helpers, ported from src/core/geo.ts.
 public enum Geo {
     static let earthRadiusM = 6_371_008.8
-    /// Meters per degree of latitude (and of longitude at the equator).
-    static let mPerDegree = earthRadiusM * Double.pi / 180
+    /// Meters in one degree of latitude (and of longitude at the equator).
+    public static let mPerDegree = earthRadiusM * Double.pi / 180
+
+    /// Degrees of longitude that span as much ground as `latDegrees` of
+    /// latitude, at latitude `lat`. A degree of longitude shrinks toward the
+    /// poles; the floor near them keeps the answer finite.
+    public static func lngDegreesFor(_ latDegrees: Double, _ lat: Double) -> Double {
+        latDegrees / JS.max(0.01, cos(JS.min(89.9, abs(lat)) * Double.pi / 180))
+    }
 
     public static func isValidLngLat(_ p: LngLat) -> Bool {
         p.lng.isFinite && p.lat.isFinite && p.lng >= -180 && p.lng <= 180 && p.lat >= -90 && p.lat <= 90
@@ -116,6 +123,36 @@ public enum Geo {
         let lengthSq = dx * dx + dy * dy
         let t = lengthSq == 0 ? 0 : JS.min(1, JS.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq))
         return SegmentHit(distanceM: hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)), t: t)
+    }
+
+    /// True when P lies within `toleranceM` of some segment of the line (flat
+    /// plane). A line of fewer than two points is near nothing.
+    public static func nearLine(_ p: XY, _ line: [XY], _ toleranceM: Double) -> Bool {
+        guard line.count >= 2 else { return false }
+        for i in 1..<line.count where pointToSegment(p, line[i - 1], line[i]).distanceM <= toleranceM {
+            return true
+        }
+        return false
+    }
+
+    /// Meters along `line` (as alongRouteM counts them) of the line's point
+    /// closest to `p`. The first of equally close points wins. 0 for a line of
+    /// fewer than two points.
+    public static func nearestAlongM(_ line: [LngLat], _ p: LngLat) -> Double {
+        let project = localProjector(p)
+        let along = alongRouteM(line)
+        var bestDistanceM = Double.infinity
+        var bestAtM = 0.0
+        if line.count >= 2 {
+            for i in 1..<line.count {
+                let hit = pointToSegment(XY(0, 0), project(line[i - 1]), project(line[i]))
+                if hit.distanceM < bestDistanceM {
+                    bestDistanceM = hit.distanceM
+                    bestAtM = along[i - 1] + hit.t * (along[i] - along[i - 1])
+                }
+            }
+        }
+        return bestAtM
     }
 
     /// True when every point lies inside the box (edges included).

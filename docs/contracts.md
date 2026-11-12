@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 2** (Nov 12, 2026: version 1 plus the shell's test drive and share sheet, #86). The Swift port does not match it yet;
+**Current version: 2** (Nov 12, 2026: version 1 plus the shell's test drive and share sheet, #86). The Swift port is being brought up to it (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -108,7 +108,7 @@ the declarations that changed.
 | Side | Matches | Notes |
 | --- | --- | --- |
 | Web app (`src/`) | 2 | by definition |
-| Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
+| Swift port (`native/RouteIQCore`) | 2, in part: routes, signal tiles and bundle, reroute engine (#33 stage A) | live drive and place book not yet; see its README and #33 |
 | iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes

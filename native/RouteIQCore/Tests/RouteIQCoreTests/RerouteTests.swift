@@ -3,7 +3,8 @@ import XCTest
 import RouteIQCore
 
 // Mirrors tests/reroute.test.ts, assertion for assertion, except the describe
-// "line helpers the engine and the simulated drive share" (in GeoTests.swift).
+// "line helpers the engine and the simulated drive share" (in GeoTests.swift) and
+// "side streets found by probes during a drive", which needs probe.ts (ported with Probe.swift).
 // Scripted drives through the reroute engine on a fake clock and a made-up road
 // network (see DriveWorld.swift). No network, no timers; every position is invented.
 
@@ -101,10 +102,14 @@ final class RerouteTests: XCTestCase {
         nowSec: Double = 0,
         state: RerouteState = .initial,
         options: RerouteOptions = .default,
-        extra: [RouteName: Patch] = [:]
+        extra: [RouteName: Patch] = [:],
+        baseline: KeyValuePairs<RouteName, Double>? = nil
     ) -> RerouteDecision {
         let here = at(xM, 0)
-        let candidates = etas.compactMap { entry in candidate(entry.key, here, entry.value, extra[entry.key]) }
+        func made(_ etas: KeyValuePairs<RouteName, Double>) -> [RouteCandidate] {
+            etas.compactMap { entry in candidate(entry.key, here, entry.value, extra[entry.key]) }
+        }
+        let candidates = made(etas)
         let routeGeometry = candidate(.A, at(0, 0), 2000)?.geometry ?? []
         return Reroute.decideReroute(
             state,
@@ -113,7 +118,8 @@ final class RerouteTests: XCTestCase {
                 route: DrivenRoute(geometry: routeGeometry, maneuvers: [], limitedAccessSpansM: nil),
                 positionAlongM: xM,
                 speedMps: speedMps,
-                candidates: candidates
+                candidates: candidates,
+                baseline: baseline.map(made)
             ),
             options: options
         )
@@ -139,6 +145,13 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(d.routeLostPolls, 3)
         XCTAssertEqual(d.offRouteM, 50)
         XCTAssertEqual(d.sameRouteToleranceM, 10)
+        XCTAssertEqual(d.matchToleranceM, 20)
+        XCTAssertEqual(d.matchMinOverlap, 0.95)
+        XCTAssertEqual(d.matchMaxGapM, 400)
+        XCTAssertEqual(d.matchMaxDivergenceM, 50)
+        XCTAssertEqual(d.matchIgnoreStartM, 150)
+        XCTAssertEqual(d.baselineViaSpacingM, 3000)
+        XCTAssertEqual(d.baselineMaxViaPoints, 6)
         XCTAssertEqual(d.returnOverlapFraction, 0.5)
         XCTAssertEqual(d.requireTypicalDuration, true)
         XCTAssertEqual(d.etaTieWindowSec, 30)
@@ -196,6 +209,258 @@ final class RerouteTests: XCTestCase {
         short.geometry = Array(fresh.geometry.dropLast(4))
         XCTAssertNil(Reroute.findCurrentRoute(driven.geometry, positionAlongM: 3000, candidates: [short]))
         XCTAssertNil(Reroute.findCurrentRoute(driven.geometry, positionAlongM: 3000, candidates: []))
+    }
+
+    // MARK: - describe('the same route, drawn differently (patterns measured on real answers)')
+
+    // The shapes below are the ones measured on real answers (README, "Why the matching is by
+    // overlap"), redrawn by hand on the made-up plane. Every position is invented.
+    private typealias Corner = (x: Double, y: Double)
+
+    private func line(_ corners: [Corner]) -> [LngLat] { corners.map { at($0.x, $0.y) } }
+
+    /// A fresh route along the corners, as a provider would return it.
+    private func fresh(_ corners: [Corner], _ durationSec: Double = 1500) throws -> RouteCandidate {
+        var c = try XCTUnwrap(candidate(.A, at(0, 0), durationSec))
+        c.id = "fresh-\(corners.count)-\(JS.string(durationSec))"
+        c.geometry = line(corners)
+        c.distanceM = Geo.alongRouteM(c.geometry).last ?? 0
+        c.maneuvers = []
+        return c
+    }
+
+    /// The main road A, straight east, being driven; the car is 3 km along it.
+    private func onA() throws -> RouteCandidate { try XCTUnwrap(candidate(.A, at(0, 0), 2000)) }
+    private let here3km = 3000.0
+
+    private func isCurrent(_ corners: [Corner]) throws -> Bool {
+        Reroute.findCurrentRoute(try onA().geometry, positionAlongM: here3km, candidates: [try fresh(corners)]) != nil
+    }
+
+    /// North one 125 m block at xM (or `sideM` to the side), east `blocks` blocks, and back down to the main road.
+    private func around(_ xM: Double, _ blocks: Double, _ sideM: Double = 125) -> [Corner] {
+        [(xM, 0), (xM, sideM), (xM + 125 * blocks, sideM), (xM + 125 * blocks, 0)]
+    }
+
+    private var oneBlock: [Corner] { [(here3km, 0)] + around(10000, 1) + [(20000, 0)] }
+
+    private func poll(_ route: RouteCandidate, _ positionAlongM: Double, _ speedMps: Double, _ candidates: [RouteCandidate], nowSec: Double = 0, state: RerouteState = .initial) -> RerouteDecision {
+        Reroute.decideReroute(state, RerouteObservation(nowSec: nowSec, route: DrivenRoute(route), positionAlongM: positionAlongM, speedMps: speedMps, candidates: candidates))
+    }
+
+    // it('different vertex density: a bend drawn with 4 points or with 46 is the same road')
+    func testDrawnDifferently_differentVertexDensityABendDrawnWith4PointsOrWith46IsTheSameRoad() throws {
+        // East for 2 km, a quarter circle of 300 m radius to the north, then north.
+        func bend(_ stepDeg: Double) -> [Corner] {
+            var arc: [Corner] = []
+            var deg = -90.0
+            while deg <= 0 {
+                arc.append((2000 + 300 * cos(deg * Double.pi / 180), 300 + 300 * sin(deg * Double.pi / 180)))
+                deg += stepDeg
+            }
+            return arc + [(2300, 5000)]
+        }
+        let driven = line([(0, 0)] + bend(2))
+        // The coarse drawing cuts 10.2 m inside the fine one at each chord: more than the old 10 m, vertex by vertex.
+        let coarse = try fresh([(500, 0)] + bend(30))
+        XCTAssertEqual(Reroute.findCurrentRoute(driven, positionAlongM: 500, candidates: [coarse]), coarse)
+        // And the other way round: driving the coarse drawing, offered the fine one.
+        let fine = try fresh([(500, 0)] + bend(2))
+        XCTAssertEqual(Reroute.findCurrentRoute(line([(0, 0)] + bend(30)), positionAlongM: 500, candidates: [fine]), fine)
+    }
+
+    // it('a different first 150 m: snapped to the parallel street, joining a block later')
+    func testDrawnDifferently_aDifferentFirst150mSnappedToTheParallelStreetJoiningABlockLater() throws {
+        XCTAssertTrue(try isCurrent([(here3km, 40), (3120, 40), (3140, 0), (20000, 0)]))
+        // The same beginning that never joins is another road.
+        XCTAssertFalse(try isCurrent([(here3km, 40), (19980, 40), (20000, 0)]))
+    }
+
+    // it('a divided road: the other drawing of the carriageway, 14 m to the side for 6 km')
+    func testDrawnDifferently_aDividedRoadTheOtherDrawingOfTheCarriageway14mToTheSideFor6km() throws {
+        XCTAssertTrue(try isCurrent([(here3km, 0), (6000, 0), (6010, 14), (11990, 14), (12000, 0), (20000, 0)]))
+    }
+
+    // it('one corner cut 14 m inside the old one')
+    func testDrawnDifferently_oneCornerCut14mInsideTheOldOne() throws {
+        let onB = try XCTUnwrap(candidate(.B, at(0, 0), 2000))
+        // B turns north at 5 km; the fresh drawing starts the turn 20 m early.
+        let cut = try fresh([(here3km, 0), (4980, 0), (5000, 20), (5000, 1000), (15000, 1000), (15000, 0), (20000, 0)])
+        XCTAssertEqual(Reroute.findCurrentRoute(onB.geometry, positionAlongM: here3km, candidates: [cut]), cut)
+    }
+
+    // it('the other lane group at a freeway exit: three short stretches up to 39 m apart')
+    func testDrawnDifferently_theOtherLaneGroupAtAFreewayExitThreeShortStretchesUpTo39mApart() throws {
+        let exit: [Corner] = [
+            (here3km, 0), (9000, 0), (9030, 22), (9270, 22), (9300, 0), (9420, 0), (9440, 39), (9580, 39), (9600, 0),
+            (9750, 0), (9770, 38), (9910, 38), (9930, 0), (20000, 0),
+        ]
+        XCTAssertTrue(try isCurrent(exit))
+        // It is the current route for the ETA, and never an alternative to it, whatever time it claims.
+        let decision = poll(try onA(), here3km, 20, [try fresh(exit, 1400), try XCTUnwrap(candidate(.A, at(here3km, 0), 2000))])
+        XCTAssertEqual(decision.action, .stay)
+        XCTAssertEqual(decision.code, .noAlternative)
+        XCTAssertEqual(decision.current?.durationSec, 2000)
+        XCTAssertEqual(decision.current?.asked, false)
+        // Offered alone, its time is the current route's time.
+        let alone = poll(try onA(), here3km, 20, [try fresh(exit, 1400)])
+        XCTAssertEqual(alone.action, .stay)
+        XCTAssertEqual(alone.code, .noAlternative)
+        XCTAssertEqual(alone.current?.durationSec, 1400)
+    }
+
+    // it('a genuinely different route that shares four fifths is still a different route')
+    func testDrawnDifferently_aGenuinelyDifferentRouteThatSharesFourFifthsIsStillADifferentRoute() throws {
+        // 17 km to go; for 4 km of them it runs on the next road, 300 m north.
+        let detour: [Corner] = [(here3km, 0), (10000, 0), (10000, 300), (14000, 300), (14000, 0), (20000, 0)]
+        XCTAssertFalse(try isCurrent(detour))
+        // Even a frontage road 30 m to the side, for the same 4 km.
+        XCTAssertFalse(try isCurrent([(here3km, 0), (10000, 0), (10010, 30), (13990, 30), (14000, 0), (20000, 0)]))
+        // And a 700 m detour that would fit inside the 5% allowance of a long route: one stretch apart is too long.
+        XCTAssertFalse(try isCurrent([(here3km, 0), (10000, 0), (10000, 100), (10500, 100), (10500, 0), (20000, 0)]))
+        // A route that overshoots and comes back along the same road is never apart, but it is longer.
+        XCTAssertFalse(try isCurrent([(here3km, 0), (10000, 0), (10000, 15), (9000, 15), (9000, 0), (20000, 0)]))
+        // So it is weighed as an alternative: five minutes faster than the current route, it starts a confirmation.
+        let decision = poll(try onA(), here3km, 20, [try XCTUnwrap(candidate(.A, at(here3km, 0), 2000)), try fresh(detour, 1700)])
+        XCTAssertEqual(decision.action, .stay)
+        XCTAssertEqual(decision.code, .confirming)
+        let considered = try XCTUnwrap(decision.considered)
+        XCTAssertEqual(considered.savingSec, 300)
+        XCTAssertEqual(considered.turnInM, 7000, accuracy: 50)
+    }
+
+    // Where the overlap rule's loose side ends (#41): no point of a stretch apart may run farther
+    // than matchMaxDivergenceM (50 m) from the other line.
+    // it('one block around is another route, on a long trip too (#41)')
+    func testDrawnDifferently_oneBlockAroundIsAnotherRouteOnALongTripToo() throws {
+        // 17 km to go, about 340 m of the fresh line apart: inside the length and share limits, 125 m to the side.
+        XCTAssertFalse(try isCurrent(oneBlock))
+        // The divergence cap, either side of 50 m: 300 m of road 45 m to the side is still a drawing of
+        // the same road; 60 m is the next street.
+        XCTAssertTrue(try isCurrent([(here3km, 0)] + around(10000, 2.4, 45) + [(20000, 0)]))
+        XCTAssertFalse(try isCurrent([(here3km, 0)] + around(10000, 2.4, 60) + [(20000, 0)]))
+        XCTAssertNotNil(Reroute.findCurrentRoute(
+            try onA().geometry, positionAlongM: here3km,
+            candidates: [try fresh([(here3km, 0)] + around(10000, 2.4, 60) + [(20000, 0)])],
+            options: RerouteOptions(matchMaxDivergenceM: 70)
+        ))
+        // Two blocks, or one with 5 km to go, were already another route.
+        XCTAssertFalse(try isCurrent([(here3km, 0)] + around(10000, 2) + [(20000, 0)]))
+        XCTAssertNil(Reroute.findCurrentRoute(try onA().geometry, positionAlongM: 15000, candidates: [try fresh([(15000, 0)] + around(17000, 1) + [(20000, 0)])]))
+        // So it is weighed as an alternative like any other: five minutes faster, it starts a confirmation.
+        let both = poll(try onA(), here3km, 20, [try fresh(oneBlock, 1700), try XCTUnwrap(candidate(.A, at(here3km, 0), 2000))])
+        XCTAssertEqual(both.action, .stay)
+        XCTAssertEqual(both.code, .confirming)
+        XCTAssertEqual(both.considered?.savingSec, 300)
+    }
+
+    // it('a closed block ahead: the provider routes round it, the block itself is asked for, and three "no route" answers take the detour (#41)')
+    func testDrawnDifferently_aClosedBlockAheadTheBlockItselfIsAskedForAndThreeNoRouteAnswersTakeTheDetour() throws {
+        // Every check, the provider's only answer goes round the block at 10 km; the main road is closed there.
+        var state = RerouteState.initial
+        var decisions: [RerouteDecision] = []
+        let route = try onA()
+        for p in 0..<3 {
+            let x = here3km + 600 * Double(p)
+            let detour = try fresh([(x, 0)] + around(10000, 1) + [(20000, 0)], 1700)
+            // Not the current route any more, so its time is asked for, with one via point: on the closed block itself.
+            let probe = try XCTUnwrap(Reroute.baselineProbe(route.geometry, positionAlongM: x, candidates: [detour]))
+            XCTAssertEqual(probe.via.count, 1)
+            let viaX = Geo.alongRouteM([at(0, 0), try XCTUnwrap(probe.via.first).point])[1]
+            XCTAssertGreaterThan(viaX, 10000)
+            XCTAssertLessThan(viaX, 10125)
+            // The provider finds no route through it.
+            let decision = Reroute.decideReroute(state, RerouteObservation(
+                nowSec: 60 * Double(p), route: DrivenRoute(route), positionAlongM: x, speedMps: 10, candidates: [detour], baseline: []
+            ))
+            decisions.append(decision)
+            state = decision.nextState
+        }
+        XCTAssertEqual(decisions.map(\.code), [.routeUnconfirmed, .routeUnconfirmed, .routeLost])
+        XCTAssertEqual(decisions[2].action, .switchRoute)
+        XCTAssertEqual(decisions[2].toRouteId, try fresh(oneBlock, 1700).id)
+        XCTAssertTrue(decisions[2].reason.hasPrefix("Switching: the road ahead can no longer be routed, turn in "), decisions[2].reason)
+    }
+
+    // it('a confirmation carries on when the same alternative comes back drawn a little differently')
+    func testDrawnDifferently_aConfirmationCarriesOnWhenTheSameAlternativeComesBackDrawnALittleDifferently() throws {
+        let route = try onA()
+        let first = poll(route, 1000, 15, [try XCTUnwrap(candidate(.A, at(1000, 0), 2000)), try XCTUnwrap(candidate(.B, at(1000, 0), 1700))])
+        XCTAssertEqual(first.action, .stay)
+        XCTAssertEqual(first.code, .confirming)
+        // B again a minute later, its corner at 5 km cut 14 m inside: still the route being confirmed.
+        let redrawn = try fresh([(1900, 0), (4980, 0), (5000, 20), (5000, 1000), (15000, 1000), (15000, 0), (20000, 0)], 1650)
+        let second = poll(route, 1900, 15, [try XCTUnwrap(candidate(.A, at(1900, 0), 1950)), redrawn], nowSec: 60, state: first.nextState)
+        XCTAssertEqual(second.action, .switchRoute)
+        XCTAssertEqual(second.code, .fasterRoute)
+        XCTAssertEqual(second.toRouteId, redrawn.id)
+        // Another road in its place starts the count again.
+        let other = poll(route, 1900, 15, [try XCTUnwrap(candidate(.A, at(1900, 0), 1950)), try XCTUnwrap(candidate(.C, at(1900, 0), 1650))], nowSec: 60, state: first.nextState)
+        XCTAssertEqual(other.action, .stay)
+        XCTAssertEqual(other.code, .confirming)
+        XCTAssertEqual(other.nextState.pending?.polls, 1)
+    }
+
+    // it('route gone from the answers while the driver is on the road: stays; gone and off the road: a new route at once')
+    func testDrawnDifferently_routeGoneFromTheAnswersWhileOnTheRoadStaysGoneAndOffTheRoadANewRouteAtOnce() throws {
+        let others = [try XCTUnwrap(candidate(.B, at(here3km, 0), 1500)), try XCTUnwrap(candidate(.C, at(here3km, 0), 1600))]
+        var observation = RerouteObservation(nowSec: 0, route: DrivenRoute(try onA()), positionAlongM: here3km, speedMps: 15, candidates: others)
+        var state = RerouteState.initial
+        for p in 0..<10 {
+            observation.nowSec = Double(p) * 60
+            let decision = Reroute.decideReroute(state, observation)
+            XCTAssertEqual(decision.action, .stay)
+            XCTAssertEqual(decision.code, .routeUnconfirmed)
+            state = decision.nextState
+        }
+        // The tracker says the car has left the route: that, not the list of routes, is the reason to change.
+        observation.nowSec = 600
+        observation.offRouteM = 80
+        let off = Reroute.decideReroute(state, observation)
+        XCTAssertEqual(off.action, .switchRoute)
+        XCTAssertEqual(off.code, .offRoute)
+        XCTAssertEqual(off.toRouteId, others[0].id)
+    }
+
+    // MARK: - describe('baselineProbe: how to ask for the current route when it is not offered')
+
+    /// Where along the main road each via point is, to the nearest 100 m (the stretches are found in 10 m steps).
+    private func xOf(_ via: [BaselineViaPoint]) -> [Double] {
+        via.map { (Geo.alongRouteM([at(0, 0), $0.point])[1] / 100).rounded() * 100 }
+    }
+
+    // it('asks nothing when the current route is among the fresh routes, or there are none')
+    func testBaselineProbe_asksNothingWhenTheCurrentRouteIsAmongTheFreshRoutesOrThereAreNone() throws {
+        let here = at(3000, 0)
+        XCTAssertNil(Reroute.baselineProbe(try onA().geometry, positionAlongM: 3000, candidates: [try XCTUnwrap(candidate(.A, here, 1500)), try XCTUnwrap(candidate(.B, here, 1400))]))
+        XCTAssertNil(Reroute.baselineProbe(try onA().geometry, positionAlongM: 3000, candidates: []))
+    }
+
+    // it('puts via points on the stretches the fresh routes leave, with the heading of travel')
+    func testBaselineProbe_putsViaPointsOnTheStretchesTheFreshRoutesLeaveWithTheHeadingOfTravel() throws {
+        let here = at(3000, 0)
+        // B leaves the main road between 5 and 15 km, C between 8 and 12 km: one set of points pins both.
+        let probe = try XCTUnwrap(Reroute.baselineProbe(try onA().geometry, positionAlongM: 3000, candidates: [try XCTUnwrap(candidate(.B, here, 1400)), try XCTUnwrap(candidate(.C, here, 1450))]))
+        XCTAssertEqual(xOf(probe.via), [6300, 8800, 11300, 13700])
+        for v in probe.via {
+            XCTAssertEqual(v.bearingDeg, 90, accuracy: 0.5)
+            // On the main road itself.
+            XCTAssertLessThan(abs(v.point.lat - at(0, 0).lat) * 111_195, 1)
+        }
+        // A short loop near the end gets a point of its own.
+        let withE = try XCTUnwrap(Reroute.baselineProbe(try onA().geometry, positionAlongM: 3000, candidates: [try XCTUnwrap(candidate(.B, here, 1400)), try XCTUnwrap(candidate(.E, here, 1450))]))
+        XCTAssertEqual(xOf(withE.via), [6300, 8800, 11300, 13700, 19000])
+    }
+
+    // it('never more than the cap, spread over the way')
+    func testBaselineProbe_neverMoreThanTheCapSpreadOverTheWay() throws {
+        let here = at(3000, 0)
+        let probe = try XCTUnwrap(Reroute.baselineProbe(
+            try onA().geometry, positionAlongM: 3000,
+            candidates: [try XCTUnwrap(candidate(.B, here, 1400)), try XCTUnwrap(candidate(.E, here, 1450))],
+            options: RerouteOptions(baselineMaxViaPoints: 2)
+        ))
+        XCTAssertEqual(xOf(probe.via), [8800, 13700])
     }
 
     // MARK: - describe('scripted drives')
@@ -418,25 +683,73 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(try pollAt(log, 6).decision.nextState.failedPolls, 0)
     }
 
-    // it('current route not among the candidates: waits three polls, then takes the best fresh route')
-    func testScriptedDrives_currentRouteNotAmongTheCandidatesWaitsThreePollsThenTakesTheBestFreshRoute() throws {
+    // The old rule here was "missing from the fresh routes three polls in a row: take the best
+    // fresh route". On real drives that fired with nothing wrong, so a route that is merely not
+    // offered is no longer a reason to switch: the next four tests replace it.
+    // it('current route not among the candidates and nothing else known: stays on it, however long')
+    func testScriptedDrives_currentRouteNotAmongTheCandidatesAndNothingElseKnownStaysOnItHoweverLong() throws {
         let log = drive(DriveScript(
-            polls: 6,
+            polls: 12,
             eta: RerouteFx.fixed([.A: 2000, .B: 1900, .C: 1950]),
             tamper: { candidates, context in
                 context.poll >= 1 ? candidates.filter { DriveWorld.nameOf($0) != .A } : candidates
             }
         ))
-        XCTAssertEqual(slice(log.codes, 0, 4), ["saving-too-small", "route-lost-waiting", "route-lost-waiting", "route-lost"])
-        XCTAssertEqual(try pollAt(log, 1).decision.reason, "Staying: current route is missing from the fresh routes, check 1 of 3")
-        XCTAssertEqual(try pollAt(log, 3).decision.reason, "Switching: current route is no longer offered, turn in 2.5 miles")
+        XCTAssertEqual(log.switches, [])
+        XCTAssertEqual(log.codes, ["saving-too-small"] + Array(repeating: "route-unconfirmed", count: 11))
+        XCTAssertEqual(
+            try pollAt(log, 1).decision.reason,
+            "Staying: current route is not among the fresh routes, and its travel time could not be checked"
+        )
+        // Not being offered is not evidence against the road ahead: nothing counts up.
+        XCTAssertEqual(log.polls.map { $0.decision.nextState.lostPolls }, Array(repeating: 0, count: 12))
+        XCTAssertNil(try pollAt(log, 5).decision.current)
+    }
+
+    // it('current route not among the candidates: its own travel time is asked for, and the usual rules decide')
+    func testScriptedDrives_currentRouteNotAmongTheCandidatesItsOwnTravelTimeIsAskedForAndTheUsualRulesDecide() throws {
+        // The provider only offers B and C. Asked for the main road itself it says 2000 s, and from the fourth poll 2300 s.
+        let log = drive(DriveScript(
+            polls: 6,
+            eta: RerouteFx.fixed([.B: 1900, .C: 1950]),
+            baseline: { _, context in
+                DriveWorld.candidate(.A, context.position, context.poll >= 3 ? 2300 : 2000).map { [$0] } ?? []
+            }
+        ))
+        XCTAssertEqual(log.codes, ["saving-too-small", "saving-too-small", "saving-too-small", "confirming", "faster-route", "current-best"])
+        let first = try XCTUnwrap(pollAt(log, 0).decision.current)
+        XCTAssertEqual(first.durationSec, 2000)
+        XCTAssertTrue(first.asked)
+        XCTAssertEqual(try pollAt(log, 0).decision.reason, "Staying: faster route saves only 1.6 minutes")
+        // A real saving, measured like for like, confirmed over two polls: an ordinary switch.
+        XCTAssertEqual(try pollAt(log, 4).decision.reason, "Switching: saves 6.6 minutes, turn in 2.3 miles")
+        XCTAssertEqual(try XCTUnwrap(pollAt(log, 4).decision.considered).savingSec, 400)
+        XCTAssertEqual(log.switches, [Switch(nowSec: 240, from: .A, to: .B)])
+        XCTAssertTrue(log.polls.allSatisfy { $0.decision.nextState.lostPolls == 0 })
+    }
+
+    // it('asked for the road ahead three times and no route found that way: takes the best fresh route, and says why')
+    func testScriptedDrives_askedForTheRoadAheadThreeTimesAndNoRouteFoundThatWayTakesTheBestFreshRouteAndSaysWhy() throws {
+        let log = drive(DriveScript(
+            polls: 6,
+            eta: RerouteFx.fixed([.A: 2000, .B: 1900, .C: 1950]),
+            tamper: { candidates, context in
+                context.poll >= 1 ? candidates.filter { DriveWorld.nameOf($0) != .A } : candidates
+            },
+            // Asked for the main road itself, the provider finds no route along it.
+            baseline: { _, context in context.poll >= 1 ? [] : nil }
+        ))
+        XCTAssertEqual(slice(log.codes, 0, 4), ["saving-too-small", "route-unconfirmed", "route-unconfirmed", "route-lost"])
+        XCTAssertEqual(try pollAt(log, 1).decision.reason, "Staying: the road ahead could not be routed, check 1 of 3")
+        XCTAssertEqual(try pollAt(log, 3).decision.reason, "Switching: the road ahead can no longer be routed, turn in 2.5 miles")
         XCTAssertNil(try XCTUnwrap(pollAt(log, 3).decision.considered).savingSec)
         XCTAssertEqual(log.switches, [Switch(nowSec: 180, from: .A, to: .B)])
     }
 
-    // it('current route not among the candidates: the route left a moment ago may be the one to take')
-    func testScriptedDrives_currentRouteNotAmongTheCandidatesTheRouteLeftAMomentAgoMayBeTheOneToTake() throws {
-        // On B since the switch at 60 s. Then the provider stops offering B and puts A first.
+    // it('the road ahead cannot be routed: the route left a moment ago may be the one to take')
+    func testScriptedDrives_theRoadAheadCannotBeRoutedTheRouteLeftAMomentAgoMayBeTheOneToTake() throws {
+        // On B since the switch at 60 s. Then the provider stops offering B, puts A first, and
+        // finds no route when asked for B itself.
         let log = drive(DriveScript(
             polls: 9,
             eta: { name, context in
@@ -449,14 +762,15 @@ final class RerouteTests: XCTestCase {
             },
             tamper: { candidates, context in
                 context.poll >= 2 ? candidates.filter { DriveWorld.nameOf($0) != .B } : candidates
-            }
+            },
+            baseline: { _, context in context.poll >= 2 ? [] : nil }
         ))
         XCTAssertEqual(slice(log.codes, 0, 8), [
             "confirming",
             "faster-route",
-            "route-lost-waiting",
-            "route-lost-waiting",
-            // Three polls without it, but the cooldown (until 360 s) still holds.
+            "route-unconfirmed",
+            "route-unconfirmed",
+            // Three such answers, but the cooldown (until 360 s) still holds.
             "cooldown",
             "cooldown",
             "route-lost",
@@ -468,7 +782,7 @@ final class RerouteTests: XCTestCase {
         ])
         XCTAssertEqual(
             try pollAt(log, 4).decision.reason,
-            "Staying: switched routes 3 minutes ago, and the current route is no longer offered"
+            "Staying: switched routes 3 minutes ago, and the road ahead can no longer be routed"
         )
     }
 
@@ -491,47 +805,117 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(try poll(3000).code, .currentBest)
         // 40 m on (a second or two of driving): still the same route.
         XCTAssertEqual(try poll(3040).code, .currentBest)
-        // 300 m on, the answer is stale: nothing matches, and nothing is switched on one such poll.
+        // 300 m on, the answer is stale. Routes that start a little behind the car are still the
+        // same routes, compared like for like.
         let stale = try poll(3300)
         XCTAssertEqual(stale.action, .stay)
-        XCTAssertEqual(stale.code, .routeLostWaiting)
+        XCTAssertEqual(stale.code, .currentBest)
+        // Only a straight approach from behind is left out of the comparison: a route that first
+        // drives a kilometer the other way and turns back is not the current route (#41 review).
+        func uTurn(_ yM: Double) throws -> RouteCandidate {
+            var c = try XCTUnwrap(candidate(.A, fetchedFrom, 1700))
+            c.geometry = [at(2900, 0), at(1900, 0), at(1900, yM), at(20000, yM)]
+            c.id = "u-turn-\(yM)"
+            c.distanceM = Geo.alongRouteM(c.geometry).last ?? 0
+            c.maneuvers = []
+            return c
+        }
+        XCTAssertNil(Reroute.findCurrentRoute(route.geometry, positionAlongM: 3000, candidates: [try uTurn(15)]))
+        XCTAssertNil(Reroute.findCurrentRoute(route.geometry, positionAlongM: 3000, candidates: [try uTurn(0.1)]))
     }
 
-    // it('current route missing for one poll only: the count starts again')
-    func testScriptedDrives_currentRouteMissingForOnePollOnlyTheCountStartsAgain() {
+    // it('the road ahead not routed for one poll only: the count starts again')
+    func testScriptedDrives_theRoadAheadNotRoutedForOnePollOnlyTheCountStartsAgain() {
         let log = drive(DriveScript(
             polls: 8,
             eta: RerouteFx.fixed([.A: 2000, .B: 1900]),
             tamper: { candidates, context in
                 context.poll % 3 == 1 ? candidates.filter { DriveWorld.nameOf($0) != .A } : candidates
-            }
+            },
+            baseline: { _, context in context.poll % 3 == 1 ? [] : nil }
         ))
         XCTAssertEqual(log.switches, [])
         XCTAssertEqual(log.codes, [
-            "saving-too-small", "route-lost-waiting", "saving-too-small", "saving-too-small",
-            "route-lost-waiting", "saving-too-small", "saving-too-small", "route-lost-waiting",
+            "saving-too-small", "route-unconfirmed", "saving-too-small", "saving-too-small",
+            "route-unconfirmed", "saving-too-small", "saving-too-small", "route-unconfirmed",
         ])
         XCTAssertEqual(log.polls.map { $0.decision.nextState.lostPolls }, [0, 1, 0, 0, 1, 0, 0, 1])
     }
 
-    // it('current route no longer offered and the only other route turns off too soon: stays')
-    func testScriptedDrives_currentRouteNoLongerOfferedAndTheOnlyOtherRouteTurnsOffTooSoonStays() {
-        let lost = pollOnA(xM: 4700, etas: [.B: 1500], options: RerouteOptions(routeLostPolls: 1))
+    // it('"no route" answers add up even with "another road" answers between them; finding the current route starts over (#41)')
+    func testScriptedDrives_noRouteAnswersAddUpEvenWithAnotherRoadAnswersBetweenThemFindingTheCurrentRouteStartsOver() {
+        // A closure between via points: some checks the points miss it and the provider routes round it
+        // through them (another road), some checks a point lands on it (no route).
+        func lostAt(_ poll: Int) -> Bool { poll % 2 == 0 }
+        let log = drive(DriveScript(
+            polls: 5,
+            eta: RerouteFx.fixed([.A: 2000, .B: 1900]),
+            tamper: { candidates, _ in candidates.filter { DriveWorld.nameOf($0) != .A } },
+            baseline: { candidates, context in lostAt(context.poll) ? [] : candidates.filter { DriveWorld.nameOf($0) == .B } }
+        ))
+        XCTAssertEqual(log.polls.map { $0.decision.nextState.lostPolls }, [1, 1, 2, 2, 0])
+        XCTAssertEqual(log.codes, ["route-unconfirmed", "route-unconfirmed", "route-unconfirmed", "route-unconfirmed", "route-lost"])
+        XCTAssertEqual(log.switches.count, 1)
+        // The current route offered again between them: the count starts over, and nothing switches.
+        let found = drive(DriveScript(
+            polls: 5,
+            eta: RerouteFx.fixed([.A: 2000, .B: 1900]),
+            tamper: { candidates, context in context.poll == 3 ? candidates : candidates.filter { DriveWorld.nameOf($0) != .A } },
+            baseline: { candidates, context in
+                context.poll == 3 ? nil : lostAt(context.poll) ? [] : candidates.filter { DriveWorld.nameOf($0) == .B }
+            }
+        ))
+        XCTAssertEqual(found.polls.map { $0.decision.nextState.lostPolls }, [1, 1, 2, 0, 1])
+        XCTAssertEqual(found.switches, [])
+    }
+
+    // it('a poll that could not ask for the current path neither adds to the count nor clears it')
+    func testScriptedDrives_aPollThatCouldNotAskForTheCurrentPathNeitherAddsToTheCountNorClearsIt() {
+        let state = RerouteState(lostPolls: 2)
+        let notAsked = pollOnA(xM: 1000, etas: [.B: 1500], state: state)
+        XCTAssertEqual(notAsked.action, .stay)
+        XCTAssertEqual(notAsked.code, .routeUnconfirmed)
+        XCTAssertEqual(notAsked.nextState.lostPolls, 2)
+        // "No route through these points" is the answer that counts: the third in a row.
+        let third = pollOnA(xM: 1000, etas: [.B: 1500], state: state, baseline: [:])
+        XCTAssertEqual(third.action, .switchRoute)
+        XCTAssertEqual(third.code, .routeLost)
+        // Answered with another road (the via points did not pin the path): no evidence either way,
+        // and the count is kept (#41).
+        let otherRoad = pollOnA(xM: 1000, etas: [.B: 1500], state: state, baseline: [.B: 1500])
+        XCTAssertEqual(otherRoad.action, .stay)
+        XCTAssertEqual(otherRoad.code, .routeUnconfirmed)
+        XCTAssertEqual(otherRoad.reason, "Staying: current route is not among the fresh routes, and asking for it brought back another road")
+        XCTAssertEqual(otherRoad.nextState.lostPolls, 2)
+        // An answer that is the current path but has no typical duration is not compared, and is not shown as its ETA.
+        let noTraffic = pollOnA(xM: 1000, etas: [.B: 1500], extra: [.A: { $0.typicalDurationSec = nil }], baseline: [.A: 2400])
+        XCTAssertEqual(noTraffic.action, .stay)
+        XCTAssertEqual(noTraffic.code, .noTrafficData)
+        XCTAssertNil(noTraffic.current)
+    }
+
+    // it('the road ahead cannot be routed and the only other route turns off too soon: stays')
+    func testScriptedDrives_theRoadAheadCannotBeRoutedAndTheOnlyOtherRouteTurnsOffTooSoonStays() {
+        let lost = pollOnA(xM: 4700, etas: [.B: 1500], options: RerouteOptions(routeLostPolls: 1), baseline: [:])
         XCTAssertEqual(lost.action, .stay)
         XCTAssertEqual(lost.code, .tooLate)
         XCTAssertEqual(
             lost.reason,
-            "Staying: current route is no longer offered, but the other route turns off in 0.1 miles, too late to take safely"
+            "Staying: the road ahead can no longer be routed, but the other route turns off in 0.1 miles, too late to take safely"
         )
         // Inside the cooldown it waits as well.
         var cooledState = RerouteState.initial
         cooledState.lastSwitchAtSec = 0
-        let cooling = pollOnA(xM: 1000, etas: [.B: 1500], nowSec: 100, state: cooledState, options: RerouteOptions(routeLostPolls: 1))
+        let cooling = pollOnA(xM: 1000, etas: [.B: 1500], nowSec: 100, state: cooledState, options: RerouteOptions(routeLostPolls: 1), baseline: [:])
         XCTAssertEqual(cooling.action, .stay)
         XCTAssertEqual(cooling.code, .cooldown)
-        let taken = pollOnA(xM: 1000, etas: [.B: 1500], options: RerouteOptions(routeLostPolls: 1))
+        let taken = pollOnA(xM: 1000, etas: [.B: 1500], options: RerouteOptions(routeLostPolls: 1), baseline: [:])
         XCTAssertEqual(taken.action, .switchRoute)
         XCTAssertEqual(taken.code, .routeLost)
+        // Without the answer to that request there is no switch, whatever routeLostPolls says.
+        let notAsked = pollOnA(xM: 1000, etas: [.B: 1500], options: RerouteOptions(routeLostPolls: 1))
+        XCTAssertEqual(notAsked.action, .stay)
+        XCTAssertEqual(notAsked.code, .routeUnconfirmed)
     }
 
     // it('off route: takes the best fresh route at once, cooldown or not')
@@ -996,5 +1380,209 @@ final class RerouteTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(try XCTUnwrap(considered.savingSec), 240, "seed \(run.seed)")
             }
         }
+    }
+}
+
+// MARK: - describe('a route the driver turned down')
+
+final class RerouteDeclinedTests: XCTestCase {
+    private func at(_ xM: Double, _ yM: Double) -> LngLat { DriveWorld.at(xM, yM) }
+    private func candidate(_ name: DriveWorld.RouteName, _ from: LngLat, _ durationSec: Double) throws -> RouteCandidate {
+        try XCTUnwrap(DriveWorld.candidate(name, from, durationSec))
+    }
+
+    // "Keep previous route" in the live drive: declineRoute, then the same faster route at every poll.
+    private func offer(_ nowSec: Double, _ state: RerouteState, _ xM: Double) throws -> RerouteDecision {
+        let mainRoad = DrivenRoute(geometry: try candidate(.A, at(0, 0), 2000).geometry, maneuvers: [], limitedAccessSpansM: nil)
+        return Reroute.decideReroute(state, RerouteObservation(
+            nowSec: nowSec, route: mainRoad, positionAlongM: xM, speedMps: 5,
+            candidates: [try candidate(.A, at(xM, 0), 2000), try candidate(.B, at(xM, 0), 1500)]
+        ))
+    }
+
+    // it('is not switched to again until its time is up, whatever it saves')
+    func testTurnedDown_isNotSwitchedToAgainUntilItsTimeIsUpWhateverItSaves() throws {
+        let b = try candidate(.B, at(900, 0), 1500)
+        let declined = Reroute.declineRoute(.initial, b.geometry, untilSec: 600)
+        XCTAssertEqual(declined, RerouteState(declined: [RerouteState.Declined(geometry: b.geometry, untilSec: 600)]))
+        let first = try offer(60, declined, 1200)
+        XCTAssertEqual(first.action, .stay)
+        XCTAssertEqual(first.code, .driverDeclined)
+        XCTAssertEqual(first.reason, "Staying: faster route saves 8.3 minutes, but you chose to keep this route")
+        // No confirmation builds up meanwhile.
+        XCTAssertNil(first.nextState.pending)
+        let second = try offer(120, first.nextState, 1500)
+        XCTAssertEqual(second.code, .driverDeclined)
+        // Once the time is up the entry is dropped and the usual rules apply again.
+        let later = try offer(600, second.nextState, 3000)
+        XCTAssertEqual(later.nextState.declined, [])
+        XCTAssertEqual(later.action, .stay)
+        XCTAssertEqual(later.code, .confirming)
+        let taken = try offer(660, later.nextState, 3300)
+        XCTAssertEqual(taken.action, .switchRoute)
+        XCTAssertEqual(taken.code, .fasterRoute)
+    }
+
+    // it('another faster route is still taken')
+    func testTurnedDown_anotherFasterRouteIsStillTaken() throws {
+        let c = try candidate(.C, at(900, 0), 1500)
+        let first = try offer(60, Reroute.declineRoute(.initial, c.geometry, untilSec: 600), 1200)
+        XCTAssertEqual(first.code, .confirming)
+        let second = try offer(120, first.nextState, 1500)
+        XCTAssertEqual(second.action, .switchRoute)
+        XCTAssertEqual(second.code, .fasterRoute)
+    }
+
+    // it('drops a route-lost count in progress, so a lost road needs the full count again (#28)')
+    func testTurnedDown_dropsARouteLostCountInProgressSoALostRoadNeedsTheFullCountAgain() throws {
+        let b = try candidate(.B, at(900, 0), 1500)
+        let declined = Reroute.declineRoute(RerouteState(lostPolls: 2), b.geometry, untilSec: 600)
+        XCTAssertEqual(declined.lostPolls, 0)
+        XCTAssertNil(declined.pending)
+    }
+}
+
+// MARK: - describe('matching cost on a long route (#51)')
+
+// #51: the overlap matching walked every 10 m of both lines, and every point of a stretch apart
+// looked at the whole other line. The cost is counted (segment distance checks plus grid
+// entries, see MatchMeter), not timed, so the test says the same on every machine.
+final class RerouteMatchingCostTests: XCTestCase {
+    private typealias Corner = (x: Double, y: Double)
+
+    /// Through the corners with a vertex every 20 m: 100 km is 5000 vertices.
+    private static func dense(_ corners: [Corner]) -> [Corner] {
+        var out: [Corner] = [corners[0]]
+        for i in 1..<corners.count {
+            let (x0, y0) = corners[i - 1]
+            let (x1, y1) = corners[i]
+            let n = max(1, Int((hypot(x1 - x0, y1 - y0) / 20).rounded()))
+            for k in 1...n {
+                out.append((x0 + (x1 - x0) * Double(k) / Double(n), y0 + (y1 - y0) * Double(k) / Double(n)))
+            }
+        }
+        return out
+    }
+
+    private struct Bumped {
+        let xy: [Corner]
+        let route: RouteCandidate
+    }
+
+    /// A route north (+) or south (-) of the straight line by `bumpM` for the middle 45 %, as meters and as a candidate.
+    private static func bumped(_ id: String, _ bumpM: Double, _ durationSec: Double) -> Bumped {
+        let xy = dense([(0, 0), (27_500, 0), (27_500, bumpM), (72_500, bumpM), (72_500, 0), (100_000, 0)])
+        var route = DriveWorld.candidate(.A, DriveWorld.at(0, 0), durationSec)!
+        route.id = id
+        route.geometry = xy.map { DriveWorld.at($0.x, $0.y) }
+        route.distanceM = Geo.alongRouteM(route.geometry).last ?? 0
+        route.maneuvers = []
+        return Bumped(xy: xy, route: route)
+    }
+
+    // The current route: 100 km east, 1 km north for the middle 45 %. Three alternatives run 2 to
+    // 4 km from it for that 45 % (the first just as long, so no length check rules it out), and
+    // one is the current route drawn again.
+    private static let driven = bumped("driven", 1000, 5000)
+    private static let alternatives = [bumped("south-1", -1000, 4800), bumped("south-2", -2000, 4900), bumped("south-3", -3000, 5000)]
+    private static let same = bumped("same", 1000, 5100)
+
+    /// The matcher before #35, as a reference for the cost: every vertex of each line within
+    /// 10 m of the other, each looked up by scanning the other line from its start.
+    private static func oldMatcherChecks(_ path: [Corner], _ candidates: [[Corner]]) -> Int {
+        var checks = 0
+        func toSegment(_ p: Corner, _ a: Corner, _ b: Corner) -> Double {
+            checks += 1
+            let dx = b.x - a.x
+            let dy = b.y - a.y
+            let lengthSq = dx * dx + dy * dy
+            let t = lengthSq == 0 ? 0 : min(1, max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq))
+            return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+        }
+        func near(_ p: Corner, _ line: [Corner]) -> Bool {
+            for i in 1..<line.count where toSegment(p, line[i - 1], line[i]) <= 10 { return true }
+            return false
+        }
+        for fresh in candidates {
+            // Where the fresh route starts on the path (one full scan), then both ways, vertex by vertex.
+            for i in 1..<path.count { _ = toSegment(fresh[0], path[i - 1], path[i]) }
+            if fresh.allSatisfy({ near($0, path) }) && path.allSatisfy({ near($0, fresh) }) { return checks }
+        }
+        return checks
+    }
+
+    private func cost(_ offered: [Bumped]) -> (found: RouteCandidate?, work: Int) {
+        let meter = MatchMeter()
+        let found = Reroute.findCurrentRoute(Self.driven.route.geometry, positionAlongM: 0, candidates: offered.map(\.route), meter: meter)
+        return (found, meter.segmentChecks + meter.gridEntries)
+    }
+
+    // it('the current route not among them: at most twice the old cost')
+    func testMatchingCost_theCurrentRouteNotAmongThemAtMostTwiceTheOldCost() {
+        XCTAssertEqual(Self.driven.xy.count, 5101)
+        let (found, work) = cost(Self.alternatives)
+        XCTAssertNil(found)
+        XCTAssertLessThanOrEqual(work, 2 * Self.oldMatcherChecks(Self.driven.xy, Self.alternatives.map(\.xy)))
+    }
+
+    // it('the current route among them, offered last: at most twice the old cost, and found')
+    func testMatchingCost_theCurrentRouteAmongThemOfferedLastAtMostTwiceTheOldCostAndFound() {
+        let offered = Self.alternatives + [Self.same]
+        let (found, work) = cost(offered)
+        XCTAssertEqual(found, Self.same.route)
+        XCTAssertLessThanOrEqual(work, 2 * Self.oldMatcherChecks(Self.driven.xy, offered.map(\.xy)))
+    }
+
+    // it('counting changes nothing: the same answer with or without a meter')
+    func testMatchingCost_countingChangesNothingTheSameAnswerWithOrWithoutAMeter() {
+        XCTAssertEqual(Reroute.findCurrentRoute(Self.driven.route.geometry, positionAlongM: 0, candidates: (Self.alternatives + [Self.same]).map(\.route)), Self.same.route)
+        XCTAssertNil(Reroute.findCurrentRoute(Self.driven.route.geometry, positionAlongM: 0, candidates: Self.alternatives.map(\.route)))
+    }
+}
+
+// MARK: - describe('the lead is judged where the driver is when the answer is used (#5 review)')
+
+final class RerouteLeadFromTheCarTests: XCTestCase {
+    // A slow answer (a probe that drags on weak signal): asked 4.3 km along A, used once the car
+    // has gone on. B leaves A at 5 km.
+    private func decide(_ drivenSinceM: Double?) throws -> RerouteDecision {
+        let here = DriveWorld.at(4300, 0)
+        return Reroute.decideReroute(
+            .initial,
+            RerouteObservation(
+                nowSec: 0,
+                route: DrivenRoute(geometry: try XCTUnwrap(DriveWorld.candidate(.A, DriveWorld.at(0, 0), 2400)).geometry, maneuvers: [], limitedAccessSpansM: nil),
+                positionAlongM: 4300,
+                speedMps: 15,
+                candidates: [try XCTUnwrap(DriveWorld.candidate(.A, here, 2000)), try XCTUnwrap(DriveWorld.candidate(.B, here, 1700))],
+                drivenSinceM: drivenSinceM
+            ),
+            options: RerouteOptions(confirmPolls: 1)
+        )
+    }
+
+    // it('a turn-off 700 m from where the check was asked is taken when the answer is quick')
+    func testLeadFromTheCar_aTurnOff700mFromWhereTheCheckWasAskedIsTakenWhenTheAnswerIsQuick() throws {
+        let quick = try decide(nil)
+        XCTAssertEqual(quick.action, .switchRoute)
+        XCTAssertEqual(try XCTUnwrap(quick.considered).turnInM, 700, accuracy: 0.5)
+        XCTAssertEqual(try decide(0).action, .switchRoute)
+    }
+
+    // it('and refused when the car went 375 m while the answer was out: 325 m left is under the 400 m lead')
+    func testLeadFromTheCar_andRefusedWhenTheCarWent375mWhileTheAnswerWasOut() throws {
+        let late = try decide(375)
+        XCTAssertEqual(late.code, .tooLate)
+        XCTAssertEqual(try XCTUnwrap(late.considered).turnInM, 325, accuracy: 0.5)
+        XCTAssertTrue(late.reason.hasSuffix(", too late to take safely") && late.reason.contains("turns off in "), late.reason)
+    }
+
+    // it('what is said counts from the car too, and a value that is not a distance is 0')
+    func testLeadFromTheCar_whatIsSaidCountsFromTheCarTooAndAValueThatIsNotADistanceIs0() throws {
+        let on = try decide(200)
+        XCTAssertEqual(on.action, .switchRoute)
+        XCTAssertEqual(try XCTUnwrap(on.considered).turnInM, 500, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(try decide(.nan).considered).turnInM, 700, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(try decide(-50).considered).turnInM, 700, accuracy: 0.5)
     }
 }
