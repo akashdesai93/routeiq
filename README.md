@@ -1087,10 +1087,12 @@ stays at the right.
   holds up".
 - **The iPhone shell**: the token screen and the top bar's "Change token" and "Drive
   diagnostics" are unchanged in place, in the same dark theme.
-- **Safe areas.** The page runs edge to edge (`viewport-fit=cover`), and the shell's web view
-  no longer insets it (`contentInset: "never"` in `native/shell/capacitor.config.json`), so
-  the app pads itself with `env(safe-area-inset-*)`: the top bar below the notch, the content
-  clear of the home indicator and the rounded corners. The drive view already did.
+- **Safe areas.** The page asks to run edge to edge (`viewport-fit=cover`) and pads itself
+  with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
+  sits below the notch and the content clear of the home indicator and the rounded corners.
+  The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
+  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
+  gaps apply; the shell's layout is the same as before this change.
 
 ## Live drive
 
