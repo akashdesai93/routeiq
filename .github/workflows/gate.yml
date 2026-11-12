@@ -48,6 +48,8 @@ jobs:
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # Proof only: compare with the previous push, as on main.
+          base: ${{ github.event.before }}
           # A change to this file runs everything, so a change to the gate is tested in full.
           filters: |
             native-core:
