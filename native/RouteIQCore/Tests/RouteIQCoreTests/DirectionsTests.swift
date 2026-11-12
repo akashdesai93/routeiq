@@ -436,6 +436,69 @@ final class DirectionsTests: XCTestCase {
         XCTAssertEqual(span.endM, 4 * 111.19, accuracy: 0.5)
     }
 
+    // it('carries per-segment congestion and duration, one entry per segment of the line')
+    func test_parseDirections_carriesPerSegmentCongestionAndDurationOneEntryPerSegmentOfTheLine() throws {
+        let first = try item(try routesOf(Directions.parse(try fixture("directions.congestion.json"))), 0)
+        XCTAssertEqual(first.geometry.count, 5)
+        XCTAssertEqual(first.segmentTraffic, SegmentTraffic(
+            congestion: [.low, .heavy, .severe, .moderate],
+            durationSec: [80.2, 310.5, 402.1, 107.6]
+        ))
+    }
+
+    // it('reads congestion it does not know as unknown, and drops a list of the wrong length')
+    func test_parseDirections_readsCongestionItDoesNotKnowAsUnknownAndDropsAListOfTheWrongLength() throws {
+        let routes = try routesOf(Directions.parse(try fixture("directions.congestion.json")))
+        // "jammed" and null are not Mapbox levels: unknown, never a guess. Two durations for three segments: none.
+        XCTAssertEqual(try item(routes, 1).segmentTraffic, SegmentTraffic(congestion: [.low, .unknown, .unknown], durationSec: nil))
+        // No annotation at all (an older response, or a test): nil, not an empty list.
+        XCTAssertNil(try item(routes, 2).segmentTraffic)
+        XCTAssertEqual(try routesOf(Directions.parse(try fixture("directions.ok.json"))).map(\.segmentTraffic), [nil, nil, nil])
+    }
+
+    // it('drops annotations that cannot line up with the geometry')
+    func test_parseDirections_dropsAnnotationsThatCannotLineUpWithTheGeometry() throws {
+        let route = try rawRoute(try fixture("directions.congestion.json"), 0)
+        let leg = try item(try XCTUnwrap(route["legs"]?.arrayValue), 0)
+        let annotation = try XCTUnwrap(leg["annotation"])
+        let congestion = try XCTUnwrap(annotation["congestion"]?.arrayValue)
+        let duration = try XCTUnwrap(annotation["duration"]?.arrayValue)
+        func parse(_ r: JSONValue) throws -> SegmentTraffic? { try firstOf(r).segmentTraffic }
+        func withAnnotation(_ a: JSONValue) -> JSONValue { route.merging(["legs": .array([leg.merging(["annotation": a])])]) }
+        // One entry short.
+        XCTAssertEqual(
+            try parse(withAnnotation(annotation.merging(["congestion": .array(Array(congestion.dropFirst()))]))),
+            SegmentTraffic(congestion: nil, durationSec: duration.compactMap(\.numberValue))
+        )
+        // A duration that is not a number of 0 or more spoils that list only.
+        XCTAssertEqual(
+            try parse(withAnnotation(annotation.merging(["duration": [80.2, -1, 402.1, 107.6]]))),
+            SegmentTraffic(congestion: [.low, .heavy, .severe, .moderate], durationSec: nil)
+        )
+        // A bad point dropped from the line would shift every entry after it.
+        var coordinates = try XCTUnwrap(route["geometry"]?["coordinates"]?.arrayValue)
+        coordinates[2] = ["x", "y"]
+        XCTAssertNil(try parse(route.merging(["geometry": ["type": "LineString", "coordinates": .array(coordinates)]])))
+        // Not an object, not a list, a leg without one.
+        XCTAssertNil(try parse(withAnnotation("congestion")))
+        XCTAssertNil(try parse(withAnnotation(["congestion": "heavy", "duration": 3])))
+        XCTAssertNil(try parse(route.merging(["legs": [leg, ["steps": []]]])))
+    }
+
+    // it('joins the annotations of several legs into one list for the whole line')
+    func test_parseDirections_joinsTheAnnotationsOfSeveralLegsIntoOneListForTheWholeLine() throws {
+        let route = try rawRoute(try fixture("directions.congestion.json"), 0)
+        let leg = try item(try XCTUnwrap(route["legs"]?.arrayValue), 0)
+        let legs: JSONValue = [
+            leg.merging(["annotation": ["congestion": ["low", "heavy"], "duration": [80.2, 310.5]]]),
+            leg.merging(["annotation": ["congestion": ["severe", "moderate"], "duration": [402.1, 107.6]]]),
+        ]
+        XCTAssertEqual(try firstOf(route.merging(["legs": legs])).segmentTraffic, SegmentTraffic(
+            congestion: [.low, .heavy, .severe, .moderate],
+            durationSec: [80.2, 310.5, 402.1, 107.6]
+        ))
+    }
+
     // it('treats a non-numeric typical duration as missing')
     func test_parseDirections_treatsANonNumericTypicalDurationAsMissing() throws {
         let ok = try fixture("directions.ok.json")

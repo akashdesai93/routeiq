@@ -123,6 +123,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    `src/live/runner.ts` runs the machine with whatever it is handed. A development
    GPS replay (`src/drive/replay.ts`) drives the same path with noise, dropouts, a
    stop, a tunnel and a wrong turn.
+   Robustness (Nov 12, 2026): a request not answered within 30 s
+   (`requestTimeoutSec`) is a failed answer, so one hung connection no longer stops
+   every later check (#29); fixes and the session share one clock that never steps
+   back with the wall clock (`src/device/clock.ts`, #30); a drive started on the
+   plan's route counts the plan's answer as its last check, so "checked N s ago" is
+   true from the start (#71). Open for later: the clock follows a forward step of the
+   wall clock on purpose (time asleep must count), so a forward correction of N s
+   still shortens the cooldown and no-return by N s, and can time out a check in flight.
    The limit: a web page only runs in front with the screen on. Open: none of it has
    been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
    audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Settled
@@ -152,6 +160,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    determinism, and 40 seeded random drives in which switches are never closer
    together than the cooldown. `tests/drive.test.ts` covers the simulated clock, the
    request budget, the what-if delay and a whole simulated drive offline.
+   Follow-ups (#74, #68): the match looks for the fresh route's start near the car
+   first (`matchStartSearchM`), so a cloverleaf no longer loses the current route; "no
+   route" answers older than `routeLostWindowSec` (15 min) no longer count toward a
+   closure switch; and the e2e world has road closures, with the scenario "when a block
+   ahead is closed, it reroutes around it". Open for later: whether the side-street
+   probes of #23 shorten the wait for a closure between via points (#68, item 3).
 8. **Done: go anywhere.** The web version of the phone app's Plan screen
    (`src/PlanPanel.tsx`). Search for either end of the trip through the Mapbox Search
    Box API (`/suggest` + `/retrieve` on a session token; chosen over Geocoding v6,
@@ -275,6 +289,25 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     - **Later, if probing is not enough:** an own routing engine (Valhalla or OSRM on
       OSM) with live speeds from a traffic feed. That means a server, so it needs a cost
       and privacy decision first.
+
+12. **Done: private drive log** (#107, `src/core/driveLog.ts`). Each live drive is kept
+    on the device with the time predicted when it set off against the time it really
+    took, under a coarse corridor key (both ends rounded to about 1 km and hashed: no
+    coordinates, addresses or place names), with its switches (claimed and realised
+    saving, kept or turned down), off-route events, requests, lights, and an optional
+    ETA typed from another app at departure. Written at switches and at the end only.
+    The Drives screen (from the plan screen) lists the drives and a per-corridor
+    summary (median error by start hour and by route source); Export as CSV through
+    the share sheet or Copy; Clear asks once. Versioned shape `routeiq.drives.v1`,
+    contract version 2. Tests: `tests/driveLog.test.ts`; e2e: "after a drive, it shows
+    how long it really took against what it predicted" (`e2e/drivelog.spec.ts`).
+    Open for later: the ranking correction factor per corridor and route source,
+    behind a setting (never loosening the reroute thresholds), #115;
+    editing the other app's ETA after the drive; naming corridors; a drive the app is
+    closed during without a switch is not kept (nothing is written before the first
+    switch or the end); a drive that arrives on its first fix (started at the
+    destination) is not logged; the realised saving is measured for the last kept
+    switch only.
 
 ## Native iPhone + CarPlay (later)
 

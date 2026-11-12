@@ -1,6 +1,6 @@
 import type { KeyValueStore } from '../../storage/kv.ts'
 import { isOsmSignalTile, type OsmSignalTile } from './adapter.ts'
-import { DEFAULT_BUNDLE_RETRY, type BundleCoverage, type BundleLayer, type BundleRetryOptions } from './bundleLayer.ts'
+import { DEFAULT_BUNDLE_RETRY, type BundleCoverage, type BundleLayer } from './bundleLayer.ts'
 import { OVERPASS_COOLDOWN_MS, OVERPASS_MAX_COOLDOWN_MS, type OverpassClient } from './client.ts'
 
 /**
@@ -41,12 +41,6 @@ export interface TileSourceOptions {
   retryMs?: number
   /** The longest a failed tile is left alone (8 minutes). */
   maxRetryMs?: number
-  /**
-   * The same two waits for a tile that is waiting on the bundle (see
-   * LoadedTiles.awaitingBundle): shorter, because trying again is a read of
-   * the app's own files. Default: DEFAULT_BUNDLE_RETRY (5 s, doubling to a minute).
-   */
-  bundleRetry?: Partial<BundleRetryOptions>
 }
 
 export interface LoadedTiles {
@@ -102,7 +96,8 @@ export interface TileSource {
  *   tile is not tried again for `retryMs`, then twice that, up to
  *   `maxRetryMs`, so a route that is recounted every few seconds (rerouting)
  *   does not ask for it on every tick. A tile that is waiting on the bundle
- *   (see LoadedTiles.awaitingBundle) has shorter waits, `bundleRetry`.
+ *   (see LoadedTiles.awaitingBundle) has shorter waits, DEFAULT_BUNDLE_RETRY
+ *   (5 s, doubling to a minute), because trying again is a read of the app's own files.
  *   `retryFailed` skips the wait (the
  *   network client's own pause after a busy answer still holds). A tile on
  *   the edge of the bundled area that the network cannot supply is still
@@ -121,7 +116,6 @@ export function createTileSource(options: TileSourceOptions): TileSource {
     retryMs = OVERPASS_COOLDOWN_MS,
     maxRetryMs = OVERPASS_MAX_COOLDOWN_MS,
   } = options
-  const bundleRetry = { ...DEFAULT_BUNDLE_RETRY, ...options.bundleRetry }
   const session = new Map<string, OsmSignalTile>()
   const clipped = new Map<string, OsmSignalTile>()
   const pending = new Map<string, Promise<OsmSignalTile | null>>()
@@ -210,7 +204,7 @@ export function createTileSource(options: TileSourceOptions): TileSource {
         if (tile !== null) failed.delete(tileId)
         else {
           const onBundle = awaitingBundle.has(tileId)
-          const waits = onBundle ? bundleRetry : { retryMs, maxRetryMs }
+          const waits = onBundle ? DEFAULT_BUNDLE_RETRY : { retryMs, maxRetryMs }
           // A tile that failed the other way before (the index has been read since) starts its wait over.
           const waitMs = failure !== undefined && failure.onBundle === onBundle ? failure.nextMs : waits.retryMs
           failed.set(tileId, { until: now() + waitMs, nextMs: Math.min(waitMs * 2, waits.maxRetryMs), onBundle })

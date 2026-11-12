@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 2** (Nov 12, 2026: version 1 plus the shell's test drive and share sheet, #86). The Swift port does not match it yet;
+**Current version: 5** (Nov 12, 2026: version 4 plus the private drive log, #107). The Swift port is being brought up to it (#33);
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -28,6 +28,7 @@ on one line.
 | Signal tiles | `OsmSignalTile` | `src/providers/osm/adapter.ts` | `public/seed/osm-signals/<tileId>.json`, the device cache; `SignalBundle.swift` |
 | Signal bundle index | `OsmBundleIndex` (version 2, `TileRows`) | `src/providers/osm/bundle.ts` | `public/seed/osm-signals/index.json`; `SignalBundle.swift` |
 | Place book | `PlaceBook` | `src/core/places.ts` | localStorage `routeiq.places.v1`, stored with `version: 1` |
+| Drive log | `DriveLog` (`DriveRecord`, `LoggedSwitch`) | `src/core/driveLog.ts` | localStorage `routeiq.drives.v1`, stored with `version: 1` (#107) |
 | Reroute engine | `RerouteOptions`, `RerouteState`, `RerouteObservation`, `RerouteDecision` | `src/core/reroute.ts` | the simulated and live drives; `Reroute.swift` |
 | Live drive | `LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect` | `src/core/live.ts` | `src/live/runner.ts`, a native shell running the same machine |
 | Native plugin | `RouteIQNativePlugin` (`fix`, `locationError`, `tick`, `appState` events; `httpGet`, `httpCancel`; `NativeFix`) | `src/device/native/plugin.ts` | the iPhone shell's Swift plugin `RouteIQNative` |
@@ -107,9 +108,9 @@ the declarations that changed.
 
 | Side | Matches | Notes |
 | --- | --- | --- |
-| Web app (`src/`) | 2 | by definition |
-| Swift port (`native/RouteIQCore`) | none yet: it predates version 1 | see its README and #33 |
-| iPhone shell plugin (`native/shell`) | 2 (`RouteIQNativePlugin`) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
+| Web app (`src/`) | 5 | by definition |
+| Swift port (`native/RouteIQCore`) | 5, in part: routes, signal tiles and bundle, reroute engine (#33 stage A) | live drive, drive log and place book not yet (versions 4 and 5 changed only live-drive and drive-log shapes); see its README and #33 |
+| iPhone shell plugin (`native/shell`) | 5 (`RouteIQNativePlugin`, unchanged since 2) | the plugin interface was added with the shell (#78, #80); the test drive and share with #86 |
 
 ## Changes
 
@@ -121,3 +122,15 @@ the declarations that changed.
   `NativeSimulatedStep`, and three optional methods on `RouteIQNativePlugin`:
   `startSimulatedRoute`, `stopSimulatedRoute` and `share`. The bridge schema gains
   `simulatedRouteRequest`, `simulatedStep` and `shareRequest`.
+- **3** (Nov 12, 2026, #74, #68): `RerouteOptions.matchStartSearchM` (the fresh route's start is
+  looked for near the car first) and `RerouteOptions.routeLostWindowSec` (old "no route" answers
+  age out); `RerouteState.lostAtSec` (the time of each counted "no route" answer; `lostPolls` is
+  its length). For the port: see the Swift-port note on PR #109.
+- **4** (Nov 12, 2026, #29, #30, #71): the live drive's robustness fixes.
+  `LiveOptions.requestTimeoutSec` (a request not answered in time is a failed answer),
+  `LiveState.pickedAtMs` and the Start event's `routeFetchedAtMs` (a drive started on the
+  plan's route counts the plan's answer as its last check). No field removed or renamed; the
+  Swift port is not affected beyond these live-drive shapes.
+- **5** (Nov 12, 2026, #107): `LiveSwitch.savingSec` (the saving the engine claimed for a switch, null when
+  none); the private drive log `DriveLog` (`DriveRecord`, `LoggedSwitch`, `LoggedSignals`, `DriveOutcome`)
+  joins the contract as data kept on the device.

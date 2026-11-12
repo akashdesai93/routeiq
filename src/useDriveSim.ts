@@ -9,7 +9,6 @@ import {
   formatDuration,
   INITIAL_CHECK_PROBES,
   INITIAL_REROUTE_STATE,
-  lineFrom,
   pointAtDistance,
   rankRoutes,
   rememberCheckProbes,
@@ -44,8 +43,10 @@ export interface DriveView {
   readonly simTimeSec: number
   /** Where the simulated car is. */
   readonly car: LngLat
-  /** The route being driven, from the car to the destination. */
-  readonly routeAhead: readonly LngLat[]
+  /** The route being driven, whole: the same array until the route changes. */
+  readonly route: readonly LngLat[]
+  /** How far along `route` the car is, in meters. */
+  readonly alongM: number
   readonly remainingM: number
   /** Directions requests this drive has made. */
   readonly requestsUsed: number
@@ -111,11 +112,11 @@ interface Run {
 const NO_SIGNALS: readonly RouteSignal[] = []
 
 function viewOf(run: Run): DriveView {
-  const ahead = lineFrom(run.route.geometry, run.clock.alongM)
   return {
     simTimeSec: run.clock.simTimeSec,
-    car: ahead[0] ?? run.route.geometry[0]!,
-    routeAhead: ahead,
+    car: pointAtDistance(run.route.geometry, run.clock.alongM)?.point ?? run.route.geometry[0]!,
+    route: run.route.geometry,
+    alongM: run.clock.alongM,
     remainingM: Math.max(0, run.routeLengthM - run.clock.alongM),
     requestsUsed: run.clock.requestsUsed,
     polling: run.inFlight !== null,

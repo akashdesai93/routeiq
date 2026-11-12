@@ -61,8 +61,9 @@ extracts on disk); see Data sources.
 
 CI runs on every pull request and every push to `main` from one workflow,
 `.github/workflows/gate.yml`. It calls `ci.yml` (`npm ci`, typecheck, lint, tests, the
-production build and its size budget, on Node 24 on Ubuntu) and `e2e.yml` (the end-to-end
-scenarios, report uploaded as the `e2e-report` artifact) every time, and the Swift tests
+production build and its size budget, the iPhone shell's web build and Xcode project, on
+Node 24 on Ubuntu) and `e2e.yml` (the end-to-end scenarios, dealt over eight runners by
+`e2e/shard.mjs`, merged into the `e2e-report` artifact) every time, and the Swift tests
 and the two macOS builds when their paths change. Its last job, `required`, is the one
 status check `main` requires: `main` is protected and every change arrives through a pull
 request. See [docs/branch-protection.md](docs/branch-protection.md).
@@ -83,7 +84,8 @@ faster, it never switches", "a wrong turn: it says I am off the route, finds a n
 gets me there", "a route outside NC/SC shows a partial light count, never 0", "saved places
 and the last trip survive a reload", "with a token Mapbox rejects, it says what to fix",
 "when a side street saves time, it is offered and wins", "when a jam builds during the
-drive, a side street found mid-drive takes me round it".
+drive, a side street found mid-drive takes me round it", "after a drive, it shows how long
+it really took against what it predicted".
 
 ```powershell
 npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
@@ -239,6 +241,10 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 removing, telling two places apart, the caps, and reading a stored
                 book back without trusting it. search.ts says when typed text is
                 worth a request and how requests are grouped into billing sessions.
+                driveLog.ts is the private drive log (#107): the recorder fed the live
+                drive's state (a record begins when the drive sets off, is written at a
+                switch and at the end), the coarse corridor key, the stored shape read
+                back without trusting it, the per-corridor summaries and the CSV export.
                 tracking.ts turns raw position fixes into a place on the route, with
                 an off-route verdict that takes patience. guidance.ts picks the turn
                 to show and the announcement that is due. speechQueue.ts is what is
@@ -301,6 +307,7 @@ src/storage/    kv.ts: the tiny key-value store the signal data on the device go
                 or memory without it; a full or blocked store reports the failed write.
                 placeBook.ts: loads, saves and clears the place book under one
                 versioned key (`routeiq.places.v1`); corrupt data is removed.
+                driveLog.ts: the same for the private drive log (`routeiq.drives.v1`).
 src/signalData.ts  Loads the signal data a set of routes needs (the tiles they touch)
                 and wires up the sources the app uses, the bundled tiles ahead of the
                 device cache and the network. askOnce wraps them for a drive that
@@ -594,6 +601,9 @@ it; moving a pin, Swap and Reset end the drive. While a drive is on, the route l
 the map show what the last check returned from the car's position, the route being
 driven is drawn in black on a white casing with the car on it, and an amber dot marks where a switch
 leaves the old route (hollow while the switch is still waiting to be confirmed).
+The map gets the route's line only when the route changes; on each fix it gets the car
+(a few hundred bytes) and the part behind the car is trimmed off the line
+(`line-trim-offset`, src/map/driveLayers.ts), for the live drive too (#94).
 
 The engine (`src/core/reroute.ts`, `decideReroute`) applies these rules in order:
 
@@ -656,12 +666,14 @@ faster route saves only 40 seconds" or "Switching: saves 3 minutes, turn in 0.8 
 | `minLeadDistanceM`, `minLeadTimeSec` | 400 m, 20 s |
 | `freewayLeadDistanceM` | 1200 m |
 | `routeLostPolls` (checks with no route along the road ahead, none between them finding the current route) | 3 |
+| `routeLostWindowSec` (a "no route" answer older than this no longer counts) | 900 s |
 | `offRouteM` | 50 m |
 | `sameRouteToleranceM` (a point is on the current route: where an alternative turns off) | 10 m |
 | `matchToleranceM`, `matchMinOverlap` (a fresh route IS the current one) | 20 m, 0.95 |
 | `matchMaxGapM` (longest stretch apart, and largest difference in length) | 400 m |
 | `matchMaxDivergenceM` (farthest a point of a stretch apart may be from the other line) | 50 m |
 | `matchIgnoreStartM` (not compared after the query point) | 150 m |
+| `matchStartSearchM` (where the fresh route starts is looked for on this first stretch of the path ahead, first) | 200 m |
 | `baselineViaSpacingM`, `baselineMaxViaPoints` (asking for the current path) | 3000 m, 6 |
 | `returnOverlapFraction` | 0.5 |
 | `requireTypicalDuration` | true |
@@ -779,6 +791,30 @@ be, so such a closure never added up). The closure is taken only once three chec
 have put a point on it; until then, or if none does, the driver finds out at the closure
 and the off-route rule takes over from there. `tests/reroute.test.ts` pins these cases.
 
+**Old "no route" answers age out (#68).** Each "no route" answer is kept with the time
+of its check, and only those from the last 15 minutes (`routeLostWindowSec`) count
+toward the three. Without it, one answer early in a long drive, then a quarter of an
+hour of "another road" answers, then two more, made three, though the first was about a
+road long since passed. The window only ever takes answers away, so it can delay a
+closure switch, never bring one sooner: three answers within 15 minutes switch exactly
+as before. At the 60 s check interval that is room for 15 checks; a poll interval set
+above 7.5 minutes would let no three answers fit, and a closure would then be found at
+the closure itself (off route). The e2e scenario "when a block ahead is closed, it
+reroutes around it" drives it end to end: a block of Main Corridor closes, Mapbox stops
+offering it, the drive's check of its own path comes back "no route" three times, and
+the drive changes to East Loop with "The road ahead on your route looks closed."
+
+**Routes that cross themselves (#74).** Where the fresh route starts is looked for on the
+first 200 m of the path ahead (`matchStartSearchM`, from 50 m behind the car), and on the
+rest only when nothing there is within 20 m (`matchToleranceM`). It used to be the nearest point of the whole
+path: under a cloverleaf bridge the later pass over it can be a meter nearer the snapped
+start than the road being driven, the comparison then started after the loop, the
+lengths differed by more than 400 m, and the current route went "unconfirmed" (a spent
+check, and a lost confirmation). 200 m is shorter than a cloverleaf loop; a loop back to the same spot within 150 m of the car would still be in the window.
+The tracker had the same flaw on a drive's first fix only (later fixes already take the
+pass that fits the progress so far): of passes about as near (15 m), it now takes the
+first in driving order.
+
 **Matching cost (#51).** The comparison walks both lines in 10 m steps. Each step looks
 only at the segments of the other line in the 3 x 3 grid cells (50 m wide, a bounding-box
 index built per comparison) around it, and the match stops at the first stretch that
@@ -894,6 +930,12 @@ is marked "via side streets" in the route list.
   plus a spur or loop out to the via: never faster, and not a side street. `coversRoute`
   checks one way only, so the probe's extra roads are allowed, and the sampling between
   vertices keeps a real cut-through that leaves a long straight segment.
+- **The comparison is linear.** Both tests walk along the line and look at the few
+  segments after the last one a point was near; only a miss measures further (the whole
+  line for the first 8 misses, then a segment grid, `segmentGrid` in src/core/geo.ts, the
+  one the reroute matcher uses). A point counts as near only when a segment really is
+  within 10 m, so the answers are those of measuring every segment (#93: a 60 km plan
+  went from about 0.4 s to under 5 ms on a desktop).
 
 | `DEFAULT_PROBE_BUDGET` | Default | Meaning |
 | --- | --- | --- |
@@ -1038,8 +1080,10 @@ destination stops and shows a short summary (trip time, the switches and why).
 with the Start tap: the recommended one, a slower one picked on purpose, or a side-street
 route the plan's probes found (`source: 'probe'`). When the first good fix is on that
 route's line (the tracker's own test, `offRouteM` 50 m), the drive starts on it with no
-request of its own, and the plan's answer counts as the first one: the first check goes
-out a poll interval (60 s) later. A first fix that is not on it (the trip was planned
+request of its own, and the plan's answer counts as the first one, as old as it is
+(#71): "checked N s ago" counts from when the plan's answer came, not from the Start
+tap, and the first check goes out a poll interval (60 s) after the plan, at once when
+the plan is older than that. A check alone never switches (confirmation needs two). A first fix that is not on it (the trip was planned
 from somewhere else) plans a route from there, as before. From then on the engine judges
 the picked route like any other. Mapbox does not offer a side street by itself, so a
 check from the car usually lacks it; the existing path check (`baselineProbe`, one more
@@ -1164,6 +1208,30 @@ comes, the answer is taken like any check (minimum saving, confirmation, cooldow
 not as off-route. Signal counts come through the drive's once-only sources
 (`askOnce`): bundled tiles, never an Overpass retry on a check.
 
+**A request that never answers** (#29). Only one route request is out at a time, so a
+connection that hangs (a dead zone) would hold back every check after it. A request not
+answered within 30 seconds (`requestTimeoutSec`, counted from when it was sent and
+covering everything one check asks) is given up: it is cancelled, and taken as a failed
+answer. A check then changes nothing but the engine's failed-poll counter, the quiet
+line says "Staying: could not check for faster routes (The route request timed out.)",
+and the next check goes out at the usual minute; an answer that turns up later is
+ignored. A search for a new route off the route is asked again after `replanGapSec`. A
+first route that never comes ends the start with "Could not find a route from here. The
+route request timed out.", as a failed one does. The limit is generous on purpose: a
+browser keeps a request going for minutes, while the iPhone shell's own limit is 20 s a
+request, and a check can be two or three requests one after another. In a replay the
+limit is stretched by the replay speed, like the request gap.
+
+**The drive's clock** (#30, `src/device/clock.ts`). Tracking only believes a fix that is
+newer than the last one, so every fix is stamped on arrival with one session clock, the
+same one the drive itself runs on (the browser's GPS, the iPhone shell's GPS and the
+session all share it). It follows the wall clock forward, so time with the phone asleep
+counts, but a step back of the wall clock (NTP or the carrier correcting it, or the time
+set by hand) is absorbed: the clock carries on from where it was. Before, a step back of
+30 s left every fix for 30 s "out of order" and the car stood still on the map, with no
+turn prompts. `performance.now()` was not used because it does not advance while an
+Apple device sleeps (w3c/hr-time#115). The arrival time is still shown on the wall clock.
+
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
 Nov 11, 2026: both instruction parameters need `steps=true`, no profile is excluded,
@@ -1209,6 +1277,58 @@ current route).
 positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audio over
 CarPlay or Bluetooth, and battery use have not been tried. The checklist for the first
 real-phone test is [docs/phone-testing.md](docs/phone-testing.md).
+
+## Drive log (private)
+
+RouteIQ's edge over the big navigation apps is the owner's own repeated drives, so each
+live drive is kept in a **private drive log** on the device (#107): what RouteIQ predicted
+at the start against what the drive really took. Rules: `src/core/driveLog.ts`; storage:
+`src/storage/driveLog.ts`; screen: `src/DrivesPanel.tsx`.
+
+- **What a drive records:** when it began (the moment it set off on its first route) and
+  ended; a coarse **corridor key** for its two ends (below); the first route's source
+  (`provider` for Mapbox, `probe` for a side street; not its id, which is a hash of the
+  exact geometry and could confirm a guessed route); the
+  first route's traffic-aware time then (the prediction), its length and its lights
+  (unknown stays unknown, a partial count is a lower bound); the actual time; each switch
+  with the saving the engine claimed and whether it was kept or turned down with "Keep
+  previous route"; how often it said "off the route"; the route requests used; and the
+  other app's ETA if one was noted.
+- **Saving actually made**, for the last kept switch of a drive: the time the route left was predicted to
+  take from there (the new route's time plus the claimed saving) minus the time the rest
+  of the drive really took. It is measured against a prediction, not against the road not
+  taken, and is unknown for an earlier switch (its window would take in the gains of the
+  later ones), a closure, a new route after leaving the route, and a drive that did not
+  arrive.
+- **Another app's ETA.** Under Start drive, "Other app's ETA (minutes)" takes what Google
+  Maps or Waze showed for the same trip at departure ("19", "19 min" or "1:05"), for a
+  side-by-side test. Optional; it is read when the drive sets off and kept with it only.
+- **When it writes:** when a switch is made or turned down (so a drive the app does not
+  see the end of is still kept, as "not finished") and when the drive arrives or End is
+  tapped. Nothing is written or computed on the 1-second tick. A development replay and the
+  iPhone app's test drive (simulated GPS) are not logged.
+- **Drives screen:** the Drives button on the plan screen. Newest drive first (predicted,
+  took, the difference, the other app's ETA, switches), then a summary per corridor
+  (Corridor A, B, ... by first drive): the median error overall, by hour of the start and
+  by route source ("Mapbox routes: under-estimated by 2 min"). Only arrived drives are
+  compared; a drive ended early or not finished is listed and counted, not compared.
+- **Export:** the log as CSV (one row per drive, start time in UTC, hour in local time),
+  through the share sheet (in the iPhone app, the app's own; in a browser, where it offers
+  one), or Copy. **Clear drive log** asks once,
+  then removes it from the device.
+- **Not yet:** the correction factor per corridor and route source used when ranking is a
+  later step (#115), behind a setting. It will never loosen the reroute thresholds.
+
+| Setting (`DEFAULT_DRIVE_LOG_OPTIONS`) | Value | Meaning |
+| --- | --- | --- |
+| `corridorGridDeg` | 0.01° | each end is rounded to this grid (about 1.1 km) before the corridor key is made |
+| `maxDrives` | 500 | drives kept; the oldest go first |
+| `maxOtherAppMin` | 600 | the largest other-app ETA accepted, in minutes |
+
+The stored shape is versioned: localStorage key `routeiq.drives.v1`, value
+`{ "version": 1, "drives": [...] }` (`DriveLog` in the core contract, docs/contracts.md). A
+value of another version, or text that is not one, is discarded; a damaged record is
+dropped by itself, and only known fields are read back.
 
 ## Pinned versions (checked Nov 11, 2026)
 
@@ -1293,6 +1413,20 @@ with the centre of the map rounded to four decimals (to put nearby results first
 random session token that groups the requests for billing and says nothing about you.
 Picking a suggestion sends that suggestion's id. Nothing typed is logged or stored by
 RouteIQ; a destination picked from search is kept in the recent list (below).
+
+**The drive log** (Drives screen) lives only on the device, in localStorage under
+`routeiq.drives.v1` (in the iPhone shell, the app's own web storage on the phone). It
+holds times, durations, distances, light counts, switch savings, request counts and, for
+each drive, the route's source (Mapbox or side street, never the route itself or its
+id) and a corridor key: the drive's first position and its destination, each rounded
+to about a kilometre and hashed together, so a record holds no coordinate, address or
+place name. The rounding is what protects you; the hash only makes the key short. Someone
+holding the log and guessing a pair of 1 km squares could confirm the guess, so the log
+says roughly which areas you drive between and when, and is treated as private. It is
+never sent anywhere: the only way out is Export, which hands the CSV to the share sheet or
+the clipboard for you to send yourself. "Clear drive log" removes all of it, as does
+clearing the site's (or the app's) data. The other app's ETA you type is kept with its
+drive only.
 
 **Saved places, recent destinations and the last trip** live only in this browser's
 localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They
