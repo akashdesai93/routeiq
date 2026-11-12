@@ -247,7 +247,8 @@ function usableHeading(heading: number | null): heading is number {
  *   within `offRouteM` of the fix. Where the route comes by the same spot
  *   more than once, the pass that fits the progress so far is taken (the
  *   first one at or ahead of the last position that the car could have
- *   reached), not the globally nearest point.
+ *   reached), not the globally nearest point. With nothing to go on (the
+ *   first fix, no hint), the first of the passes about as near as any.
  * - **No going back on noise.** A snap up to `backwardToleranceM` behind the
  *   last position keeps the position. A snap farther back, or farther ahead
  *   than `maxSpeedMps` allows, is believed after `jumpFixes` fixes in a row;
@@ -291,7 +292,11 @@ export function trackFix(
     // Off the line: progress stays where it was.
     alongM = last ?? nearest.alongM
   } else if (last === null) {
-    pass = closest(passes)
+    // Nothing to go on: of the passes about as near as any, the first in driving order. A
+    // drive starts at the start of its route, and at a self-crossing (a cloverleaf) the
+    // later pass can be a meter nearer (#74).
+    const nearM = closest(passes).distanceM + SAME_PASS_SLACK_M
+    pass = passes.find((p) => p.distanceM <= nearM)!
     alongM = pass.alongM
   } else if (state === null) {
     // A route taken up again: the pass nearest to where the car is known to be.
