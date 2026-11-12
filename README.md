@@ -353,6 +353,7 @@ src/DrivePanel.tsx The "Simulate drive" controls, the thresholds, the what-if co
 src/RoutePanel.tsx Route list in rank order: ETA, distance, signal count, difference from
                 typical time, the reason for its place, and a "Recommended" badge on
                 the top route. The highlight follows the selection, not the rank.
+                Under it the delta row (core routeDelta) and Start drive.
 src/config.ts   Reads and checks VITE_MAPBOX_TOKEN.
 src/App.tsx     Page shell; owns origin and destination (search, saved place, location,
                 drag, swap, reset) and restores the last trip. Shows setup
@@ -1065,9 +1066,37 @@ durations are carried but not used for the choice yet.
 | `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
 | `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
 
+### The plan and route screens (#85)
+
+Every screen is in the approved design (`design/README.md`, "The merged direction"), dark:
+black glass, Inter for words, Barlow Condensed for figures (the two faces the drive view
+bundles; no new fonts), a white button for the one primary action, amber only for news in
+the drive view. On a phone (up to 700 px) the map is on top and the trip and the routes
+sit in one sheet under it, its rounded top lapping over the map; on a wide screen the panel
+stays at the right.
+- **A route card** leads with its time, large; beside it the name with the "Recommended"
+  badge (filled white) and the "via side streets" tag (outlined) for a route a probe found,
+  then the distance and the light count. A count that is not whole says so under it in
+  words ("Signal data for part of this route is missing, so this is a lower bound."; "Signal
+  data for this route could not be loaded."), and is never shown as 0.
+- **The delta row**, under the list: what Route 1 gives against Route 2, "−8 min · −2 lights ·
+  −3 mi" (`routeDelta` in `src/core/rank.ts`). Minutes and miles are rounded (miles to a
+  tenth under 10). Lights are compared only when both counts are full; otherwise the cell
+  reads "Lights: can't compare".
+- **Start drive** is the white button under it, with "Switches by itself if a faster route
+  holds up".
+- **The iPhone shell**: the token screen and the top bar's "Change token" and "Drive
+  diagnostics" are unchanged in place, in the same dark theme.
+- **Safe areas.** The page asks to run edge to edge (`viewport-fit=cover`) and pads itself
+  with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
+  sits below the notch and the content clear of the home indicator and the rounded corners.
+  The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
+  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
+  gaps apply; the shell's layout is the same as before this change.
+
 ## Live drive
 
-"Start drive" at the top of the route list is the one tap. After it nothing needs
+"Start drive" under the route list is the one tap. After it nothing needs
 touching: RouteIQ asks for the location permission, starts on the route you picked,
 follows the car, checks Mapbox for faster routes,
 changes route by itself and announces it, speaks the turn prompts, and at the

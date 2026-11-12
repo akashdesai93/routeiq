@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   MIN_SEARCH_CHARS,
@@ -26,12 +24,10 @@ import {
   SEARCH_TYPES,
 } from '../src/providers/mapbox/searchClient.ts'
 import { createSearchRunner, type SearchState } from '../src/search/searchRunner.ts'
+import { fixture } from './helpers/fixtures.ts'
 
 // Hand-written bodies shaped like Search Box API responses, about public landmarks only.
 // No test here touches the network.
-function fixture(name: string): unknown {
-  return JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8'))
-}
 const SUGGEST = fixture('search.suggest.json') as { suggestions: unknown[] }
 const RETRIEVE = fixture('search.retrieve.json') as { features: Record<string, unknown>[] }
 const ERROR = fixture('search.error.json')

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   armGuidance,
@@ -13,14 +11,11 @@ import {
 import { parseDirections } from '../src/providers/mapbox/adapter.ts'
 import { buildDirectionsUrl } from '../src/providers/mapbox/client.ts'
 import { at } from './helpers/driveWorld.ts'
+import { fixture } from './helpers/fixtures.ts'
 
 // Turn guidance: what the Mapbox adapter carries per route (banner and voice instructions,
 // or instructions made up from the steps), and the pure functions that pick what to show
 // and what to say. Hand-written bodies; no network.
-
-function fixture(name: string): unknown {
-  return JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8'))
-}
 
 function guidanceOf(body: unknown): readonly GuidanceStep[] {
   const result = parseDirections(body)
