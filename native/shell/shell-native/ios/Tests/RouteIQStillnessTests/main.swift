@@ -108,6 +108,11 @@ do {
     var g = RouteIQStillness()
     _ = parked(&g, from: 0, seconds: 60)
     check(g.fix(lat: lat, lng: lng, speedMps: nil, nowSec: 60.3), "a fix with no speed is passed on")
+    // Not only by the keep-alive: every fix with no speed goes through, half a second apart, and nothing is held after it.
+    var allUnknown = true
+    for i in 1...5 { allUnknown = allUnknown && g.fix(lat: lat, lng: lng, speedMps: nil, nowSec: 60.3 + Double(i) * 0.5) }
+    check(allUnknown, "every fix with no speed is passed on, even within keepAliveSec of the last one")
+    check(!g.holding(nowSec: 63), "a fix with no speed ends the hold")
 }
 
 do {
