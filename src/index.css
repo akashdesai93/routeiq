@@ -102,6 +102,7 @@ button:hover { background: var(--raised2); }
 .route-delta-cell .unit { color: var(--dim); font-size: 19px; font-weight: 500; }
 .route-delta-words { align-self: center; color: var(--dim); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.25; white-space: normal; }
 .hint { color: var(--dim); font-size: 13px; }
+.offline-note { margin: 0 0 8px; padding: 10px 12px; border-radius: 16px; background: var(--raised); color: var(--fg); font-size: 14px; }
 .handoff { margin: 4px 0 8px; font-size: 14px; }
 button.link { padding: 0; border: 0; background: none; font-size: inherit; color: var(--fg); text-decoration: underline; }
 button.link:hover { background: none; color: #ffffff; }

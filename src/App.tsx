@@ -12,6 +12,7 @@ import {
 } from './core/index.ts'
 import { tokenStatus, type TokenStatus } from './config.ts'
 import { isNativeShell } from './device/native/index.ts'
+import { useOnline } from './device/offline.ts'
 import { DrivePanel } from './DrivePanel.tsx'
 import { FrozenWhile } from './FrozenWhile.tsx'
 import { DrivesPanel } from './DrivesPanel.tsx'
@@ -102,6 +103,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
   // Inside the iPhone shell: a test drive, where a made-up car moved by the app's native code stands in
   // for the GPS, so reroutes and the voice can be tried at home with the phone locked.
   const inShell = isNativeShell()
+  const online = useOnline()
   const [testDriveSetup, setTestDriveSetup] = useState<TestDriveSetup>(DEFAULT_TEST_DRIVE_SETUP)
   const testDrive = useMemo(
     () => (inShell && testDriveSetup.enabled ? { origin: originPosition, preset: testDriveSetup.preset, multiplier: testDriveSetup.multiplier } : null),
@@ -269,6 +271,11 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
           {/* Hidden during a live drive (live.css): not rendered again until the drive ends (#95). */}
           <FrozenWhile frozen={live.active}>
           <div className="side">
+            {!online && !inShell && (
+              <p className="hint offline-note" role="status">
+                No connection. RouteIQ opens without one, but finding routes and traffic needs it.
+              </p>
+            )}
             <PlanPanel
               pins={pins}
               token={token}
@@ -302,6 +309,12 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
                 <OtherAppEtaField value={otherEtaText} problem={otherEta.problem} onChange={setOtherEtaText} />
                 {import.meta.env.DEV && <ReplayPanel setup={replaySetup} onChange={setReplaySetup} />}
                 {inShell && <TestDrivePanel setup={testDriveSetup} onChange={setTestDriveSetup} />}
+                {!inShell && (
+                  <p className="hint home-screen-note">
+                    Added to the Home Screen it is the same: iPhone stops a web app&rsquo;s GPS when the phone locks. For
+                    drives with the phone locked, use the RouteIQ iPhone app.
+                  </p>
+                )}
               </>
             }
           >

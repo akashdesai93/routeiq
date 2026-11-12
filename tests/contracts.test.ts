@@ -2,38 +2,31 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CORE_CONTRACT_VERSION, EMPTY_PLACE_BOOK, serializePlaceBook, type PlaceBook } from '../src/core/index.ts'
+import { CONTRACT_CHANGES_DIR, CONTRACT_SNAPSHOT, contractProblems, isChangeFile, nextSnapshot, type ChangeFile, type ContractSnapshot } from './helpers/contractCheck.ts'
 import { CONTRACT_ROOTS, CONTRACT_SCHEMAS, contractHash, contractSurface, declarationsOf, tokenize } from './helpers/contractSurface.ts'
 
 // PLAN step 10 (#7): the core contracts are versioned. The shapes the Swift port and the iPhone
 // shell depend on (docs/contracts.md) are read from the source, with everything they refer to,
-// and compared with the snapshot in docs/contracts/core-contract.json. A change of shape without
-// a bump of CORE_CONTRACT_VERSION fails here. To change a contract on purpose:
-//   1. bump CORE_CONTRACT_VERSION (src/core/contract.ts),
-//   2. UPDATE_CONTRACT=1 npx vitest run tests/contracts.test.ts,
-//   3. say in docs/contracts.md what changed, and in native/RouteIQCore/README.md what the Swift port matches.
-
-const SNAPSHOT = 'docs/contracts/core-contract.json'
-
-interface Snapshot {
-  readonly version: number
-  readonly hash: string
-  /** Every version there has been, oldest first, with its hash. */
-  readonly history: readonly { readonly version: number; readonly hash: string }[]
-  readonly declarations: Record<string, string>
-}
+// and compared with the snapshot in docs/contracts/core-contract.json. To change a contract (#169):
+//   1. UPDATE_CONTRACT=1 npx vitest run tests/contracts.test.ts (regenerates the declarations),
+//   2. add docs/contracts/changes/<your-branch>.md saying what changed, for the Swift port.
+// Do not bump CORE_CONTRACT_VERSION: the pull request that ports the Swift side does, once, and
+// deletes the change files it ported. The rules are in tests/helpers/contractCheck.ts.
 
 const surface = contractSurface()
 const hash = contractHash(surface)
-const readSnapshot = (): Snapshot | null => (existsSync(SNAPSHOT) ? (JSON.parse(readFileSync(SNAPSHOT, 'utf8')) as Snapshot) : null)
+const readSnapshot = (): ContractSnapshot | null =>
+  existsSync(CONTRACT_SNAPSHOT) ? (JSON.parse(readFileSync(CONTRACT_SNAPSHOT, 'utf8')) as ContractSnapshot) : null
+const changeFiles = (): ChangeFile[] =>
+  existsSync(CONTRACT_CHANGES_DIR)
+    ? readdirSync(CONTRACT_CHANGES_DIR)
+        .filter(isChangeFile)
+        .sort()
+        .map((name) => ({ name, text: readFileSync(join(CONTRACT_CHANGES_DIR, name), 'utf8') }))
+    : []
 
 if (process.env.UPDATE_CONTRACT === '1') {
-  const old = readSnapshot()
-  if (old !== null && old.hash !== hash && old.version === CORE_CONTRACT_VERSION) {
-    throw new Error(`The contract changed: bump CORE_CONTRACT_VERSION (now ${CORE_CONTRACT_VERSION}) before regenerating ${SNAPSHOT}.`)
-  }
-  const history = old === null ? [] : old.history.filter((h) => h.version !== CORE_CONTRACT_VERSION)
-  const next: Snapshot = { version: CORE_CONTRACT_VERSION, hash, history: [...history, { version: CORE_CONTRACT_VERSION, hash }], declarations: surface }
-  writeFileSync(SNAPSHOT, `${JSON.stringify(next, null, 2)}\n`)
+  writeFileSync(CONTRACT_SNAPSHOT, `${JSON.stringify(nextSnapshot(readSnapshot(), surface, hash, CORE_CONTRACT_VERSION), null, 2)}\n`)
 }
 
 /** The names of an interface's fields as written, with whether each is optional. */
@@ -54,21 +47,9 @@ function fieldsOf(text: string): Map<string, boolean> {
 }
 
 describe('core contracts (PLAN step 10, #7)', () => {
-  it('a change of shape is not possible without a bump of CORE_CONTRACT_VERSION', () => {
-    const snapshot = readSnapshot()
-    expect(snapshot, `${SNAPSHOT} is missing: run UPDATE_CONTRACT=1 npx vitest run tests/contracts.test.ts`).not.toBeNull()
-    const latest = snapshot!.history.at(-1)!
-    if (snapshot!.hash !== hash) {
-      const changed = Object.keys({ ...surface, ...snapshot!.declarations }).filter((k) => surface[k] !== snapshot!.declarations[k])
-      const hint =
-        CORE_CONTRACT_VERSION === latest.version
-          ? `bump CORE_CONTRACT_VERSION (src/core/contract.ts, now ${CORE_CONTRACT_VERSION}), then run UPDATE_CONTRACT=1 npx vitest run tests/contracts.test.ts`
-          : `run UPDATE_CONTRACT=1 npx vitest run tests/contracts.test.ts to record version ${CORE_CONTRACT_VERSION}`
-      expect.fail(`The core contract changed (${changed.join(', ') || 'a schema file'}): ${hint}, and note the change in docs/contracts.md.`)
-    }
-    expect(snapshot!.version).toBe(CORE_CONTRACT_VERSION)
-    expect(latest).toEqual({ version: CORE_CONTRACT_VERSION, hash })
-    expect(snapshot!.declarations).toEqual(surface)
+  it('the snapshot matches the source, and a change of shape since the last version is described', () => {
+    const problems = contractProblems({ snapshot: readSnapshot(), surface, hash, version: CORE_CONTRACT_VERSION, changeFiles: changeFiles() })
+    expect(problems, problems.join('\n')).toEqual([])
   })
 
   it('the version history only goes up, and each version has a shape of its own', () => {
