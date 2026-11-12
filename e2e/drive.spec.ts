@@ -202,7 +202,7 @@ test.describe('on a phone', () => {
     await app.routesReady()
     const turnCard = page.getByLabel('Next turn')
     const sheet = page.getByLabel('Live drive')
-    const mute = page.getByRole('button', { name: 'Mute' })
+    const voice = page.getByRole('switch', { name: /^Voice/ })
 
     const log = await app.drive({
       maxSec: 70,
@@ -217,7 +217,7 @@ test.describe('on a phone', () => {
             // One line: the time left, and the arrival time.
             await expect(sheet.locator('.live-eta')).toHaveText(/^\d+ minArrive \d{1,2}:\d{2} AM$/)
             // Two figures at a glance: the lights, the distance left and the voice are not on this screen.
-            await expect(mute).toHaveCount(0)
+            await expect(voice).toHaveCount(0)
             await expect(sheet).not.toContainText('Lights')
             await expect(page.getByRole('button', { name: 'End' })).toBeVisible()
             // The turn card and the sheet leave the car, in the middle of the map, in view.
@@ -234,16 +234,18 @@ test.describe('on a phone', () => {
             await expect(sheet.locator('[data-tile="distance"]')).toHaveText(/^Distance\d+ mi$/)
             await expect(sheet.locator('[data-tile="auto-switch"]')).toHaveText('Auto-switchOn')
             await expect(sheet).toContainText('Staying: current route is still the fastest · checked')
-            await expect(mute).toHaveAttribute('aria-pressed', 'false')
+            await expect(voice).toBeChecked()
             await app.snap('More: lights, distance, the automatic switch and the voice')
             // Everything tapped is 44px or more.
             for (const button of await sheet.getByRole('button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
 
-            await mute.click()
-            await expect(page.getByRole('button', { name: 'Unmute' })).toHaveAttribute('aria-pressed', 'true')
-            await page.getByRole('button', { name: 'Unmute' }).click()
+            await voice.click()
+            await expect(voice).not.toBeChecked()
+            await expect(voice).toHaveText(/^Voice\s*Off/)
+            await voice.click()
+            await expect(voice).toBeChecked()
             await page.getByRole('button', { name: 'Less' }).click()
-            await expect(mute).toHaveCount(0)
+            await expect(voice).toHaveCount(0)
           },
         },
       ],
