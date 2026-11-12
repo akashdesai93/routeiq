@@ -1542,6 +1542,8 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.view().moment).toMatchObject({ stage: 'pending' })
     s.send({ type: 'keep-previous', nowMs: s.nowMs() })
     expect(s.view().moment).toMatchObject({ stage: 'kept' })
+    // No check ran for this decision: no route count and no saving, never 0 (#175).
+    expect(s.state.lastDecision).toMatchObject({ code: 'kept-previous', routes: null, savingSec: null })
     // C turns up at the next check: a different route, not the one turned down.
     cruise(s, 20, (xM) => routesAt(xM, { A: 1300, C: 1000 }))
     expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })

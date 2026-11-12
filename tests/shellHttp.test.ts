@@ -440,6 +440,14 @@ describe('what each drive check concluded, in the diagnostics (so "was there a f
     expect(text).not.toMatch(/\d\.\d|-\d|script/)
   })
 
+  it('takes only the table\'s own words: a name from the object prototype is "other" too', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (const code of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) log.checked(code, 1, null)
+    const text = log.text()
+    expect(text).toContain('checks: 4: other 4')
+    expect(text).not.toMatch(/function|native code|toString|constructor|__proto__/)
+  })
+
   it('says unknown when no check could compare, and shows no check lines before the first check', () => {
     const log = createDriveDiagnostics(() => 0)
     expect(log.text()).not.toContain('checks:')
