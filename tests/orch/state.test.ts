@@ -208,6 +208,15 @@ describe('sessions in the new format', () => {
 })
 
 describe('what the owner reads', () => {
+  it('keeps a table row whole whatever a session writes (CodeQL js/incomplete-sanitization on #165)', () => {
+    const c = [comment(1, '2026-11-12T11:00:00Z', status('cloud-x', 'role: builder\nstate: working\nworking on: #5 path C:\\a\\| b | c'))]
+    const row = renderBoard(derive(board(c))).split('\n').find((l) => l.startsWith('| `cloud-x`')) ?? ''
+    // A cell boundary is a pipe preceded by an even number of backslashes.
+    const boundaries = [...row.matchAll(/(\\*)\|/g)].filter((m) => m[1].length % 2 === 0)
+    expect(boundaries).toHaveLength(7)
+  })
+
+
   it('the board says plainly when there is no orchestrator', () => {
     expect(renderBoard(at())).toContain('Orchestrator: **no heartbeat on this issue**. The understudy is acting.')
   })
