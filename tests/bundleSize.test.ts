@@ -13,6 +13,8 @@ describe('bundle ceiling (#170)', () => {
   it('the shipped budget file has every number the checks need', async () => {
     const shipped = (await import('../scripts/bundle-budget.json', { with: { type: 'json' } })).default
     expect(budgetProblems(shipped)).toEqual([])
+    // The ceiling the owner set on #170 (option (b)): changing it is an owner decision.
+    expect(shipped.ceiling).toEqual({ appJs: 480_000, css: 85_000 })
     // The growth limits the owner chose with option (a) on #170.
     expect(shipped.growthPerPr).toEqual({ appJs: 4000, css: 2000 })
     expect(shipped.alertAt).toBe(0.9)

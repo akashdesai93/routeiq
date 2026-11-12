@@ -67,7 +67,7 @@ instead of "measured + 10 %" re-based in whichever feature PR hit the wall (by 0
 
 | key | what | set by |
 | --- | --- | --- |
-| `ceiling.appJs`, `ceiling.css` | the most the app's own JavaScript (without Mapbox GL JS) and the CSS may be: a product number, what the first screen may cost on a phone | the owner, by decision on an issue (`needs-human`) |
+| `ceiling.appJs`, `ceiling.css` | the most the app's own JavaScript (without Mapbox GL JS) and the CSS may be: a product number, what the first screen may cost on a phone: 480,000 and 85,000 (owner, #170, 2026-11-12) | the owner, by decision on an issue (`needs-human`) |
 | `growthPerPr.appJs`, `growthPerPr.css` | the most one PR may add: 4,000 and 2,000 | the owner (#170) |
 | `alertAt` | the board flags `main` above this share of the ceiling: 0.9 | the owner (#170) |
 

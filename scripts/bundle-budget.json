@@ -1,8 +1,8 @@
 {
   "note": "Bundle size (#170), in bytes, minified, not compressed (scripts/check-bundle-size.mjs). ceiling: the owner's number, never changed by a feature PR. growthPerPr: the most a PR may add to each without the size-ok label. alertAt: the fleet board flags main above this share of the ceiling.",
   "ceiling": {
-    "appJs": 460000,
-    "css": 80000
+    "appJs": 480000,
+    "css": 85000
   },
   "growthPerPr": {
     "appJs": 4000,
