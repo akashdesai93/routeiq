@@ -71,11 +71,13 @@ export function hasSimHook(text) {
  * @param {string} [token] a real public token for the map, when the run has one
  * @returns {string}
  */
-export function injectSim(html, base, token = '') {
+export function injectSim(html, base, token = '', { map = 'on' } = {}) {
   if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}$/.test(base)) throw new Error('The stub server must be on this machine: http://127.0.0.1:<port>');
   if (token !== '' && !/^pk\.[A-Za-z0-9._-]+$/.test(token)) throw new Error('The map token for the simulator must be a public token (pk.)');
   if (hasSimHook(html)) throw new Error('index.html already loads the simulator drive script');
   if (!html.includes(BRIDGE_TAG)) throw new Error('index.html has no bridge script: run "npm run build" first');
+  if (map !== 'on' && map !== 'off') throw new Error('The simulator map setting is "on" or "off"');
   const tokenPart = token === '' ? '' : ` data-token="${token}"`;
-  return html.replace(BRIDGE_TAG, `${BRIDGE_TAG}\n    <script src="/${SIM_FILE}" data-base="${base}"${tokenPart}></script>`);
+  const mapPart = map === 'off' ? ' data-map="off"' : '';
+  return html.replace(BRIDGE_TAG, `${BRIDGE_TAG}\n    <script src="/${SIM_FILE}" data-base="${base}"${tokenPart}${mapPart}></script>`);
 }

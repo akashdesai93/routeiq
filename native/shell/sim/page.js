@@ -105,6 +105,16 @@ export function install(win, script) {
   const doc = win.document
   const realToken = script.dataset.token ?? ''
   const mapStub = realToken === ''
+  const mapOff = script.dataset.map === 'off'
+  if (mapOff) {
+    // No WebGL: the app's map says it could not start and the drive goes on without it
+    // (Mapbox GL crashes the web view's content process in a simulator without a GPU).
+    const getContext = win.HTMLCanvasElement.prototype.getContext
+    win.HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+      if (/webgl/i.test(String(kind))) return null
+      return getContext.call(this, kind, ...rest)
+    }
+  }
 
   try {
     win.localStorage.setItem(SHELL_TOKEN_KEY, mapStub ? SIM_TOKEN : realToken)
@@ -326,6 +336,7 @@ export function install(win, script) {
       transport,
       nativeProblem,
       mapStub,
+      mapOff,
       plugin: real !== undefined && real !== null,
       appState,
       counts: { ...counts },

@@ -270,6 +270,10 @@ export async function runDrive({ device, stub, outDir, gps = 'start', drive = DE
   result.gps = mode
 
   // The evidence.
+  // The page script counts its reports from 1 each time the page loads; a second
+  // load means the web view reloaded the app (and lost whatever it was doing).
+  const loads = stub.reports.filter((r) => r.seq === 1).length
+  if (loads > 1) note(`The page loaded ${loads} times: the web view reloaded the app during the run.`)
   const final = latest()
   const lines = final?.spoken ?? []
   const directions = stub.directions.map(({ corners: _corners, ...rest }) => rest)
@@ -328,7 +332,7 @@ function summarize({ verdict, result, shots, notes, final, lines, directions, un
   const mark = (pass) => (pass ? 'pass' : 'FAIL')
   const out = []
   out.push(`## Simulator drive: ${verdict.pass && result.completed ? 'passed' : 'FAILED'}`, '')
-  out.push(`The shell app in the iOS Simulator, driven along the made-up road network with a wrong turn. ${seconds} s, GPS mode \`${result.gps}\`, the page reached the stub through \`${final?.transport ?? 'nothing'}\`, map ${final?.mapStub === false ? 'from Mapbox (secret token)' : 'drawn from the made-up roads (no token)'}.`, '')
+  out.push(`The shell app in the iOS Simulator, driven along the made-up road network with a wrong turn. ${seconds} s, GPS mode \`${result.gps}\`, the page reached the stub through \`${final?.transport ?? 'nothing'}\`, map ${final?.mapOff === true ? 'off (WebGL switched off by the page script, so the app drives without a map)' : final?.mapStub === false ? 'from Mapbox (secret token)' : 'drawn from the made-up roads (no token)'}.`, '')
   if (!result.completed) out.push(`**The run stopped early:** ${result.stoppedAt}`, '')
   out.push('| Check | Result | What was seen |', '| --- | --- | --- |')
   for (const c of verdict.checks) out.push(`| ${c.name} | ${mark(c.pass)} | ${c.detail} |`)

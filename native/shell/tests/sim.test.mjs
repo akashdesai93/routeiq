@@ -55,6 +55,9 @@ test('the simulator script is added once, after the bridge, and only for a stub 
   assert.throws(() => injectSim(BUILT, 'http://127.0.0.1.example.com:80'), /this machine/);
   assert.throws(() => injectSim(BUILT, 'http://127.0.0.1:8521', 'sk.secret'), /public token/);
   assert.match(injectSim(BUILT, 'http://127.0.0.1:8521', 'pk.abc.def'), /data-token="pk\.abc\.def"/);
+  assert.match(injectSim(BUILT, 'http://127.0.0.1:8521', '', { map: 'off' }), /data-map="off"/);
+  assert.doesNotMatch(injectSim(BUILT, 'http://127.0.0.1:8521'), /data-map/);
+  assert.throws(() => injectSim(BUILT, 'http://127.0.0.1:8521', '', { map: 'maybe' }), /"on" or "off"/);
 });
 
 test('the page script does nothing without a stub on this machine', () => {

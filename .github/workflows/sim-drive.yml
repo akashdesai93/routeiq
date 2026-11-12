@@ -20,6 +20,11 @@ on:
         default: start
         type: choice
         options: [start, set]
+      map:
+        description: "The map: 'off' (WebGL switched off in the page; Mapbox GL crashes the simulator's web view on a runner without a GPU) or 'on'"
+        default: 'off'
+        type: choice
+        options: ['off', 'on']
       device:
         description: 'Simulator device name (empty: a plain iPhone on the newest iOS runtime)'
         default: ''
@@ -94,6 +99,7 @@ jobs:
       - name: Add the simulator drive's page script
         env:
           MAPBOX_PUBLIC_TOKEN_SIM: ${{ secrets.MAPBOX_PUBLIC_TOKEN_SIM }}
+          SIM_MAP: ${{ inputs.map || 'off' }}
         run: |
           if [ -z "$MAPBOX_PUBLIC_TOKEN_SIM" ]; then
             echo "::notice::No MAPBOX_PUBLIC_TOKEN_SIM secret: the map is a drawing of the made-up roads."

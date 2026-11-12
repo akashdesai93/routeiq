@@ -10,6 +10,11 @@
 //
 // MAPBOX_PUBLIC_TOKEN_SIM (optional, a repository secret): a real public
 // token for the map. Route requests are answered by the stub either way.
+//
+// SIM_MAP (optional, 'off' by default): 'off' makes WebGL unavailable to the
+// page, so the app shows "The map could not start" and drives without a map.
+// Mapbox GL in the simulator on a hosted macOS runner (no GPU) kills the web
+// view's content process, which reloads the page and loses the drive.
 import { build } from 'esbuild';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +36,8 @@ async function prepareWww() {
   const indexPath = path.join(root, 'www/index.html');
   if (!existsSync(indexPath)) throw new Error('www/index.html is missing. Run "npm run build" first.');
   const token = (process.env.MAPBOX_PUBLIC_TOKEN_SIM ?? '').trim();
-  writeFileSync(indexPath, injectSim(readFileSync(indexPath, 'utf8'), `http://127.0.0.1:${port}`, token));
+  const map = (process.env.SIM_MAP ?? '').trim() || 'off';
+  writeFileSync(indexPath, injectSim(readFileSync(indexPath, 'utf8'), `http://127.0.0.1:${port}`, token, { map }));
   await build({
     entryPoints: [path.join(root, 'sim/page.js')],
     outfile: path.join(root, 'www', SIM_FILE),
@@ -40,7 +46,7 @@ async function prepareWww() {
     target: 'safari15',
     logLevel: 'warning',
   });
-  console.log(`Simulator drive script added to www/ (stub at http://127.0.0.1:${port}; map: ${token === '' ? 'made-up roads, no token' : 'Mapbox, with the secret token'}).`);
+  console.log(`Simulator drive script added to www/ (stub at http://127.0.0.1:${port}; map: ${map === 'off' ? 'off (no WebGL)' : token === '' ? 'made-up roads, no token' : 'Mapbox, with the secret token'}).`);
 }
 
 function preparePlist() {
