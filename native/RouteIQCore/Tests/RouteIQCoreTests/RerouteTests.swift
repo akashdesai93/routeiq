@@ -143,6 +143,7 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(d.minLeadTimeSec, 20)
         XCTAssertEqual(d.freewayLeadDistanceM, 1200)
         XCTAssertEqual(d.routeLostPolls, 3)
+        XCTAssertEqual(d.routeLostWindowSec, 900)
         XCTAssertEqual(d.offRouteM, 50)
         XCTAssertEqual(d.sameRouteToleranceM, 10)
         XCTAssertEqual(d.matchToleranceM, 20)
@@ -150,6 +151,7 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(d.matchMaxGapM, 400)
         XCTAssertEqual(d.matchMaxDivergenceM, 50)
         XCTAssertEqual(d.matchIgnoreStartM, 150)
+        XCTAssertEqual(d.matchStartSearchM, 200)
         XCTAssertEqual(d.baselineViaSpacingM, 3000)
         XCTAssertEqual(d.baselineMaxViaPoints, 6)
         XCTAssertEqual(d.returnOverlapFraction, 0.5)
@@ -209,6 +211,52 @@ final class RerouteTests: XCTestCase {
         short.geometry = Array(fresh.geometry.dropLast(4))
         XCTAssertNil(Reroute.findCurrentRoute(driven.geometry, positionAlongM: 3000, candidates: [short]))
         XCTAssertNil(Reroute.findCurrentRoute(driven.geometry, positionAlongM: 3000, candidates: []))
+    }
+
+    // MARK: - describe('findCurrentRoute at a route that crosses itself (#74)')
+
+    // East along y = 0, under a bridge at (3000, 0), round a loop (3150, 0) > (3150, -150) >
+    // (3000, -150), then north over the bridge along x = 3000. The car is 3000 m along, at the
+    // crossing; the fresh route is the true rest of the route.
+    private func crossingCandidate(_ id: String, _ geometry: [LngLat]) -> RouteCandidate {
+        var c = DriveWorld.candidate(.A, at(0, 0), 600)!
+        c.id = id
+        c.geometry = geometry
+        c.distanceM = Geo.alongRouteM(geometry).last ?? 0
+        c.maneuvers = []
+        return c
+    }
+    private var crossingLoop: [LngLat] { [at(3150, 0), at(3150, -150), at(3000, -150), at(3000, 0), at(3000, 6000)] }
+    private var crossingDriven: RouteCandidate { crossingCandidate("driven", [at(0, 0), at(3000, 0)] + crossingLoop) }
+    private func crossingRest(_ start: LngLat) -> RouteCandidate { crossingCandidate("rest", [start] + crossingLoop) }
+
+    // it('matches when the fresh start is nearer the later pass than the one being driven')
+    func testCrossesItself_matchesWhenTheFreshStartIsNearerTheLaterPassThanTheOneBeingDriven() {
+        // 0.8 m beside the line and 0.3 m before the crossing, as Mapbox can snap a start.
+        XCTAssertNotNil(Reroute.findCurrentRoute(crossingDriven.geometry, positionAlongM: 3000, candidates: [crossingRest(at(2999.7, 0.8))]))
+        // Control: 5 m before the crossing it always matched.
+        XCTAssertNotNil(Reroute.findCurrentRoute(crossingDriven.geometry, positionAlongM: 2995, candidates: [crossingRest(at(2995, 0.8))]))
+    }
+
+    // it('looks for the start on the first matchStartSearchM of the path, then on the whole of it')
+    func testCrossesItself_looksForTheStartOnTheFirstMatchStartSearchMOfThePathThenOnTheWholeOfIt() throws {
+        // Only the first stretch is looked at while the start is on it: the later pass, 650 m on, is not.
+        XCTAssertNotNil(Reroute.findCurrentRoute(crossingDriven.geometry, positionAlongM: 3000, candidates: [crossingRest(at(2999.7, 0.8))], options: RerouteOptions(matchStartSearchM: 649)))
+        // A window that reaches the later pass lets it win again: the window must be shorter than the loop.
+        XCTAssertNil(Reroute.findCurrentRoute(crossingDriven.geometry, positionAlongM: 3000, candidates: [crossingRest(at(2999.7, 0.8))], options: RerouteOptions(matchStartSearchM: 700)))
+        // A fresh route fetched from further on than the position says (a stale position, 300 m
+        // behind, so beyond the window) is still found on the whole path.
+        let straight = try XCTUnwrap(candidate(.A, at(0, 0), 2000))
+        XCTAssertNotNil(Reroute.findCurrentRoute(straight.geometry, positionAlongM: 2700, candidates: [try XCTUnwrap(candidate(.A, at(3000, 0), 1700))]))
+    }
+
+    // it('a poll at the crossing keeps the current route and its count')
+    func testCrossesItself_aPollAtTheCrossingKeepsTheCurrentRouteAndItsCount() {
+        let decision = Reroute.decideReroute(.initial, RerouteObservation(
+            nowSec: 0, route: DrivenRoute(crossingDriven), positionAlongM: 3000, speedMps: 15, candidates: [crossingRest(at(2999.7, 0.8))]
+        ))
+        XCTAssertNotEqual(decision.code, .routeUnconfirmed)
+        XCTAssertNotNil(decision.current)
     }
 
     // MARK: - describe('the same route, drawn differently (patterns measured on real answers)')
@@ -870,9 +918,42 @@ final class RerouteTests: XCTestCase {
         XCTAssertEqual(found.switches, [])
     }
 
+    // it('"no route" answers older than routeLostWindowSec no longer count toward leaving the route (#68)')
+    func testScriptedDrives_noRouteAnswersOlderThanRouteLostWindowSecNoLongerCountTowardLeavingTheRoute() throws {
+        // One "no route" answer at the start, then a quarter of an hour of "another road" answers
+        // (no evidence either way), then two more "no route" answers. The first is 17 minutes old
+        // by then: three in all, but only two recent ones, so no switch until a third recent one.
+        func noRouteAt(_ poll: Int) -> Bool { poll == 0 || poll >= 16 }
+        let script = DriveScript(
+            speedMps: 1,
+            polls: 19,
+            eta: RerouteFx.fixed([.A: 2000, .B: 1900]),
+            tamper: { candidates, _ in candidates.filter { DriveWorld.nameOf($0) != .A } },
+            baseline: { candidates, context in noRouteAt(context.poll) ? [] : candidates.filter { DriveWorld.nameOf($0) == .B } }
+        )
+        let log = drive(script)
+        let counts = log.polls.map { $0.decision.nextState.lostPolls }
+        XCTAssertEqual(slice(counts, 0, 2), [1, 1])
+        // 900 s after the first answer it still counts; at 960 s it has dropped out.
+        XCTAssertEqual(slice(counts, 15, 16), [1])
+        // The third recent answer switches (and a switch starts the count over).
+        XCTAssertEqual(slice(counts, 16), [1, 2, 0])
+        XCTAssertEqual(slice(log.codes, 18, 19), ["route-lost"])
+        XCTAssertEqual(log.switches, [Switch(nowSec: 18 * 60, from: .A, to: .B)])
+        XCTAssertEqual(try pollAt(log, 17).decision.reason, "Staying: the road ahead could not be routed, check 2 of 3")
+        // Without the window (as before #68) the stale answer counted and the switch came a poll sooner.
+        var unbounded = script
+        unbounded.options = RerouteOptions(routeLostWindowSec: 1e9)
+        XCTAssertEqual(drive(unbounded).switches, [Switch(nowSec: 17 * 60, from: .A, to: .B)])
+        // The window only ever takes answers away: three recent ones in a row still switch at once.
+        var recent = script
+        recent.baseline = { _, _ in [] }
+        XCTAssertEqual(drive(recent).switches, [Switch(nowSec: 2 * 60, from: .A, to: .B)])
+    }
+
     // it('a poll that could not ask for the current path neither adds to the count nor clears it')
     func testScriptedDrives_aPollThatCouldNotAskForTheCurrentPathNeitherAddsToTheCountNorClearsIt() {
-        let state = RerouteState(lostPolls: 2)
+        let state = RerouteState(lostPolls: 2, lostAtSec: [0, 0])
         let notAsked = pollOnA(xM: 1000, etas: [.B: 1500], state: state)
         XCTAssertEqual(notAsked.action, .stay)
         XCTAssertEqual(notAsked.code, .routeUnconfirmed)
