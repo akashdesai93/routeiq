@@ -17,6 +17,18 @@ job is named `required`, and that is the only check branch protection asks for.
 | `native-app` (`native-app.yml`) | when the native app or what it bundles changes | unsigned `.ipa` on macOS (`RouteIQ-native-unsigned`) |
 | `shell-ios` (`shell-ios.yml`) | when `native/shell`, `src`, `public` or the web build files change | unsigned `.ipa` on macOS (`RouteIQ-unsigned`) |
 | `required` | always (`if: always()`) | passes when every job that had to run succeeded; fails when one failed, was cancelled, or was skipped although it had to run |
+| `shell-unit` | every push to `main` | the shell's Node unit tests (`native/shell`, `npm test`) on Linux; on pull requests they run inside `shell-ios` |
+| `merge-message` | every pull request | fails when the title or a commit carries a skip-ci marker, which the squash merge would copy to `main` (GitHub then starts no workflow for that commit) |
+
+On a push to `main` the unit tests of every area run whatever the push touched (#140): two
+pull requests that were each green can break `main` together, and the merge commit after
+them need not touch the area they broke. So `native-core` and `shell-unit` run on every
+push to `main`; only the macOS builds stay path-filtered there.
+
+`main-red.yml` follows the Gate on `main`: when the newest finished run failed or was
+cancelled it opens the issue **main is red** (label `p1`, link to the run), or comments on
+it if it is already open, and it closes it when `main` is green again. It uses the
+workflow's own token with `issues: write` and `actions: read` only.
 
 The exact path lists are in `gate.yml` under `changes`. A change to `gate.yml` itself runs
 everything. Each of the five workflows can also be started by hand
