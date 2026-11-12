@@ -32,9 +32,10 @@ The web app's core contracts are versioned (`CORE_CONTRACT_VERSION`, `src/core/c
 
 This port does not match version 1 yet. It predates the first frozen version and lags `main`
 (#33). Among the things missing:
-- `RouteCandidate.segmentTraffic` and `RouteCandidate.source`;
+- `RouteCandidate.segmentTraffic`, `RouteCandidate.source` and `RouteCandidate.via`;
 - `RerouteState.declined` and `declineRoute`;
-- `RerouteOptions.matchMaxDivergenceM`;
+- `RerouteOptions.matchMaxDivergenceM`, `RerouteObservation.drivenSinceM` and the like-for-like
+  rule for probed routes (`probe-unconfirmed`);
 - the guidance steps;
 - the live drive (`LiveOptions`, `LiveState`, `LiveEvent`, `LiveEffect`);
 - the place book.

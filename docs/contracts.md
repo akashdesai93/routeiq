@@ -11,7 +11,7 @@ They are versioned together under one number:
 import { CORE_CONTRACT_VERSION } from './src/core/index.ts' // src/core/contract.ts
 ```
 
-**Current version: 1** (Nov 12, 2026, `main` at d265f99). The Swift port does not match it yet;
+**Current version: 1** (Nov 12, 2026, `main` at 08526ec, side-street probes in the drive included). The Swift port does not match it yet;
 see [Who matches which version](#who-matches-which-version).
 
 ## What is in the contract
@@ -113,4 +113,6 @@ the declarations that changed.
 
 ## Changes
 
-- **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at d265f99.
+- **1** (Nov 12, 2026): the first frozen version, the shapes on `main` at 08526ec (after #82:
+  `RouteCandidate.via`, the drive's probe budget and memory, `request-sent`, `drivenSinceM`,
+  `probe-unconfirmed`).
