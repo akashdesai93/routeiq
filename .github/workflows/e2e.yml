@@ -8,11 +8,12 @@ name: E2E
 # of its own, so each change runs once); it can also be started by hand.
 #
 # The scenarios are CPU-bound (Mapbox GL drawn in software, plus the video of every
-# scenario), so they are spread over several runners: each shard runs its share
-# (e2e/shard.mjs deals every scenario to exactly one shard and checks that it did) with
-# two browsers on the runner's four cores. Shards are dealt by weight (a drive counts ten short scenarios). Each shard uploads a blob report; the report
-# job (e2e-report.yml) merges them into the one `e2e-report`. In gate.yml that merge
-# runs after the shards but is not part of `required`, so it adds no waiting time.
+# scenario), so they are spread over several runners, two browsers on each runner's four
+# cores. e2e/shard.mjs deals every scenario to exactly one shard, weighted by its measured
+# seconds (e2e/durations.json) so that no runner gets more than its share of the long
+# drives, and checks that Playwright selects exactly what it was dealt. Each shard uploads
+# a blob report; e2e-report.yml merges them into the one `e2e-report`. In gate.yml that
+# merge runs after the shards but is not part of `required`, so it adds no waiting time.
 #
 # To change the number of shards, change the list under `matrix.shard` only: the
 # total comes from `strategy.job-total`, so the deal always covers every scenario.
@@ -34,7 +35,7 @@ jobs:
       # Any failed shard still fails this workflow, and with it `required`.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
