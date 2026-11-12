@@ -7,6 +7,7 @@
 //
 // While a drive scenario runs, the WHOLE PHONE reports the simulated position (Find My
 // included). It is cleared at the end, on failure and on Ctrl+C.
+import { quietHoursProblem } from './preflight.mjs'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -41,15 +42,17 @@ export const USAGE = [
   '  --push-web       build the web app (native/shell) and copy it into the app first; the app then runs that build',
   '  --web            run the web build that was pushed earlier instead of the one in the app',
   '  --out <dir>      where reports go (default phone-lab/)',
+  '  --voice-ok       allow a scenario that speaks during quiet hours (22:00 to 07:00): the owner said so',
 ].join('\n')
 
 export function parseArgs(argv) {
-  const options = { scenario: null, fix: null, lock: false, ownerUnlocksAfter: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
+  const options = { scenario: null, fix: null, voiceOk: false, lock: false, ownerUnlocksAfter: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
   const numbers = { '--away-sec': 'awaySec', '--minutes': 'minutes', '--from-m': 'fromM', '--speed': 'speed' }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--lock') options.lock = options.inApp = true
     else if (arg === '--owner-unlocks-after') options.ownerUnlocksAfter = true
+    else if (arg === '--voice-ok') options.voiceOk = true
     else if (arg === '--in-app') options.inApp = true
     else if (arg === '--no-gps') options.gps = false
     else if (arg === '--push-web') options.pushWeb = options.web = true
@@ -125,6 +128,12 @@ async function main(argv) {
   const options = parseArgs(argv)
   if ('error' in options) {
     console.error(`${options.error}\n\n${USAGE}`)
+    return 64
+  }
+  // Quiet hours (docs/phone-lab.md, "Preflight and hard rules"): a drive speaks out loud.
+  const quiet = quietHoursProblem(new Date().getHours(), options.scenario, options.voiceOk)
+  if (quiet !== null) {
+    console.error(quiet)
     return 64
   }
   const { scenario } = options

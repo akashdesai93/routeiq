@@ -1,0 +1,72 @@
+name: Fleet board
+
+# The fleet's status board (docs/orchestrator.md): every hour, and on demand, runs
+# scripts/orch/state.mjs (GitHub alone: #17, labels, PRs, check runs, workflow runs), then
+#   - replaces the body of #17 with the board (and nothing else in that issue),
+#   - uploads the state as the `orch-state` artifact (Mission Control reads these files),
+#   - keeps the one `orch-alert` issue open while health is bad (orchestrator heartbeat stale,
+#     main red, orphaned PRs, silent sessions, stray owner decisions), commenting only when the
+#     list changes, and closes it when all is clear,
+#   - at the 11:xx UTC run, posts the morning report on #17 once a day.
+# One job of about 30 s on ubuntu-latest: 24 runs a day bill 24 minutes (each run is rounded
+# up to a minute), about 730 a month, which public repositories do not pay for.
+# No secret; the workflow's own token, with read access plus issues: write.
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what it would do, change nothing
+        type: boolean
+        default: false
+      morning:
+        description: Also post the morning report (once per UTC day)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: fleet-board
+  cancel-in-progress: false
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # sparse checkout of scripts/orch; commit dates
+      issues: write # the body of #17, the alert issue, the morning report
+      pull-requests: read # open and merged PRs, their comments
+      checks: read # the `required` check run of each PR
+      actions: read # Gate runs on main, the iPhone build of phone-gated PRs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/orch
+          sparse-checkout-cone-mode: true
+
+      - name: Fleet state from GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/orch/state.mjs --out orch-state
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: orch-state
+          path: orch-state/
+          retention-days: 7
+
+      - name: Board, alert and morning report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          MORNING: ${{ github.event_name == 'schedule' && 'auto' || (inputs.morning && 'yes' || 'no') }}
+        run: |
+          args=(--dir orch-state --board --alert)
+          if [ "$MORNING" = yes ] || { [ "$MORNING" = auto ] && [ "$(date -u +%H)" = 11 ]; }; then args+=(--morning); fi
+          if [ "$DRY" = true ]; then args+=(--dry-run); fi
+          node scripts/orch/publish.mjs "${args[@]}"
+          cat orch-state/board.md >> "$GITHUB_STEP_SUMMARY"

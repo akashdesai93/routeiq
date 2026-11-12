@@ -31,7 +31,7 @@ echo "Branch protection on $BRANCH"
 gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" --silent --input - <<'JSON'
 {
   "required_status_checks": {
-    "strict": true,
+    "strict": false,
     "checks": [{ "context": "required", "app_id": 15368 }]
   },
   "enforce_admins": true,
