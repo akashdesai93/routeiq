@@ -7,10 +7,12 @@ import { busyMapStyle } from './world/busyMap.ts'
 // route ahead is drawn so it reads on that map, and while driving the base map's points of
 // interest and traffic are off (amber is the only news colour; RouteIQ shows its own slow stretch).
 
-/** The colours of the busy map's traffic lines and its points of interest (busyMap.ts). */
+/**
+ * The colours of the busy map's traffic lines (busyMap.ts). Its points of interest are too sparse
+ * behind the cards to count by pixel; which layers are hidden is pinned in tests/mapTheme.test.ts,
+ * and the traffic count here shows the hiding is applied while driving.
+ */
 const TRAFFIC = ['#d73027', '#f39c12', '#2ecc71']
-const NIGHT_POI = '#7d8794'
-const DAY_POI = '#8a6dbf'
 
 /**
  * How many pixels of the map between the turn card and the sheet are within `tolerance` of each
@@ -73,7 +75,7 @@ function styleRequests(page: Page): string[] {
 test.describe('at night', () => {
   test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' })
 
-  test('at night the drive map is a night map, the route ahead is a light line on a dark casing, and no traffic or points of interest are drawn', async ({ app, page }) => {
+  test('at night the drive map is a night map, the route ahead is a light line on a dark casing, and no traffic is drawn', async ({ app, page }) => {
     const asked = styleRequests(page)
     app.outside.mapStyle = busyMapStyle('night')
     await app.open({ fakeClock: true })
@@ -83,16 +85,15 @@ test.describe('at night', () => {
     await lookWhileDriving(app, async () => {
       await page.clock.runFor(50)
       await app.snap('night: driving over a night map')
-      const [lightCore, poi, ...traffic] = await mapPixels(page, ['#f2f4f6', NIGHT_POI, ...TRAFFIC])
+      const [lightCore, ...traffic] = await mapPixels(page, ['#f2f4f6', ...TRAFFIC])
       // Tighter for the day's core: the night map's own major-road casing (#101215) is 6 away from it.
       // What is left of #0a0c0f is the car's outline ring, which is the same by day and by night.
       const [darkCore] = await mapPixels(page, ['#0a0c0f'], 3)
       // The route ahead reads on the dark land: a light core (#f2f4f6), not the day's black one.
       expect(lightCore, 'light route core pixels').toBeGreaterThan(2000)
       expect(darkCore, 'black (day) route core pixels').toBeLessThan(lightCore! / 2)
-      // Nothing orange next to amber, and no clutter behind the cards.
+      // Nothing orange next to amber.
       expect(traffic, 'traffic pixels (red, orange, green)').toEqual([0, 0, 0])
-      expect(poi, 'points of interest').toBeLessThan(20)
       // The cards keep their edge against the night map: a lighter hairline (3.5:1 on the land).
       const edge = await page.locator('.live-top').evaluate((el) => getComputedStyle(el).borderTopColor)
       expect(edge).toBe('rgb(107, 115, 126)')
@@ -113,10 +114,9 @@ test.describe('by day', () => {
       await page.clock.runFor(50)
       await app.snap('day: driving over a day map')
       // (Not counted by day: a near-white core, which the white streets' anti-aliased edges also give.)
-      const [darkCore, poi, ...traffic] = await mapPixels(page, ['#0a0c0f', DAY_POI, ...TRAFFIC])
+      const [darkCore, ...traffic] = await mapPixels(page, ['#0a0c0f', ...TRAFFIC])
       expect(darkCore, 'black route core pixels').toBeGreaterThan(400)
       expect(traffic, 'traffic pixels (red, orange, green)').toEqual([0, 0, 0])
-      expect(poi, 'points of interest').toBeLessThan(20)
       const edge = await page.locator('.live-top').evaluate((el) => getComputedStyle(el).borderTopColor)
       expect(edge).toBe('rgb(44, 49, 56)')
     })
