@@ -110,6 +110,15 @@ for (const { loc, w } of heaviestFirst) {
   load[to] += w
   dealt[to].push(loc)
 }
+// Every shard computes the whole deal, so each one checks that it covers every location exactly
+// once: a scenario dealt to no shard would otherwise never run, and no shard would notice.
+const dealtAll = dealt.flat()
+if (dealtAll.length !== locations.length || new Set(dealtAll).size !== locations.length || !locations.every((loc) => dealtAll.includes(loc))) {
+  const missing = locations.filter((loc) => !dealtAll.includes(loc))
+  console.error(`the deal does not cover every scenario location exactly once (${dealtAll.length} dealt, ${locations.length} locations)`)
+  if (missing.length > 0) console.error(`never dealt:\n  ${missing.join('\n  ')}`)
+  process.exit(1)
+}
 const mine = dealt[index - 1]
 console.log(`CI seconds per shard (run two at a time): ${load.map((l) => l.toFixed(0)).join(', ')}`)
 if (guessed.length > 0) console.log(`not in e2e/durations.json yet, so guessed:\n  ${guessed.join('\n  ')}`)
