@@ -10,26 +10,17 @@ name: native-app
 # - MAPBOX_DOWNLOADS_TOKEN: a secret token with only DOWNLOADS:READ, used only if
 #   Mapbox ever requires credentials to download its SDK binaries again (on
 #   2026-11-11 they downloaded without any).
-# Push runs only on main; a branch is built through its pull request, so each
-# change builds once.
+# Called by gate.yml on pull requests and pushes to main that touch the native app
+# (the path list is in gate.yml, under `changes`), and its result counts towards the
+# `required` check. It has no triggers of its own, so each change runs once; it can
+# also be started by hand.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'native/RouteIQ/**'
-      - 'native/scripts/**'
-      - 'public/seed/osm-signals/**'
-      - 'native/RouteIQCore/Package.swift'
-      - 'native/RouteIQCore/Sources/**'
-      - '.github/workflows/native-app.yml'
-  pull_request:
-    paths:
-      - 'native/RouteIQ/**'
-      - 'native/scripts/**'
-      - 'public/seed/osm-signals/**'
-      - 'native/RouteIQCore/Package.swift'
-      - 'native/RouteIQCore/Sources/**'
-      - '.github/workflows/native-app.yml'
+  workflow_call:
+    secrets:
+      MAPBOX_PUBLIC_TOKEN:
+        required: false
+      MAPBOX_DOWNLOADS_TOKEN:
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -165,7 +156,7 @@ jobs:
       - name: Upload ipa
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: RouteIQ-unsigned
+          name: RouteIQ-native-unsigned
           path: native/RouteIQ/build/RouteIQ-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
@@ -183,7 +174,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: xcodebuild-log
+          name: native-xcodebuild-log
           path: native/RouteIQ/build/xcodebuild.log
           if-no-files-found: ignore
           retention-days: 7

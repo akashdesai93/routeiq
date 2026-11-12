@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_LIVE_OPTIONS,
+  isValidLngLat,
   LIVE_IDLE,
   liveView,
   type LiveOptions,
@@ -18,6 +19,7 @@ import { createWakeLock } from './device/wakeLock.ts'
 import { fetchFreshRoutes } from './drive/freshRoutes.ts'
 import { createReplaySource, type ReplayMultiplier, type ReplayPlan } from './drive/replay.ts'
 import { MIN_REQUEST_GAP_MS, type DriveSettings } from './drive/simulation.ts'
+import type { TestDrivePreset } from './drive/testDrive.ts'
 import { createLiveRunner, type LiveRunner } from './live/runner.ts'
 
 /** The development replay: a made-up driver in place of the device's GPS (see drive/replay.ts). */
@@ -26,6 +28,14 @@ export interface ReplayConfig {
   readonly origin: LngLat
   readonly plan: ReplayPlan
   readonly multiplier: ReplayMultiplier
+}
+
+/** The iPhone app's test drive: a made-up car moved by the app's native code (see drive/testDrive.ts). */
+export interface TestDriveConfig {
+  /** Where the car starts when no route is picked. With one, it starts at the route's start. */
+  readonly origin: LngLat
+  readonly preset: TestDrivePreset
+  readonly multiplier: number
 }
 
 export interface LiveDriveConfig {
@@ -43,6 +53,8 @@ export interface LiveDriveConfig {
   readonly onWhatIfSpent: () => void
   /** Null: the device's GPS. */
   readonly replay: ReplayConfig | null
+  /** Inside the iPhone shell only: a test drive in place of the GPS. Null or left out: the GPS. Read at Start. */
+  readonly testDrive?: TestDriveConfig | null
 }
 
 export interface LiveDrive {
@@ -55,6 +67,8 @@ export interface LiveDrive {
   /** True while the drive view is to be shown (from Start until End, a failure and the summary included). */
   readonly active: boolean
   readonly replaying: boolean
+  /** True during the iPhone app's test drive: the positions are made up. */
+  readonly simulated: boolean
   readonly speechSupported: boolean
   /** Call from inside the tap handler. */
   readonly start: () => void
@@ -88,6 +102,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   const [state, setState] = useState<LiveState>(LIVE_IDLE)
   const [nowMs, setNowMs] = useState(0)
   const [replaying, setReplaying] = useState(false)
+  const [simulated, setSimulated] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(true)
   const runnerRef = useRef<{ runner: LiveRunner; now: () => number } | null>(null)
   const speakerRef = useRef<Speaker | null>(null)
@@ -108,12 +123,17 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   }, [])
 
   const start = useCallback(() => {
-    const { token, destination, route, replay } = latest.current
+    const { token, destination, route, replay, testDrive = null } = latest.current
     if (token === null) return
     runnerRef.current?.runner.dispose()
     // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
     // and go on with the phone locked (src/device/native). In a browser: the browser's own.
-    const native = nativeDevice()
+    // A test drive swaps the GPS for a made-up car that the native side moves; the clock stays real.
+    const native = nativeDevice(
+      replay === null && testDrive !== null
+        ? { origin: route?.geometry.find(isValidLngLat) ?? testDrive.origin, preset: testDrive.preset, multiplier: testDrive.multiplier }
+        : null,
+    )
     const speaker = (speakerRef.current ??= native?.speaker ?? createSpeaker())
     const replaySource = replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
     const source: PositionSource = replaySource ?? native?.source ?? geolocationSource()
@@ -157,14 +177,27 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           signal: query.signal,
           whatIf: query.driving !== null && whatIfDelaySec > 0 ? { ...query.driving, delaySec: whatIfDelaySec } : null,
           baseline: query.driving !== null && query.baseline ? { ...query.driving, rerouteOptions } : null,
+          probes:
+            query.driving !== null && query.probes.allowed > 0
+              ? {
+                  ...query.driving,
+                  allowed: query.probes.allowed,
+                  memory: query.probes.memory,
+                  rerouteOptions,
+                  timeoutMs: query.probes.budget.timeoutSec * 1000,
+                  minDelaySec: query.probes.budget.minDelaySec,
+                }
+              : null,
+          onRequest: query.onRequest,
         })
         if (!result.ok) return { routes: null, message: result.message }
         whatIfInPlay.current = result.simulated
-        return { routes: result.candidates, baseline: result.baseline, requests: result.requests }
+        return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },
     })
     runnerRef.current = { runner, now }
     setReplaying(replaySource !== null)
+    setSimulated(replaySource === null && native !== null && native.simulated)
     setSpeechSupported(speaker.supported)
     runner.start(destination, route)
   }, [optionsOf])
@@ -211,6 +244,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     canStart: config.token !== null,
     active: state.status !== 'idle',
     replaying,
+    simulated,
     speechSupported,
     start,
     end,

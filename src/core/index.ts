@@ -1,4 +1,5 @@
 // Public surface of the framework-free core. UI code imports from here only.
+export { CORE_CONTRACT_VERSION } from './contract.ts'
 export type {
   BBox,
   CongestionLevel,
@@ -27,6 +28,7 @@ export {
   isValidLngLat,
   lineFrom,
   localProjector,
+  nearestAlongM,
   pointAtDistance,
   pointToSegment,
   type PointOnLine,
@@ -183,13 +185,23 @@ export {
   type HandoffWaypoint,
 } from './handoff.ts'
 export {
+  checkProbeAllowance,
+  checkProbes,
+  DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
   coversRoute,
+  INITIAL_CHECK_PROBES,
+  mergeCheckProbes,
   mergeProbeRoutes,
   planProbes,
+  rememberCheckProbes,
+  resolveDriveProbeBudget,
   selectViaPoints,
   sideStreetNotice,
+  type CheckProbeInput,
+  type CheckProbeMemory,
+  type DriveProbeBudget,
   type ProbeBudget,
   type ProbeOptions,
   type ProbeSide,

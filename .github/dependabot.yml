@@ -1,0 +1,46 @@
+# Weekly dependency updates, grouped so each project gets at most a couple of pull
+# requests: one for all minor and patch updates, and major updates one at a time.
+# Security updates come separately (Dependabot alerts) and are not limited by this.
+# Every pull request goes through the `required` check like any other.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /native/shell
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      shell-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /design
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      design-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Keeps the actions pinned by SHA up to date (it rewrites the SHA and the version comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]

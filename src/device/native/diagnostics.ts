@@ -1,7 +1,7 @@
 /**
  * Drive diagnostics for the iPhone shell: what iOS let the app do during a
- * drive, to be read (and copied out) afterwards. In memory only, gone when
- * the app is closed.
+ * drive, to be read (and copied or shared) afterwards. This log is in memory;
+ * its text is also kept on the phone as the "last drive" (lastDrive.ts).
  *
  * Privacy, by construction: this holds counts, times of day, whole
  * milliseconds, HTTP status codes and words from fixed lists. No method takes
@@ -23,16 +23,27 @@ export type RequestOutcome = 'answered' | 'network' | 'timeout' | 'cancelled' | 
 
 const APP_STATES: readonly DiagnosticsAppState[] = ['active', 'inactive', 'background']
 const OUTCOMES: readonly RequestOutcome[] = ['answered', 'network', 'timeout', 'cancelled', 'not-allowed']
+/** The test drive's presets (src/drive/testDrive.ts), as the log may name them. */
+const SIMULATED_KINDS: readonly string[] = ['follow', 'wrong-turn', 'turn-around']
 
 export interface DriveDiagnostics {
+  /** When this log began, milliseconds since 1970. */
+  readonly startedAtMs: number
+  /** A test drive began: the positions that follow are made up. `kind`: the preset, from a fixed list. `speed`: 1 for 1x. */
+  simulated(kind: string, speed: number): void
   /** The location stream was switched on or off. Gaps are measured only while it is on. */
   gps(on: boolean): void
   /** A position arrived. Nothing about the position is passed in. */
   fix(): void
   /** The live session was asked "is anything due?". */
   tick(): void
-  /** A route request went out. Returns its number, for requestEnded. */
-  requestSent(): number
+  /**
+   * A route request went out. Returns its number, for requestEnded. `kind`: a
+   * side-street probe or a path check is marked as such in the log (a probe
+   * that finds no road is a normal answer, not a fault). A word from a fixed
+   * list; anything else is not kept.
+   */
+  requestSent(kind?: 'routes' | 'path' | 'probe'): number
   /** A route request ended. `status`: the HTTP status. `nativeMs`: how long the native side says it took. */
   requestEnded(n: number, outcome: RequestOutcome, status?: number, nativeMs?: number): void
   speechStarted(): void
@@ -72,9 +83,11 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   const stream = () => ({ count: 0, away: 0, lastAt: null as number | null, longestGapMs: 0 })
   const fixes = stream()
   const ticks = stream()
-  const requests = { sent: 0, answered: 0, failed: 0, cancelled: 0, away: 0, totalMs: 0, longestMs: 0 }
+  const requests = { sent: 0, answered: 0, failed: 0, cancelled: 0, away: 0, totalMs: 0, longestMs: 0, probes: 0, paths: 0 }
   const sentAt = new Map<number, number>()
+  const tagOf = new Map<number, string>()
   const speech = { started: 0, finished: 0, cutOff: 0 }
+  let simulatedDrives = 0
 
   const log = (what: string) => {
     events.push({ atMs: now(), what: `${what} [${state}]` })
@@ -97,6 +110,11 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   }
 
   return {
+    startedAtMs: startedAt,
+    simulated(kind, speed) {
+      simulatedDrives++
+      log(`SIMULATED GPS test drive: ${SIMULATED_KINDS.includes(kind) ? kind : 'unknown'}, ${Math.min(whole(speed), 99)}x speed`)
+    },
     gps(on) {
       if (on === gpsOn) return
       gpsOn = on
@@ -106,17 +124,23 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
     },
     fix: () => beat(fixes, 'fix', FIX_GAP_EVENT_MS),
     tick: () => beat(ticks, 'tick', TICK_GAP_EVENT_MS),
-    requestSent() {
+    requestSent(kind) {
       const n = ++requests.sent
       if (state !== 'active') requests.away++
       sentAt.set(n, now())
-      log(`request ${n} sent`)
+      const tag = kind === 'probe' ? ' (probe)' : kind === 'path' ? ' (path check)' : ''
+      if (kind === 'probe') requests.probes++
+      if (kind === 'path') requests.paths++
+      if (tag !== '') tagOf.set(n, tag)
+      log(`request ${n}${tag} sent`)
       return n
     },
     requestEnded(n, outcome, status, nativeMs) {
       const began = sentAt.get(n)
       if (began === undefined) return
       sentAt.delete(n)
+      const tag = tagOf.get(n) ?? ''
+      tagOf.delete(n)
       const ms = whole(now() - began)
       const kind: RequestOutcome = OUTCOMES.includes(outcome) ? outcome : 'network'
       if (kind === 'answered') {
@@ -124,11 +148,11 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         requests.totalMs += ms
         if (ms > requests.longestMs) requests.longestMs = ms
         const native = nativeMs === undefined ? '' : `, native ${whole(nativeMs)} ms`
-        log(`request ${whole(n)} answered, HTTP ${Math.min(whole(status), 999)}, ${ms} ms${native}`)
+        log(`request ${whole(n)}${tag} answered, HTTP ${Math.min(whole(status), 999)}, ${ms} ms${native}`)
       } else {
         if (kind === 'cancelled') requests.cancelled++
         else requests.failed++
-        log(`request ${whole(n)} ${kind} after ${ms} ms`)
+        log(`request ${whole(n)}${tag} ${kind} after ${ms} ms`)
       }
     },
     speechStarted() {
@@ -156,7 +180,11 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         `ticks: ${ticks.count} (${ticks.away} while not active), longest gap ${seconds(ticks.longestGapMs)}`,
         `requests: ${requests.sent} sent (${requests.away} while not active), ${requests.answered} answered, ${requests.failed} failed, ${requests.cancelled} cancelled, ${sentAt.size} waiting`,
         `request time: average ${average} ms, longest ${requests.longestMs} ms`,
+        `of those: ${requests.probes} side-street probes (no road or no route is a normal answer for one), ${requests.paths} path checks`,
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
+        ...(simulatedDrives > 0
+          ? [`SIMULATED GPS: ${simulatedDrives} test ${simulatedDrives === 1 ? 'drive' : 'drives'} (positions made up, requests and speech real)`]
+          : []),
         `events (oldest first${dropped > 0 ? `, ${dropped} earlier ones dropped` : ''}):`,
         ...events.map((e) => `${clock(e.atMs)} ${e.what}`),
       ]

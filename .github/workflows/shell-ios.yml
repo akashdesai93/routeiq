@@ -8,40 +8,16 @@ name: Shell iOS (unsigned ipa)
 # token in it: the app asks for one on the phone. The build fails if a token
 # is found in the web bundle or in the finished app.
 #
-# Push runs only on main; a branch is built through its pull request, so each
-# change builds once.
+# Called by gate.yml on pull requests and pushes to main that touch the shell or the web app
+# (the path list is in gate.yml, under `changes`), and its result counts towards the
+# `required` check. It has no triggers of its own, so each change runs once; it can
+# also be started by hand.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'native/shell/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
-      - '.github/workflows/shell-ios.yml'
-  pull_request:
-    paths:
-      - 'native/shell/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
-      - '.github/workflows/shell-ios.yml'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: shell-ios-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -135,8 +111,8 @@ jobs:
           # class name at run time, so a build can succeed without it.
           echo "RouteIQEngine.swift mentioned in build log: $(grep -c 'RouteIQEngine.swift' build/xcodebuild.log) times"
           missing=0
-          # (the last two: the native route requests, RouteIQHttp.swift and the plugin's httpGet)
-          for needle in RouteIQNativePlugin routeiq.askedAlwaysLocation https://api.mapbox.com/ httpGet; do
+          # (then the native route requests, RouteIQHttp.swift and the plugin's httpGet, and the test drive)
+          for needle in RouteIQNativePlugin routeiq.askedAlwaysLocation https://api.mapbox.com/ httpGet startSimulatedRoute; do
             hits=$(LC_ALL=C grep -a -c "$needle" "$APP/App" || true)
             echo "binary lines containing $needle: $hits"
             if [ "$hits" -eq 0 ]; then missing=1; fi
@@ -172,7 +148,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: xcodebuild-log
+          name: shell-xcodebuild-log
           path: native/shell/build/xcodebuild.log
           if-no-files-found: ignore
           retention-days: 7

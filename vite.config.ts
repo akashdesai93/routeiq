@@ -27,6 +27,17 @@ export default defineConfig({
   build: {
     // Mapbox GL JS alone is about 1.5 MB minified, so the default 500 kB warning always fires.
     chunkSizeWarningLimit: 2000,
+    // Mapbox GL JS in its own file (mapbox-gl-*.js), apart from the app's code: the two
+    // change at different times, so the browser keeps the big one cached across app
+    // releases, and scripts/check-bundle-size.mjs can hold the app's own code to a budget.
+    // Only the three files Mapbox loads up front; the rest it still loads on demand.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{ name: 'mapbox-gl', test: /mapbox-gl[\\/]dist[\\/]esm[\\/](mapbox-gl|core|shared)\.js$/ }],
+        },
+      },
+    },
   },
   test: {
     include: ['tests/**/*.test.{ts,tsx}'],
