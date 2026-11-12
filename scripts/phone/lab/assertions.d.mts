@@ -54,6 +54,8 @@ export function checkSpeechFinished(d: ParsedDiagnostics): Verdict
 export function checkNoFailedRequests(d: ParsedDiagnostics): Verdict
 export function checkSteadyWhileAway(d: ParsedDiagnostics, awayMinutes: number, perMinute?: number): Verdict
 export function checkPlanShowsRoutes(seen: { routes: number; startDrive: boolean }): Verdict
-export function checkLockedWrongTurn(report: ParsedLabReport | null): Verdict[]
+export function awayWindows(d: ParsedDiagnostics): { from: number; to: number }[]
+export function checkStayedAway(d: ParsedDiagnostics, expectedSec: number): Verdict
+export function checkLockedWrongTurn(report: ParsedLabReport | null, awaySec?: number): Verdict[]
 export function checkSoak(report: ParsedLabReport | null, awayMinutes: number): Verdict[]
 export function redact(line: unknown): string

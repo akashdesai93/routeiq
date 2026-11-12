@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createDriveDiagnostics } from '../src/device/native/diagnostics.ts'
 import { createLab } from '../src/lab/lab.ts'
 import {
+  awayWindows,
   checkFixesWhileAway,
   checkLockedWrongTurn,
   checkNoFailedRequests,
@@ -10,6 +11,7 @@ import {
   checkRequestAnsweredWhileAway,
   checkSoak,
   checkSpeechFinished,
+  checkStayedAway,
   checkSteadyWhileAway,
   checkTicksWhileAway,
   parseDiagnostics,
@@ -131,7 +133,7 @@ const NAMES = {
   fixes: 'position fixes kept arriving while the app was not in front',
   ticks: 'the drive kept running while not in front: no wait of 5 s or more between ticks',
   request: 'a route request went out while not in front and was answered',
-  offRoute: 'off the route, then a new route: asked for, answered, and driving again',
+  offRoute: 'off the route while away, then a new route: asked for, answered, and driving again',
   speech: 'every spoken line that started also finished',
 }
 
@@ -227,6 +229,24 @@ describe('"drives locked with a wrong turn": each check passes on a good drive a
     expect(checkOffRouteThenNewRoute(late).pass).toBe(false)
   })
 
+  it('a new route that came with the app in front shows nothing about being away', () => {
+    const r = report()
+    const inFront = { ...r, history: r.history.map((h) => (h.what === 'banner new-route-after-off-route' ? { ...h, time: '21:40:10' } : h)) }
+    const check = checkOffRouteThenNewRoute(inFront)
+    expect(check.pass).toBe(false)
+    expect(check.detail).toMatch(/the app was in front then/)
+  })
+
+  it('the app came back to the front by itself after 40 of 120 s: the stayed-away check fails; the full time passes', () => {
+    const d = report().diagnostics
+    expect(awayWindows(d)).toEqual([{ from: 21 * 3600 + 40 * 60 + 20, to: 21 * 3600 + 42 * 60 + 21 }])
+    expect(checkStayedAway(d, 120).pass).toBe(true)
+    const early = { ...d, events: d.events.map((e) => (e.what === 'app active' ? { ...e, time: '21:41:00' } : e)) }
+    expect(checkStayedAway(early, 120).pass).toBe(false)
+    expect(checkStayedAway(report({ neverAway: true }).diagnostics, 120).detail).toBe('the app never went to the background')
+    expect(checkLockedWrongTurn(report(), 120)[0].name).toBe('the app stayed in the background until the lab brought it back')
+  })
+
   it('a spoken line cut off: the speech check fails', () => {
     expect(failed({ speechCutOff: true })).toEqual([NAMES.speech])
   })
@@ -278,6 +298,8 @@ describe('what goes into a report folder', () => {
   it('identifiers, coordinates and tokens are taken out of tool and system-log lines', () => {
     const line = 'device 00008140-001A2B3C4D5E6F78 app dev.routeiq.shell.AB12CD34EF at 35.22716,-80.84316 pk.eyJ1Ijoibm90LWEtcmVhbC10b2tlbiJ9.c2lnbmF0dXJl 0123456789abcdef0123456789abcdef01234567 CF1BB90B-166E-43CF-9193-AC76C02B34C6'
     expect(redact(line)).toBe('device <id> app dev.routeiq.shell.<team> at <number>,<number> <token> <id> <id>')
+    // A time of day with fractions of a second is not a coordinate.
+    expect(redact('2026-11-11 22:09:36.123456 App at -80.84316')).toBe('2026-11-11 22:09:36.123456 App at <number>')
   })
 
   it('the summary says FAIL, NOT RUN and whether the simulated position was cleared', () => {
@@ -306,6 +328,10 @@ describe('what goes into a report folder', () => {
   it('the runner refuses a scenario it does not know and reads its options', () => {
     expect(parseArgs([])).toHaveProperty('error')
     expect(parseArgs(['--scenario', 'nope'])).toHaveProperty('error')
-    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--no-gps', '--lock', '--away-sec', '90'])).toMatchObject({ scenario: 'locked-wrong-turn', gps: false, lock: true, awaySec: 90 })
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--no-gps', '--away-sec', '90'])).toMatchObject({ scenario: 'locked-wrong-turn', gps: false, lock: false, inApp: false, awaySec: 90 })
+    // Sleep ends the PC's connection, so a locked run moves the car inside the app.
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock'])).toMatchObject({ lock: true, inApp: true })
+    expect(parseArgs(['--scenario', 'locked-wrong-turn', '--lock', '--no-gps'])).toHaveProperty('error')
+    expect(parseArgs(['--scenario', 'background-soak', '--lock'])).toHaveProperty('error')
   })
 })

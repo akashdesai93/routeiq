@@ -28,7 +28,8 @@ export const USAGE = [
   'Usage: node scripts/phone/lab/run.mjs --scenario <name> [options]',
   ...Object.entries(SCENARIOS).map(([name, about]) => `  ${name.padEnd(18)} ${about}`),
   'Options:',
-  '  --lock           also put the phone to sleep while the app is in the background',
+  '  --lock           put the phone to sleep (screen off) while away; the car is then the in-app test drive',
+  '  --in-app         move the car with the in-app test drive instead of the phone\'s position over USB',
   '  --no-gps         do not replay the drive (the phone stands still): the off-route check must then fail',
   '  --away-sec <n>   locked-wrong-turn: seconds in the background (default 170)',
   '  --minutes <n>    background-soak: minutes in the background (default 10)',
@@ -40,11 +41,12 @@ export const USAGE = [
 ].join('\n')
 
 export function parseArgs(argv) {
-  const options = { scenario: null, lock: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
+  const options = { scenario: null, lock: false, inApp: false, gps: true, awaySec: 170, minutes: 10, fromM: null, speed: 13, pushWeb: false, web: false, out: path.join(repo, 'phone-lab') }
   const numbers = { '--away-sec': 'awaySec', '--minutes': 'minutes', '--from-m': 'fromM', '--speed': 'speed' }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--lock') options.lock = true
+    if (arg === '--lock') options.lock = options.inApp = true
+    else if (arg === '--in-app') options.inApp = true
     else if (arg === '--no-gps') options.gps = false
     else if (arg === '--push-web') options.pushWeb = options.web = true
     else if (arg === '--web') options.web = true
@@ -62,6 +64,8 @@ export function parseArgs(argv) {
   }
   if (options.scenario === null || !(options.scenario in SCENARIOS)) return { error: `Give --scenario: ${Object.keys(SCENARIOS).join(' | ')}` }
   if (options.speed < 1 || options.speed > 40) return { error: '--speed must be between 1 and 40 m/s' }
+  if (options.inApp && !options.gps) return { error: '--no-gps goes with the USB position, not with --lock or --in-app' }
+  if (options.inApp && options.scenario === 'background-soak') return { error: 'the soak replays its drive over USB: it cannot be combined with --lock or --in-app' }
   return options
 }
 
@@ -176,7 +180,7 @@ async function main(argv) {
     if (options.pushWeb) {
       say('building the web app for the shell (native/shell)')
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-      const built = spawnSync(npm, ['run', 'build'], { cwd: path.join(repo, 'native', 'shell'), stdio: 'ignore', shell: process.platform === 'win32', env: { ...process.env, VITE_MAPBOX_TOKEN: '' } })
+      const built = spawnSync(`${npm} run build`, { cwd: path.join(repo, 'native', 'shell'), stdio: 'ignore', shell: true, env: { ...process.env, VITE_MAPBOX_TOKEN: '' } })
       if (built.status !== 0) throw new Error('the web build failed (npm run build in native/shell)')
       if (!phone.pushWeb(path.join(repo, 'native', 'shell', 'www'))) throw new Error('the web build could not be copied into the app')
       say('web build copied into the app')
@@ -213,16 +217,27 @@ async function main(argv) {
       const waypoints = PRESETS[preset].waypoints
       const start = pathFrom(waypoints, fromM)[0]
 
-      simulated = { from: clock(), to: '?', cleared: false }
-      if (!(await phone.setLocation(start))) throw new Error('the simulated position could not be set')
-      say(`simulated position: standing on the ${preset} drive, ${fromM} m in`)
-      await pause(3000)
-
-      // The scenario names the simulated start: the app starts the drive only when the phone
-      // reports a position there, so a lab drive never runs on the phone's real position.
-      const whole = (degrees) => `${degrees < 0 ? 'm' : ''}${Math.round(Math.abs(degrees) * 1e5)}`
-      if ((await phone.launch(bundle, { args: labArgs(`drive-at-${whole(start[0])}-${whole(start[1])}`) })) === null) throw new Error('the app did not start')
-      say('app started in lab mode: it presses Start drive once the routes are there and the phone is at the simulated start')
+      // Two ways to move the car. Over USB the phone's own location services report the replayed
+      // position, which is the real thing but lasts only while the PC's connection does, and
+      // putting the phone to sleep ends that connection. So with --lock (or --in-app) the app's
+      // own test drive moves a made-up car instead, and the phone's GPS is not used at all.
+      const inApp = options.inApp
+      let labScenarioName
+      if (inApp) {
+        labScenarioName = 'testdrive'
+        say('using the in-app test drive (wrong turn after 1 min): the car is made up by the app, the phone\'s position is not used or changed')
+      } else {
+        simulated = { from: clock(), to: '?', cleared: false }
+        if (!(await phone.setLocation(start))) throw new Error('the simulated position could not be set')
+        say(`simulated position: standing on the ${preset} drive, ${fromM} m in`)
+        await pause(3000)
+        // The scenario names the simulated start: the app starts the drive only when the phone
+        // reports a position there, so a lab drive never runs on the phone's real position.
+        const whole = (degrees) => `${degrees < 0 ? 'm' : ''}${Math.round(Math.abs(degrees) * 1e5)}`
+        labScenarioName = `drive-at-${whole(start[0])}-${whole(start[1])}`
+      }
+      if ((await phone.launch(bundle, { args: labArgs(labScenarioName) })) === null) throw new Error('the app did not start')
+      say(inApp ? 'app started in lab mode: it switches the test drive on and presses Start drive' : 'app started in lab mode: it presses Start drive once the routes are there and the phone is at the simulated start')
       let lab = null
       for (let waited = 0; waited < 150_000; waited += 5000) {
         await pause(5000)
@@ -250,6 +265,8 @@ async function main(argv) {
       } else {
         say(`driving: status ${lab.status}`)
         await shot('drive-started.png')
+        await pause(8000)
+        await shot('drive-after-8s.png')
         const stopSyslog = phone.startSyslog()
         cleanups.push(() => stopSyslog())
         await sample()
@@ -258,15 +275,20 @@ async function main(argv) {
         say('app sent to the background (Calculator in front)')
         if (options.lock) {
           await pause(2000)
-          say(phone.sleepPhone() ? 'phone put to sleep' : 'the phone could not be put to sleep')
+          // Sleep ends the developer connection; a new one is made when it is time to wake the phone.
+          await phone.disconnect()
+          say(phone.sleepPhone() ? 'phone put to sleep (screen off); the PC is disconnected from it until the end of the time away' : 'the phone could not be put to sleep')
         }
         await pause(3000)
 
         let player = null
-        if (options.gps) {
-          player = phone.playTrack(buildTrack(waypoints, { speedMps: options.speed, intervalSec: 1, fromM, maxSec: awaySec, holdSec: 0 }))
+        if (inApp) say(`the app's made-up car drives for ${awaySec} s`)
+        else if (options.gps) {
+          // The car keeps driving until the app is back in front and the screenshot is taken:
+          // a car that stops reads as "waiting for a position fix".
+          player = phone.playTrack(buildTrack(waypoints, { speedMps: options.speed, intervalSec: 1, fromM, maxSec: awaySec + 120, holdSec: 0 }))
           cleanups.push(() => player.stop())
-          say(`replaying the ${preset} drive at ${options.speed} m/s for ${awaySec} s`)
+          say(`replaying the ${preset} drive at ${options.speed} m/s`)
         } else say(`NOT replaying the drive (--no-gps): the phone stands still for ${awaySec} s`)
 
         const every = soak ? 60 : 30
@@ -276,19 +298,17 @@ async function main(argv) {
           const s = await sample()
           say(`away ${Math.min(waited + every, awaySec)} s: status ${now?.status ?? '?'}, fixes ${now?.diagnostics?.fixes.count ?? '?'}, ticks ${now?.diagnostics?.ticks.count ?? '?'}, requests ${now?.diagnostics?.requests.sent ?? '?'}, web code CPU ${s.webContent?.cpuPercent ?? '?'} %`)
         }
-        if (player !== null) {
-          player.stop()
-          const played = await player.done
-          say(`replay ended: the phone took ${played.sent} positions and refused ${played.refused}`)
-          if (played.refused > played.sent / 10) throw new Error('the phone refused too many simulated positions for the run to mean anything')
-        }
         // Time for a spoken line and a route answer that are still under way.
         await pause(15_000)
         const awayEnd = report('lab-report-away.txt')
         say(`end of the time away: app ${awayEnd?.diagnostics?.appState ?? '?'}`)
 
+        if (options.lock) {
+          phone = await connectPhone({ log: say })
+          say('connected to the phone again')
+        }
         await phone.launch(bundle, { keep: true })
-        say('app brought back to the front')
+        say(options.lock ? 'phone woken and app brought back to the front' : 'app brought back to the front')
         await pause(5000)
         await shot('back-in-front.png')
         const captions = await phone.captions()
@@ -298,6 +318,12 @@ async function main(argv) {
           say(captions.length === 0 ? 'the screen reader found nothing: the phone is locked' : `the screen reader found ${captions.length} elements`)
         }
         const last = report('lab-report.txt')
+        if (player !== null) {
+          player.stop()
+          const played = await player.done
+          say(`replay ended: the phone took ${played.sent} positions and refused ${played.refused}`)
+          if (played.refused > played.sent / 10) throw new Error('the phone refused too many simulated positions for the run to mean anything')
+        }
         const syslog = stopSyslog()
         writeFileSync(path.join(dir, 'syslog.txt'), syslog.join('\n'))
         files.push('syslog.txt')
@@ -309,7 +335,7 @@ async function main(argv) {
           writeFileSync(path.join(dir, 'diagnostics.txt'), text.slice(text.indexOf('RouteIQ drive diagnostics')))
           files.push('diagnostics.txt')
         }
-        checks = soak ? checkSoak(final, awaySec / 60) : checkLockedWrongTurn(final)
+        checks = soak ? checkSoak(final, awaySec / 60) : checkLockedWrongTurn(final, awaySec)
       }
     }
   } catch (error) {
@@ -342,7 +368,7 @@ async function main(argv) {
   const failed = checks.filter((c) => !c.pass && !c.notRun)
   const skipped = checks.filter((c) => c.notRun)
   const result = failed.length > 0 ? `FAILED (${failed.length} of ${checks.length} checks)` : skipped.length > 0 || failure !== null ? 'INCOMPLETE (a check could not be made)' : `passed (${checks.length} checks)`
-  const optionText = [options.lock ? 'phone put to sleep' : 'app in the background, screen on', options.gps ? 'drive replayed' : 'drive NOT replayed (--no-gps)', options.web ? 'web build pushed from the PC' : 'web build inside the app'].join('; ')
+  const optionText = [options.lock ? 'phone put to sleep' : 'app in the background, screen on', options.inApp ? 'in-app test drive (positions made up by the app)' : options.gps ? 'drive replayed as the phone\'s position over USB' : 'drive NOT replayed (--no-gps)', options.web ? 'web build pushed from the PC' : 'web build inside the app'].join('; ')
   writeFileSync(path.join(dir, 'summary.md'), summaryMarkdown({ scenario, options: optionText, device, app, steps, checks, samples, simulated, files, result }))
   console.log('')
   for (const c of checks) console.log(`${c.notRun ? 'NOT RUN' : c.pass ? 'pass   ' : 'FAIL   '} ${c.name}: ${c.detail}`)

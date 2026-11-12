@@ -79,8 +79,14 @@ export interface RouteIQLab {
   resetToTestPoints(): boolean
   startDrive(): boolean
   endDrive(): boolean
-  /** The in-app test drive (simulated GPS), in builds that have it. */
+  /**
+   * Switches on the in-app test drive ("Test drive (simulated GPS)" on the plan
+   * screen), in builds that have it: Start drive then follows a made-up car
+   * and the phone's GPS is not used. False: the control is not there.
+   */
   startTestDrive(): boolean
+  /** True when the in-app test drive is switched on. */
+  testDriveOn(): boolean
   read(): LabScreen
   diagnostics(): string
   report(): string
@@ -105,6 +111,7 @@ export async function labScenario(plugin: LabPlugin | null): Promise<string | nu
 interface LabElement {
   readonly textContent: string | null
   readonly disabled?: boolean
+  readonly checked?: boolean
   click(): void
 }
 
@@ -176,6 +183,8 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDep
     return true
   }
 
+  const testDriveBox = () => doc.querySelector('.testdrive input[type="checkbox"]') as LabElement | null
+
   const read = (): LabScreen => {
     const turnEl = doc.querySelector('.live-top')
     const live = turnEl !== null || doc.querySelector('.live-bottom') !== null
@@ -240,7 +249,16 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now }: LabDep
     resetToTestPoints: () => press('Reset to test points'),
     startDrive: () => press('Start drive'),
     endDrive: () => press('End') || press('End drive'),
-    startTestDrive: () => press('Test drive (simulated GPS)'),
+    startTestDrive: () => {
+      const box = testDriveBox()
+      if (box === null) return false
+      if (box.checked !== true) {
+        box.click()
+        note('switched on the in-app test drive')
+      }
+      return true
+    },
+    testDriveOn: () => testDriveBox()?.checked === true,
     read,
     diagnostics: () => diagnostics.text(),
     sample,
@@ -280,6 +298,11 @@ export interface StartLabOptions {
  *   AND the phone reports a position within LAB_START_RADIUS_M of that
  *   point, which is where the PC put the simulated position. On the phone's
  *   real position it never starts.
+ * - `testdrive`: switches on the in-app test drive (its default: a wrong turn
+ *   after a minute) and presses Start drive only once that switch is on, so
+ *   the drive follows the app's made-up car and never the phone's GPS. This
+ *   is the one that works with the phone asleep: it needs no connection to
+ *   the PC.
  */
 export async function startLab({ plugin, diagnostics, target, now = Date.now, every = (ms, fn) => setInterval(fn, ms) }: StartLabOptions): Promise<RouteIQLab | null> {
   const scenario = await labScenario(plugin)
@@ -293,7 +316,8 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
   let lastSample = -Infinity
   let lastReport = -Infinity
   const start = driveStart(scenario)
-  let autopilot: 'waiting' | 'asking' | 'done' = start !== null ? 'waiting' : 'done'
+  const testDrive = scenario === 'testdrive'
+  let autopilot: 'waiting' | 'asking' | 'done' = start !== null || testDrive ? 'waiting' : 'done'
   let lastAsked = -Infinity
   /** Asks the phone where it is and starts the drive only at the simulated start. Says yes or no, never where. */
   const startAtSimulatedPosition = (at: number) => {
@@ -326,7 +350,13 @@ export async function startLab({ plugin, diagnostics, target, now = Date.now, ev
         if (at - startedAt > LAB_ROUTES_WAIT_MS) {
           lab.note('gave up: no routes, or the phone never reached the simulated start')
           autopilot = 'done'
-        } else if (screen.screen === 'plan' && screen.routes > 0 && screen.canStartDrive && at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
+        } else if (screen.screen === 'plan' && screen.routes > 0 && screen.canStartDrive) {
+          if (testDrive) {
+            // Two beats: switch it on, and start only after the page shows it on.
+            if (!lab.testDriveOn()) lab.startTestDrive()
+            else if (lab.startDrive()) autopilot = 'done'
+          } else if (at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
+        }
       }
       if (at - lastReport >= LAB_REPORT_MS) {
         lastReport = at

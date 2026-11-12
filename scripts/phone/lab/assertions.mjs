@@ -140,23 +140,56 @@ const NEW_ROUTE_WINDOW_SEC = 15
  * less than a second when Mapbox answers quickly, so it is not required to have been seen.
  */
 export function checkOffRouteThenNewRoute(report) {
-  const name = 'off the route, then a new route: asked for, answered, and driving again'
+  const name = 'off the route while away, then a new route: asked for, answered, and driving again'
   const d = report.diagnostics
-  const newRoute = report.history.find((h) => h.what === 'banner new-route-after-off-route')
-  if (newRoute === undefined) {
+  const newRoutes = report.history.filter((h) => h.what === 'banner new-route-after-off-route')
+  if (newRoutes.length === 0) {
     const off = report.history.find((h) => h.what === 'status off-route')
     return verdict(name, false, off === undefined ? 'the car never left the route: no "New route from here" on the screen' : `off the route at ${off.time}, and no new route after it`)
   }
   if (d === null) return verdict(name, false, 'no diagnostics to find the route request in')
-  const at = toSec(newRoute.time)
-  const asked = d.events.filter((e) => at - toSec(e.time) >= 0 && at - toSec(e.time) <= NEW_ROUTE_WINDOW_SEC).flatMap((e) => (e.what.match(/^request (\d+) sent$/) ?? []).slice(1))
-  const answered = asked.filter((n) => d.events.some((e) => new RegExp(`^request ${n} answered, HTTP 2\\d\\d,`).test(e.what)))
+  const away = awayWindows(d)
+  const whileAway = newRoutes.filter((h) => away.some((w) => toSec(h.time) >= w.from && toSec(h.time) <= w.to))
+  if (whileAway.length === 0) return verdict(name, false, `a new route at ${newRoutes.map((h) => h.time).join(', ')}, but the app was in front then: that shows nothing about being away`)
+  const answeredFor = (h) => {
+    const at = toSec(h.time)
+    const asked = d.events.filter((e) => at - toSec(e.time) >= 0 && at - toSec(e.time) <= NEW_ROUTE_WINDOW_SEC).flatMap((e) => (e.what.match(/^request (\d+) sent$/) ?? []).slice(1))
+    return asked.filter((n) => d.events.some((e) => new RegExp(`^request ${n} answered, HTTP 2\\d\\d,`).test(e.what))).length
+  }
+  const good = whileAway.filter((h) => answeredFor(h) > 0)
   const driving = report.status === 'driving'
   return verdict(
     name,
-    answered.length > 0 && driving,
-    `new route from where the car was at ${newRoute.time}, ${asked.length} route request(s) just before it, ${answered.length} answered, ${driving ? 'driving on at the end' : `at the end the screen showed "${report.status}"`}`,
+    good.length > 0 && driving,
+    `${whileAway.length} new route(s) from where the car was while away (${whileAway.map((h) => h.time).join(', ')}), ${good.length} with an answered route request just before, ${driving ? 'driving on at the end' : `at the end the screen showed "${report.status}"`}`,
   )
+}
+
+/** The stretches the app spent in the background, in seconds of the day: from "app background" to the next "app active" (or the end of the log). */
+export function awayWindows(d) {
+  const windows = []
+  let from = null
+  for (const e of d.events) {
+    if (e.what === 'app background' && from === null) from = toSec(e.time)
+    else if (e.what === 'app active' && from !== null) {
+      windows.push({ from, to: toSec(e.time) })
+      from = null
+    }
+  }
+  if (from !== null) windows.push({ from, to: toSec(d.now) })
+  return windows
+}
+
+/**
+ * The app stayed in the background for the time the lab meant it to. If iOS brought it back
+ * to the front early (or it never left), the other checks cover less than they claim.
+ */
+export function checkStayedAway(d, expectedSec) {
+  const name = 'the app stayed in the background until the lab brought it back'
+  const windows = awayWindows(d)
+  const longest = windows.reduce((best, w) => Math.max(best, w.to - w.from), 0)
+  const need = Math.round(expectedSec * 0.9)
+  return verdict(name, longest >= need, windows.length === 0 ? 'the app never went to the background' : `in the background for ${longest} s in one stretch (${need} s needed, ${windows.length} stretch(es))`)
 }
 
 /** Every line the app started saying, it finished. */
@@ -187,17 +220,24 @@ export function checkPlanShowsRoutes(seen) {
 }
 
 /** The checks of the "drives locked with a wrong turn" scenario, from the last lab report. */
-export function checkLockedWrongTurn(report) {
+export function checkLockedWrongTurn(report, awaySec) {
   const d = report?.diagnostics ?? null
   if (d === null) return [notRun('drive diagnostics', 'no lab report with diagnostics came back from the app')]
-  return [checkFixesWhileAway(d), checkTicksWhileAway(d), checkRequestAnsweredWhileAway(d), checkOffRouteThenNewRoute(report), checkSpeechFinished(d)]
+  return [
+    ...(awaySec === undefined ? [] : [checkStayedAway(d, awaySec)]),
+    checkFixesWhileAway(d),
+    checkTicksWhileAway(d),
+    checkRequestAnsweredWhileAway(d),
+    checkOffRouteThenNewRoute(report),
+    checkSpeechFinished(d),
+  ]
 }
 
 /** The checks of the soak. */
 export function checkSoak(report, awayMinutes) {
   const d = report?.diagnostics ?? null
   if (d === null) return [notRun('drive diagnostics', 'no lab report with diagnostics came back from the app')]
-  return [checkSteadyWhileAway(d, awayMinutes), checkTicksWhileAway(d), checkRequestAnsweredWhileAway(d), checkNoFailedRequests(d), checkSpeechFinished(d)]
+  return [checkStayedAway(d, awayMinutes * 60), checkSteadyWhileAway(d, awayMinutes), checkTicksWhileAway(d), checkRequestAnsweredWhileAway(d), checkNoFailedRequests(d), checkSpeechFinished(d)]
 }
 
 /**
@@ -210,6 +250,6 @@ export function redact(line) {
     .replace(/\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b/g, '<id>')
     .replace(/\b[0-9a-fA-F]{24,}\b/g, '<id>')
     .replace(/\b[ps]k\.[A-Za-z0-9_-]{10,}(\.[A-Za-z0-9_-]+)?/g, '<token>')
-    .replace(/-?\d{1,3}\.\d{4,}/g, '<number>')
+    .replace(/(?<![:\d])-?\d{1,3}\.\d{4,}/g, '<number>')
     .replace(/(dev\.routeiq\.shell)\.[A-Z0-9]{6,}/g, '$1.<team>')
 }

@@ -10,8 +10,8 @@
 // - As separate commands, which need no tunnel and so do not disturb that connection: the list
 //   of apps, files in the app's folder, the battery, the system log, putting the phone to sleep.
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -239,12 +239,27 @@ export async function connectPhone({ log = () => {} } = {}) {
       run(['apps', 'rm', bundle, REPORT_IN_APP])
     },
 
-    /** Copies a built web app (native/shell/www) into the app, for `-routeiqLabWeb`. */
+    /**
+     * Copies a built web app (native/shell/www) into the app, for `-routeiqLabWeb`. The copy
+     * tool puts a folder inside the destination under the folder's own name, so the build is
+     * first copied to a folder with the name the app looks for. True only when the page is
+     * really there afterwards.
+     */
     pushWeb(wwwDir) {
-      run(['apps', 'rm', bundle, WEB_IN_APP], { timeoutMs: 300_000 })
-      const r = run(['apps', 'push', bundle, wwwDir, WEB_IN_APP], { timeoutMs: 900_000 })
-      if (!r.ok) log(`push failed: ${why(r)}`)
-      return r.ok
+      const staging = mkdtempSync(path.join(tmpdir(), 'routeiq-lab-'))
+      try {
+        const named = path.join(staging, path.posix.basename(WEB_IN_APP))
+        cpSync(wwwDir, named, { recursive: true })
+        run(['apps', 'rm', bundle, WEB_IN_APP], { timeoutMs: 300_000 })
+        const r = run(['apps', 'push', bundle, named, path.posix.dirname(WEB_IN_APP)], { timeoutMs: 900_000 })
+        if (!r.ok) log(`push failed: ${why(r)}`)
+        const check = path.join(staging, 'check.html')
+        const there = run(['apps', 'pull', bundle, `${WEB_IN_APP}/index.html`, check]).ok && existsSync(check)
+        if (r.ok && !there) log('the web build is not where the app looks for it after the copy')
+        return r.ok && there
+      } finally {
+        rmSync(staging, { recursive: true, force: true })
+      }
     },
 
     removeWeb() {
@@ -262,20 +277,38 @@ export async function connectPhone({ log = () => {} } = {}) {
       return { percent: value('CurrentCapacity'), charging: value('IsCharging'), milliamps: value('InstantAmperage'), celsius: temperature === null ? null : temperature / 100 }
     },
 
-    /** Collects the app's lines of the system log until the returned function is called; it returns them, redacted. */
+    /**
+     * Collects, until the returned function is called: the app's own lines of the system log
+     * (without the DEBUG chatter; the newest 2000 are kept) and the home screen's lines that
+     * name the app (they say why it went to the background or came to the front). It returns
+     * them in order, redacted.
+     */
     startSyslog() {
-      const child = spawn(pmd3, ['syslog', 'live', '-pn', APP_PROCESS], { env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
-      const lines = []
-      let rest = ''
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (chunk) => {
-        const parts = (rest + chunk).split(/\r?\n/)
-        rest = parts.pop() ?? ''
-        for (const line of parts) if (lines.length < 3000) lines.push(redact(line))
-      })
+      const collect = (args, keep, limit) => {
+        const kept = []
+        const child = spawn(pmd3, ['syslog', 'live', ...args], { env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+        let rest = ''
+        child.stdout.setEncoding('utf8')
+        child.stdout.on('data', (chunk) => {
+          const parts = (rest + chunk).split(/\r?\n/)
+          rest = parts.pop() ?? ''
+          for (const line of parts) {
+            if (!keep(line)) continue
+            kept.push(redact(line))
+            if (kept.length > limit) kept.shift()
+          }
+        })
+        return { child, kept }
+      }
+      // Kept apart, so that the app's chatter cannot push out the few lines that say why it moved.
+      const sources = [
+        collect(['-pn', APP_PROCESS], (line) => !line.includes('<DEBUG>'), 1500),
+        collect(['-pn', 'SpringBoard', '-m', 'dev.routeiq.shell'], (line) => /<NOTICE>|<ERROR>|<FAULT>/.test(line) && /state update|Front display|open application|Executing request|termina|exit|crash|jetsam/i.test(line), 1500),
+      ]
       return () => {
-        child.kill()
-        return lines
+        for (const source of sources) source.child.kill()
+        // Each line starts with its date and time, so sorting the text puts them in order.
+        return sources.flatMap((source) => source.kept).sort((x, y) => (x.slice(0, 26) < y.slice(0, 26) ? -1 : x.slice(0, 26) > y.slice(0, 26) ? 1 : 0))
       }
     },
   }

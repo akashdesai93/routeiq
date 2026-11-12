@@ -205,6 +205,32 @@ describe("the lab presses the app's own buttons", () => {
     expect(driveStart('drive-at-12345-m3300000')).toEqual({ lng: 0.12345, lat: -33 })
   })
 
+  it('the in-app test drive: Start drive is pressed only after the test-drive switch is on', async () => {
+    const start = el('Start drive')
+    const box = { textContent: '', checked: false, clicks: 0, click() {
+      this.clicks++
+    } }
+    const doc = page({ '.plan': [el('plan')], '.routes > li': [el('Route')], button: [start], '.testdrive input[type="checkbox"]': [box as unknown as FakeElement] })
+    const run = await autopilot('testdrive', doc)
+    await run.pass(1000)
+    // The lab clicked the switch; the page has not turned it on yet, so no drive.
+    expect(box.clicks).toBe(1)
+    expect(start.clicks).toBe(0)
+    await run.pass(1000)
+    expect(start.clicks).toBe(0)
+    box.checked = true
+    await run.pass(1000)
+    expect(start.clicks).toBe(1)
+    expect(run.asked.times).toBe(0)
+  })
+
+  it('the in-app test drive in a build without it: no drive at all', async () => {
+    const start = el('Start drive')
+    const run = await autopilot('testdrive', planPage(start))
+    for (let i = 0; i < 4; i++) await run.pass(1000)
+    expect(start.clicks).toBe(0)
+  })
+
   it('without routes it does not ask for the position, and gives up after the wait', async () => {
     const start = el('Start drive')
     const run = await autopilot(AT_START, planPage(start, 0))

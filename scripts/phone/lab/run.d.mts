@@ -8,6 +8,7 @@ export const USAGE: string
 export interface LabRunOptions {
   scenario: string
   lock: boolean
+  inApp: boolean
   gps: boolean
   awaySec: number
   minutes: number
