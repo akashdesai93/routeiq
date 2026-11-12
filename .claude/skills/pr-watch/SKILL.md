@@ -20,9 +20,9 @@ without `phone-verified`, or is behind `main` in an area it changes. Don't work 
 merges only when the one required check, `required` (the last job of `gate.yml`), is green,
 the branch is up to date with `main`, and its review threads are resolved. The
 orchestrator's own doc and skill changes go through PRs like everything else: branch from
-`origin/main` in a worktree, push, open the PR, and merge it with
-`gh pr merge N --squash --auto` (no agent review needed for a docs-only or skills-only PR;
-anything else of the orchestrator's waits for the next iteration's review).
+`origin/main` in a worktree, push, open the PR, and land it with the REST merge below once
+`required` is green (no agent review needed for a docs-only or skills-only PR; anything else
+of the orchestrator's waits for the next iteration's review).
 
 In the cloud `gh pr` fails. Use REST: `gh api repos/akashdesai93/routeiq/pulls/N`,
 `.../pulls/N/files`, `.../commits/<sha>/check-runs?check_name=required`, and to land:
@@ -72,13 +72,14 @@ For each open, non-draft PR on `akashdesai93/routeiq`
    `verdict: approve <sha7>` or `verdict: changes <sha7>` (`state.mjs` reads it):
    - **Merge** when the reviewer reports no blocking finding, every Copilot and CodeQL
      thread has an outcome (step 3), verify is green, the PR has
-     no conflicts, and the PR body says how it was verified. Use
-     `gh pr merge N --squash --auto`: GitHub merges it as soon as `required` is green, and
-     refuses while it is red, so there is no merging on red CI. If GitHub says the branch
-     is out of date, run `gh pr update-branch N` (the gate runs again and auto-merge
-     finishes). Queue one PR at a time, since each merge makes the others out of date.
+     no conflicts, `required` is green on the head you reviewed, and the PR body says how
+     it was verified. Land it with the REST merge above (explicit `commit_message`,
+     `sha` pinned to that head); never `gh pr merge` or auto-merge. If GitHub says the
+     branch is out of date, update it (`gh api -X PUT repos/akashdesai93/routeiq/pulls/N/update-branch`),
+     wait for `required` on the new head, and land that head. Land one PR at a time,
+     since each merge makes the others out of date.
      GitHub deletes the head branch on merge; the author restarts from `origin/main`.
-     Once it has merged (`gh pr view N --json state,mergeCommit`; next iteration if the
+     Once it has merged (`gh api repos/akashdesai93/routeiq/pulls/N --jq .merged,.merge_commit_sha`; next iteration if the
      checks are still running):
      - comment `pr-watch: merged <sha>`;
      - tell the author to restart from `origin/main` (`mcp__fleet__send` for a local
