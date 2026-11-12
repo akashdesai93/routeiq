@@ -182,7 +182,8 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    restriction has to list that host; no live position yet (the origin is one fix,
    there is no blue dot and no following); a dragged pin shows coordinates, not an
    address; the soft keyboard covers part of the suggestion list on a small screen
-   (not tried on a real iPhone); no "add to home screen" manifest or offline shell;
+   (not tried on a real iPhone); the "add to home screen" manifest and offline shell
+   are done (#9; a Home Screen web app still stops when the iPhone locks);
    Search Box results are for temporary use by Mapbox's terms, so storing saved
    places from them needs settling (README, Planning a trip). For the native app:
    places belong in app storage (a protected file or the keychain), location comes
