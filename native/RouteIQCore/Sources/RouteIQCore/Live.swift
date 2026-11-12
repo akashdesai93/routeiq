@@ -53,8 +53,13 @@ public struct LiveOptions: Hashable, Sendable {
     public var offRouteReserve: Double
     /// No check is sent from a position older than this, in seconds (a tunnel): it would be asked from the wrong place.
     public var maxFixAgeSec: Double
-    /// How long the "switched route" banner and its "Keep previous route" button stay, in seconds.
+    /// How long the "switched route" banner and its "Keep my route" button stay, in seconds.
     public var switchBannerSec: Double
+    /// While the switch banner shows, the turn card holds the distance the spoken line named only
+    /// when its next turn is that turn-off: a maneuver within this many meters of it, in meters.
+    /// Also how near a new offer's turn-off must be to one turned down for the offer to read
+    /// "Still faster" (#84).
+    public var heldTurnMatchM: Double
     /// A spell in the background shorter than this is not mentioned, in seconds.
     public var hiddenNoteMinSec: Double
     /// How long the "was paused in the background" note stays, in seconds.
@@ -80,6 +85,7 @@ public struct LiveOptions: Hashable, Sendable {
         offRouteReserve: Double = 5,
         maxFixAgeSec: Double = 10,
         switchBannerSec: Double = 8,
+        heldTurnMatchM: Double = 50,
         hiddenNoteMinSec: Double = 5,
         pausedNoteSec: Double = 15,
         replanGapSec: Double = 30,
@@ -96,6 +102,7 @@ public struct LiveOptions: Hashable, Sendable {
         self.offRouteReserve = offRouteReserve
         self.maxFixAgeSec = maxFixAgeSec
         self.switchBannerSec = switchBannerSec
+        self.heldTurnMatchM = heldTurnMatchM
         self.hiddenNoteMinSec = hiddenNoteMinSec
         self.pausedNoteSec = pausedNoteSec
         self.replanGapSec = replanGapSec
@@ -123,6 +130,7 @@ public struct LiveOptions: Hashable, Sendable {
             offRouteReserve: JS.round(n(offRouteReserve, d.offRouteReserve)),
             maxFixAgeSec: n(maxFixAgeSec, d.maxFixAgeSec),
             switchBannerSec: n(switchBannerSec, d.switchBannerSec),
+            heldTurnMatchM: n(heldTurnMatchM, d.heldTurnMatchM),
             hiddenNoteMinSec: n(hiddenNoteMinSec, d.hiddenNoteMinSec),
             pausedNoteSec: n(pausedNoteSec, d.pausedNoteSec),
             replanGapSec: JS.max(minRequestGapSec, n(replanGapSec, d.replanGapSec)),
@@ -268,13 +276,39 @@ public struct LiveState: Hashable, Sendable {
         public var pending: Bool
     }
 
+    /// The confirmed stage of the switch moment (#84). `text` is the line spoken for it, word for
+    /// word. The figures are those of the moment it was made (`atMs`): `afterSec` the new route's
+    /// travel time, `beforeSec` the old one's (the new one plus the saving the engine measured;
+    /// nil when no saving was measured), and `turnInM` the turn-off the line names (nil: none).
     public struct SwitchBanner: Hashable, Sendable {
         public var untilMs: Double
         public var text: String
         public var canKeep: Bool
+        public var atMs: Double
+        public var beforeSec: Double?
+        public var afterSec: Double
+        public var turnInM: Double?
     }
 
-    /// What "Keep previous route" goes back to.
+    /// A faster route the engine is confirming (its confirming or cooldown answer): the pending
+    /// stage of the switch moment (#84). `savingSec` against the route being driven (nil:
+    /// unknown); `lightsDelta` its light count minus the current route's (negative: fewer), nil
+    /// unless both counts are full; `again` when it turns off where a route the driver turned
+    /// down did.
+    public struct Offer: Hashable, Sendable {
+        public var savingSec: Double?
+        public var lightsDelta: Int?
+        public var turnInM: Double
+        public var again: Bool
+    }
+
+    /// Shown for a few seconds after "Keep my route": the calm banner of the declined stage (#43).
+    public struct Kept: Hashable, Sendable {
+        public var untilMs: Double
+        public var noReturnSec: Double
+    }
+
+    /// What "Keep my route" goes back to.
     public struct Undo: Hashable, Sendable {
         public var route: RouteCandidate
         public var alongM: Double
@@ -329,7 +363,12 @@ public struct LiveState: Hashable, Sendable {
     public var turn: Turn?
     /// Shown for a few seconds after a switch.
     public var switchBanner: SwitchBanner?
-    /// What "Keep previous route" goes back to, while the banner is up.
+    /// A faster route being confirmed, which "Keep my route" can turn down too. Nil otherwise.
+    public var offer: Offer?
+    public var kept: Kept?
+    /// Where the routes the driver turned down on this drive turn off: a new offer that turns off there is "still faster".
+    public var declinedTurns: [LngLat]
+    /// What "Keep my route" goes back to, while the banner is up.
     public var undo: Undo?
     public var switches: [LiveSwitch]
     public var declinedSwitches: Int
@@ -370,6 +409,9 @@ public struct LiveState: Hashable, Sendable {
         eta: nil,
         turn: nil,
         switchBanner: nil,
+        offer: nil,
+        kept: nil,
+        declinedTurns: [],
         undo: nil,
         switches: [],
         declinedSwitches: 0,
@@ -412,7 +454,7 @@ public enum LiveEvent: Hashable, Sendable {
     case tick(nowMs: Double)
     case visibility(nowMs: Double, hidden: Bool)
     case wakeLock(result: WakeLockResult)
-    /// The driver pressed "Keep previous route".
+    /// The driver pressed "Keep my route": turns down the switch just made, or the faster route still being confirmed.
     case keepPrevious(nowMs: Double)
     case mute(muted: Bool)
     /// The End tap, or the drive view being closed.
@@ -542,6 +584,50 @@ public struct LiveView: Hashable, Sendable {
     public var warnings: [String]
     public var requestsUsed: Int
     public var maxRequests: Double
+    /// The switch moment on screen (#84): a faster route being confirmed, the switch just made, or the route kept. Nil: none.
+    public var moment: SwitchMoment?
+    /// While the switch banner shows, the turn card holds the distance the spoken line named
+    /// ("0.8 mi" for "Turn in 0.8 miles"), so screen and voice agree (#22). Nil: show the real
+    /// distance (no banner, or the next turn is not the turn-off).
+    public var heldTurnText: String?
+}
+
+/// The three stages of the switch moment, in words and figures (design/README.md, #22, #43, #44).
+public enum SwitchMoment: Hashable, Sendable {
+    /// Travel time and arrival at the moment of a switch.
+    public struct Figures: Hashable, Sendable {
+        public var sec: Double
+        public var arriveAtMs: Double
+
+        public init(sec: Double, arriveAtMs: Double) {
+            self.sec = sec
+            self.arriveAtMs = arriveAtMs
+        }
+    }
+
+    /// A faster route is being confirmed: nothing has changed yet. "Keep my route" is offered.
+    case pending(title: String, detail: String)
+    /// The switch is made. `title` is the spoken line, word for word. `before`: the route left
+    /// behind, nil when not known.
+    case confirmed(title: String, before: Figures?, after: Figures, canKeep: Bool)
+    /// The driver kept their route. Calm, not news.
+    case kept(title: String, detail: String)
+
+    public var stage: String {
+        switch self {
+        case .pending: return "pending"
+        case .confirmed: return "confirmed"
+        case .kept: return "kept"
+        }
+    }
+
+    public var canKeep: Bool {
+        switch self {
+        case .pending: return true
+        case let .confirmed(_, _, _, canKeep): return canKeep
+        case .kept: return false
+        }
+    }
 }
 
 public enum Live {
@@ -558,6 +644,64 @@ public enum Live {
     )
 
     public static let wakeLockWarning = "This browser cannot keep the screen awake. Keep the screen on yourself."
+
+    /// The pending banner's title (#44, #43): the TS OFFER_TITLE.
+    public enum OfferTitle {
+        public static let first = "Checking a faster route"
+        public static let again = "Still faster. Checking again."
+    }
+
+    /// How many more lights `offered` has than `current` (negative: fewer). Nil unless both
+    /// counts are full: a partial or unknown count is never compared (unknown is never zero).
+    static func lightsDelta(_ current: RouteCandidate?, _ offered: RouteCandidate?) -> Int? {
+        guard let current, let offered, current.signalCoverage == .full, offered.signalCoverage == .full,
+              let a = current.signalCount, let b = offered.signalCount else { return nil }
+        return b - a
+    }
+
+    /// The route being driven as this answer gave it (the engine's `current`), so its light count
+    /// covers the same stretch, from the car on, as an offer's. Nil: not among them.
+    static func freshCurrent(_ current: RerouteCurrentEta?, _ answered: [RouteCandidate]) -> RouteCandidate? {
+        guard let current else { return nil }
+        return answered.first { $0.durationSec == current.durationSec && $0.distanceM == current.distanceM }
+    }
+
+    /// "2 fewer lights", "1 more light", "same lights"; "lights: can't compare" when a count is not full.
+    static func lightsWords(_ delta: Int?) -> String {
+        guard let delta else { return "lights: can't compare" }
+        if delta == 0 { return "same lights" }
+        let n = delta < 0 ? -delta : delta
+        return "\(n) \(delta < 0 ? "fewer" : "more") light\(n == 1 ? "" : "s")"
+    }
+
+    /// The spoken distance ("0.8 miles", "1 mile", "450 feet") as the turn card sets it ("0.8 mi", "1 mi", "450 ft").
+    public static func cardDistance(_ spoken: String) -> String {
+        if spoken.hasSuffix(" miles") { return String(spoken.dropLast(" miles".count)) + " mi" }
+        if spoken.hasSuffix(" mile") { return String(spoken.dropLast(" mile".count)) + " mi" }
+        if spoken.hasSuffix(" feet") { return String(spoken.dropLast(" feet".count)) + " ft" }
+        return spoken
+    }
+
+    static func switchMoment(_ state: LiveState, offRoute: Bool) -> SwitchMoment? {
+        guard state.status == .driving else { return nil }
+        if let banner = state.switchBanner {
+            return .confirmed(
+                title: banner.text,
+                before: banner.beforeSec.map { SwitchMoment.Figures(sec: $0, arriveAtMs: banner.atMs + $0 * 1000) },
+                after: SwitchMoment.Figures(sec: banner.afterSec, arriveAtMs: banner.atMs + banner.afterSec * 1000),
+                canKeep: banner.canKeep
+            )
+        }
+        if offRoute { return nil }
+        if let offer = state.offer {
+            let saves = offer.savingSec.map { "Would save \(Format.formatDuration($0))" } ?? "Faster than your route"
+            return .pending(title: offer.again ? OfferTitle.again : OfferTitle.first, detail: "\(saves) · \(lightsWords(offer.lightsDelta))")
+        }
+        if let kept = state.kept {
+            return .kept(title: Spoken.keptPrevious, detail: "Won't offer that route again for \(Format.formatDuration(kept.noReturnSec)).")
+        }
+        return nil
+    }
 
     static func times(_ n: Int) -> String {
         n == 1 ? "once" : n == 2 ? "twice" : "\(n) times"
@@ -618,6 +762,8 @@ public enum Live {
         next.message = message
         next.request = nil
         next.switchBanner = nil
+        next.offer = nil
+        next.kept = nil
         next.undo = nil
         return LiveStep(state: next, effects: stopEffects)
     }
@@ -700,6 +846,8 @@ public enum Live {
         next.request = nil
         next.turn = nil
         next.switchBanner = nil
+        next.offer = nil
+        next.kept = nil
         next.undo = nil
         next.pausedNote = nil
         return LiveStep(state: next, effects: stopEffects + [.speak(line: SpokenLine(text: arrivalLine(summary), priority: .urgent))])
@@ -723,6 +871,8 @@ public enum Live {
             if firstWord {
                 next.offRouteNotified = true
                 next.switchBanner = nil
+                next.offer = nil
+                next.kept = nil
                 next.undo = nil
                 // Must be heard: the "New route" line that follows within a second or two would
                 // otherwise take its place in the queue, and the driver would never hear why.
@@ -879,6 +1029,21 @@ public enum Live {
                 next.eta = LiveState.Eta(durationSec: current.durationSec, remainingM: current.distanceM)
             }
             next.turn = decision.considered.flatMap { pending ? LiveState.Turn(at: $0.turnAt, pending: true) : nil }
+            if let considered = decision.considered, pending {
+                next.offer = LiveState.Offer(
+                    savingSec: considered.savingSec,
+                    lightsDelta: lightsDelta(
+                        freshCurrent(decision.current, routes + (baseline ?? [])),
+                        routes.first { JS.Key($0.id) == JS.Key(considered.routeId) }
+                    ),
+                    turnInM: considered.turnInM,
+                    again: state.declinedTurns.contains { Geo.distanceM($0, considered.turnAt) <= opts.heldTurnMatchM }
+                )
+                // A new offer is news of its own: the calm "kept" banner gives way to it.
+                next.kept = nil
+            } else {
+                next.offer = nil
+            }
             return LiveStep(state: next, effects: [])
         }
 
@@ -895,21 +1060,23 @@ public enum Live {
         next.eta = LiveState.Eta(durationSec: chosen.durationSec, remainingM: chosen.distanceM)
         next.turn = decision.considered.map { LiveState.Turn(at: $0.turnAt, pending: false) }
         next.switches = quiet ? state.switches : state.switches + [made]
-        let bannerText: String
-        if offRoute {
-            bannerText = "New route from here"
-        } else if let saving {
-            bannerText = "Switched to a faster route\(sideStreet ? " via side streets" : ""): saves \(Reroute.spokenDuration(saving))"
-        } else {
-            bannerText = "Switched routes: the road ahead looks closed"
-        }
-        next.switchBanner = quiet ? nil : LiveState.SwitchBanner(untilMs: nowMs + opts.switchBannerSec * 1000, text: bannerText, canKeep: !offRoute)
+        let turnInM = decision.considered?.turnInM
+        // The banner shows what is said, word for word (#22).
+        let spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet: sideStreet)
+        next.switchBanner = quiet ? nil : LiveState.SwitchBanner(
+            untilMs: nowMs + opts.switchBannerSec * 1000,
+            text: spokenSwitch,
+            canKeep: !offRoute,
+            atMs: nowMs,
+            beforeSec: !offRoute ? saving.map { chosen.durationSec + $0 } : nil,
+            afterSec: chosen.durationSec,
+            turnInM: offRoute ? nil : turnInM
+        )
+        next.offer = nil
+        next.kept = nil
         // Off the route there is no previous route to keep.
         next.undo = offRoute ? nil : LiveState.Undo(route: route, alongM: tracking.alongRouteM, engine: state.engine, eta: state.eta)
-        let say = LiveEffect.speak(line: SpokenLine(
-            text: switchLine(decision.code, saving, decision.considered?.turnInM, chosen.durationSec, sideStreet: sideStreet),
-            priority: .urgent
-        ))
+        let say = LiveEffect.speak(line: SpokenLine(text: spokenSwitch, priority: .urgent))
         return LiveStep(state: next, effects: [.followRoute(geometry: chosen.geometry)] + (quiet ? [] : [say]))
     }
 
@@ -1024,12 +1191,29 @@ public enum Live {
             return LiveStep(state: next, effects: [])
 
         case let .keepPrevious(nowMs):
-            guard state.status == .driving, let undo = state.undo, let route = state.route, let tracking = state.tracking, state.switchBanner != nil else {
-                return unchanged
-            }
             let nowSec = (nowMs - (state.startedAtMs ?? nowMs)) / 1000
             // The TS reads the given value (`?? default`) without resolving it; so does this.
             let noReturnSec = opts.reroute.noReturnSec
+            let kept = LiveState.Kept(untilMs: nowMs + opts.switchBannerSec * 1000, noReturnSec: noReturnSec)
+            let declinedTurns = state.turn.map { state.declinedTurns + [$0.at] } ?? state.declinedTurns
+            if state.status == .driving, state.switchBanner == nil, state.offer != nil, let pendingPath = state.engine.pending?.geometry {
+                // Turned down while it is still being confirmed (the pending stage): nothing to go back
+                // to. The engine drops the confirmation and is told not to offer that route again for
+                // noReturnSec, as after a switch.
+                var next = state
+                next.engine = Reroute.declineRoute(state.engine, pendingPath, untilSec: nowSec + noReturnSec)
+                next.probes.keep = nil
+                next.turn = nil
+                next.offer = nil
+                next.kept = kept
+                next.declinedTurns = declinedTurns
+                next.declinedSwitches = JS.increment(state.declinedSwitches)
+                next.lastDecision = LiveState.Decision(action: .stay, code: .keptPrevious, reason: "Staying: you chose to keep your route", atMs: nowMs)
+                return LiveStep(state: next, effects: [.speak(line: SpokenLine(text: Spoken.keptPrevious, priority: .urgent))])
+            }
+            guard state.status == .driving, let undo = state.undo, let route = state.route, let tracking = state.tracking, state.switchBanner != nil else {
+                return unchanged
+            }
             let back = Tracking.retrack(tracking, TrackedRoute(undo.route.geometry), options: opts.tracking, hintAlongM: undo.alongM)
             var next = state
             next.route = undo.route
@@ -1043,6 +1227,9 @@ public enum Live {
             // The check that is out is cancelled below; its answer will never come.
             next.request = nil
             next.switchBanner = nil
+            next.offer = nil
+            next.kept = kept
+            next.declinedTurns = declinedTurns
             next.undo = nil
             next.switches = Array(state.switches.dropLast())
             next.declinedSwitches = JS.increment(state.declinedSwitches)
@@ -1078,6 +1265,7 @@ public enum Live {
                 next.undo = nil
             }
             if let note = next.pausedNote, nowMs >= note.untilMs { next.pausedNote = nil }
+            if let kept = next.kept, nowMs >= kept.untilMs { next.kept = nil }
             if let request = next.request, nowMs - request.sentAtMs >= opts.requestTimeoutSec * 1000 {
                 return maybePoll(timedOut(next, nowMs, opts), nowMs, opts)
             }
@@ -1125,6 +1313,13 @@ public enum Live {
 
         var nextTurn: NextTurn?
         if let route, let tracking, !offRoute { nextTurn = Guidance.nextTurn(route.guidance, tracking.alongRouteM) }
+        // Only when the next turn is the turn-off the line named (at its place, and no farther than
+        // it was): a shared turn before it keeps its own distance.
+        var heldTurnText: String?
+        if let turn = nextTurn, let turnInM = state.switchBanner?.turnInM, let turnOff = state.turn, !turnOff.pending,
+           Geo.distanceM(turn.location, turnOff.at) <= opts.heldTurnMatchM, turn.distanceM <= turnInM + opts.heldTurnMatchM {
+            heldTurnText = cardDistance(Reroute.spokenDistance(turnInM))
+        }
 
         return LiveView(
             status: state.status,
@@ -1138,7 +1333,9 @@ public enum Live {
             offRoute: offRoute,
             warnings: warnings,
             requestsUsed: state.requestsUsed,
-            maxRequests: opts.maxRequests
+            maxRequests: opts.maxRequests,
+            moment: switchMoment(state, offRoute: offRoute),
+            heldTurnText: heldTurnText
         )
     }
 }

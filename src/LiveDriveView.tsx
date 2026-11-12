@@ -7,6 +7,7 @@ import {
   type LiveState,
   type LiveView,
   type SignalCoverage,
+  type SwitchMoment,
 } from './core/index.ts'
 import { Figure } from './Figure.tsx'
 import { REPLAY_MULTIPLIERS, type ReplayMultiplier } from './drive/replay.ts'
@@ -31,6 +32,7 @@ interface LiveDriveViewProps {
   extra?: ReactNode
   /** The More sheet starts open. For tests: a driver opens it with a tap. */
   initiallyOpen?: boolean
+  /** "Keep my route": turns down the switch, pending or made. */
   onKeepPrevious: () => void
   onMute: (muted: boolean) => void
   onEnd: () => void
@@ -152,6 +154,92 @@ const TurnCard = memo(function TurnCard({ arrow, distance, line, plain, spokenPr
   )
 })
 
+/** The voice mark of a banner that is the spoken line. Decoration. */
+function SpeakerIcon() {
+  return (
+    <svg className="live-news-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z" />
+        <path d="M15.5 9 Q17.5 12 15.5 15 M18.5 6.5 Q22 12 18.5 17.5" />
+      </g>
+    </svg>
+  )
+}
+
+interface NewsProps {
+  stage: SwitchMoment['stage']
+  title: string
+  detail: string | null
+}
+
+/**
+ * The banner of the switch moment (#84, design #22, #43, #44): an amber
+ * outline while a faster route is being confirmed, filled amber once the
+ * switch is made (its words are the spoken line), and a calm outline after
+ * "Keep my route". Amber means news and nothing else.
+ */
+const News = memo(function News({ stage, title, detail }: NewsProps) {
+  return (
+    <div className="live-news" data-stage={stage} role="status">
+      {stage === 'pending' ? <span className="live-news-ring" aria-hidden="true" /> : <SpeakerIcon />}
+      <div className="live-news-text">
+        <strong>{title}</strong>
+        {detail !== null && <span className="live-news-detail">{detail}</span>}
+      </div>
+    </div>
+  )
+})
+
+/**
+ * "43 min" beside "35 min" reads "43 → 35 min", and "8:37 AM" beside "8:20 AM" reads
+ * "8:37 → 8:20 AM": a unit or day half the two share is written once, after the new figure,
+ * so the line fits a 375 px phone.
+ */
+function bare(before: string, after: string): string {
+  const unit = / [^\d\s]+$/.exec(after)?.[0]
+  return unit !== undefined && before.endsWith(unit) ? before.slice(0, -unit.length) : before
+}
+
+/**
+ * The time line at the moment of a switch: the old travel time and arrival
+ * small, dim and struck through, the new ones beside them, the new time
+ * on amber. The figures of the moment the switch was made: they do not tick.
+ */
+const SwitchEta = memo(function SwitchEta({ beforeLeft, beforeArrive, afterLeft, afterArrive }: {
+  beforeLeft: string | null
+  beforeArrive: string | null
+  afterLeft: string
+  afterArrive: string
+}) {
+  return (
+    <p className="live-eta live-eta-switch">
+      <span className="live-eta-change">
+        {beforeLeft !== null && (
+          <>
+            <s className="live-eta-old">{bare(beforeLeft, afterLeft)}</s>
+            <span className="live-eta-to"> → </span>
+          </>
+        )}
+        <strong className="live-eta-left live-eta-new">
+          <Figure text={afterLeft} unitClass="live-unit" />
+        </strong>
+      </span>
+      <span className="live-eta-arrive">
+        <span className="live-eta-label">Arrive </span>
+        <span className="live-eta-clock">
+          {beforeArrive !== null && (
+            <>
+              <s className="live-eta-old">{bare(beforeArrive, afterArrive)}</s>
+              <span className="live-eta-to"> → </span>
+            </>
+          )}
+          <span className="live-eta-now">{afterArrive}</span>
+        </span>
+      </span>
+    </p>
+  )
+})
+
 /** One line: the time left, large, and the arrival time, smaller and dimmer. */
 const EtaLine = memo(function EtaLine({ left, arrive, fallback }: { left: string | null; arrive: string | null; fallback: string }) {
   return (
@@ -235,7 +323,7 @@ const MoreSheet = memo(function MoreSheet({ lights, lightsHint, distance, muted,
         {status}
         {replaying && ' · GPS replay (simulated position)'}
       </p>
-      {dev !== null && replaying && (
+      {import.meta.env.DEV && dev !== null && replaying && (
         <div className="live-dev" role="group" aria-label="Replay controls (development)">
           {REPLAY_MULTIPLIERS.map((m) => (
             <button key={m} type="button" aria-pressed={dev.multiplier === m} onClick={() => dev.setMultiplier(m)}>
@@ -281,7 +369,7 @@ export function LiveDriveView({
   const [open, setOpen] = useState(initiallyOpen)
   const { status } = state
   const turn = view.nextTurn
-  const banner = state.switchBanner
+  const moment = view.moment
   const summary = state.summary
 
   if (status === 'arrived' && summary !== null) {
@@ -341,7 +429,8 @@ export function LiveDriveView({
     const straight = turn.arrow === 'straight'
     card = {
       arrow: turn.arrow,
-      distance: formatDistance(turn.distanceM),
+      // While the switch banner shows, the distance its spoken line named (#22).
+      distance: view.heldTurnText ?? formatDistance(turn.distanceM),
       line: straight ? (turn.primaryText === '' ? 'Continue straight' : `Continue on ${turn.primaryText}`) : turn.primaryText,
       plain: straight || turn.arrow === 'arrive',
       spokenPrefix: straight ? null : ARROW_LABEL[turn.arrow],
@@ -380,27 +469,37 @@ export function LiveDriveView({
       <TurnCard {...card} />
 
       <section className="live-bottom" aria-label="Live drive">
-        {banner !== null && (
-          <div className="live-banner" role="status">
-            <strong>{banner.text}</strong>
-            {banner.canKeep && (
-              <button type="button" className="live-button live-keep" onClick={onKeepPrevious}>
-                Keep previous route
-              </button>
-            )}
-          </div>
-        )}
         {view.warnings.map((warning) => (
           <p key={warning} className="live-warning" role="status">
             {warning}
           </p>
         ))}
         {!speechSupported && <p className="live-warning">This browser cannot speak: watch the screen for route changes.</p>}
-        <EtaLine
-          left={known ? formatDuration(view.remainingSec!) : null}
-          arrive={known ? clockTime(view.arrivalAtMs!) : null}
-          fallback={destinationLabel}
-        />
+        {/* The switch just made is one block: its banner, its figures and the way to undo it. */}
+        <div className={moment?.stage === 'confirmed' ? 'live-moment live-banner' : 'live-moment'}>
+          {moment !== null && (
+            <News stage={moment.stage} title={moment.title} detail={moment.stage === 'confirmed' ? null : moment.detail} />
+          )}
+          {moment?.stage === 'confirmed' ? (
+            <SwitchEta
+              beforeLeft={moment.before === null ? null : formatDuration(moment.before.sec)}
+              beforeArrive={moment.before === null ? null : clockTime(moment.before.arriveAtMs)}
+              afterLeft={formatDuration(moment.after.sec)}
+              afterArrive={clockTime(moment.after.arriveAtMs)}
+            />
+          ) : (
+            <EtaLine
+              left={known ? formatDuration(view.remainingSec!) : null}
+              arrive={known ? clockTime(view.arrivalAtMs!) : null}
+              fallback={destinationLabel}
+            />
+          )}
+          {moment !== null && moment.canKeep && (
+            <button type="button" className="live-button live-keep" onClick={onKeepPrevious}>
+              Keep my route
+            </button>
+          )}
+        </div>
         {/* With More closed the engine's latest word is still there to be read out, just not drawn.
             Without the "checked N s ago" part, so a clock tick changes nothing here. */}
         {!open && (
