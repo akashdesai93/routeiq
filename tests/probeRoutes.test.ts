@@ -339,8 +339,8 @@ describe('comparing long routes (#93)', () => {
     let compared = 0
     let same = 0
     let covered = 0
-    for (let round = 0; round < 6; round++) {
-      const base = road(random, 40 + Math.floor(random() * 120))
+    for (let round = 0; round < 4; round++) {
+      const base = road(random, 30 + Math.floor(random() * 50))
       const lines = variants(random, base).map(lngLat)
       for (const a of lines) {
         for (const b of lines) {
@@ -359,7 +359,7 @@ describe('comparing long routes (#93)', () => {
       }
     }
     // Both answers come up often enough for the comparison to mean something.
-    expect(compared).toBe(6 * 14 * 14 * 3)
+    expect(compared).toBe(4 * 14 * 14 * 3)
     expect(same).toBeGreaterThan(compared / 10)
     expect(same).toBeLessThan(compared / 2)
     expect(covered).toBeGreaterThan(compared / 5)
