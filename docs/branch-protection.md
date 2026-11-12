@@ -28,10 +28,18 @@ push to `main`; only the macOS builds stay path-filtered there.
 
 `gates.yml` keeps those PR gates current without re-running the whole Gate: when a PR gains or
 loses one of those labels or its body is edited, and when a push to `main` changes an area an
-open PR also changes, it re-runs only the `required` job of that PR's newest finished Gate run
-(about 15 s). The areas, in which two changes can break each other: web app, iPhone shell
+open PR also changes, it re-runs only the `required` job of that PR's newest Gate run
+(about 15 s). A run still in progress is waited for (up to 4 min) and re-run anyway, because
+its `required` finishes before `e2e-report` and may already have read the old labels. A fork's
+pull request gets a read-only token, so `gates.yml` cannot re-run anything for it: check its
+labels by hand before landing (none of tonight's PRs come from forks). The areas, in which two changes can break each other: web app, iPhone shell
 (`native/shell`), Swift core (`native/RouteIQCore`, `docs/contracts`), native app, design, CI.
 README, PLAN, `docs/` and `.claude/` are in none, so a docs merge never makes a PR stale.
+
+**Open PRs from before the gates.** A re-run uses the `gate.yml` of the run it re-runs, so a PR
+whose last Gate run predates the gate steps has none of them, and its old green `required`
+ignores the labels. When the gates land, update the branch of every open PR (each gets a new
+Gate run), or check its hold and phone labels by hand until it has one.
 
 `main-red.yml` follows the Gate on `main`: when the newest finished run failed or was
 cancelled it opens the issue **main is red** (label `p1`, link to the run), or comments on
@@ -108,8 +116,8 @@ And to `PATCH repos/akashdesai93/routeiq`: `allow_squash_merge: true`,
 ### What this changes day to day
 
 - **No direct pushes to `main`,** docs and skill edits included. Branch, open a pull
-  request, and merge it with `gh pr merge N --squash --auto`: it merges by itself once
-  `required` is green.
+  request; the lander merges it with the REST merge in `.claude/skills/pr-watch/SKILL.md`
+  (squash, `sha` pinned to the reviewed head, explicit message) once `required` is green.
 - **"update the branch"** (the area gate): after another pull request merges in the same area,
   bring the next one up to date (`gh pr update-branch N`, or in the cloud
   `gh api -X PUT repos/akashdesai93/routeiq/pulls/N/update-branch`); the gate runs again.

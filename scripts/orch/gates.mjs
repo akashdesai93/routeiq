@@ -20,9 +20,14 @@ export const HOLD_LABELS = ['do-not-merge', 'needs-human']
 export const PHONE_LABEL = 'needs-phone'
 export const PHONE_VERIFIED = 'phone-verified'
 // At the start of a line, as PRs write it; a PR that only quotes it (like this one's docs) is not held.
-export const PHONE_MARKER = /^[ \t>]*(?:\*\*|#+[ \t]*)?PHONE CHECK NEEDED\b/im
+// A list item ("- ", "* ", "+ ", "1. ") counts too: a reviewer writes it as a bullet as often as a line.
+export const PHONE_MARKER = /^[ \t>]*(?:(?:[-*+]|\d+\.)[ \t]+)?(?:\*\*|#+[ \t]*)?PHONE CHECK NEEDED\b/im
 /** GitHub's compare API lists at most this many files. */
 export const COMPARE_FILE_LIMIT = 300
+/** How long a re-check waits for a Gate run still in progress before re-running its `required` (gates.yml gives the job 10 min). */
+export const RERUN_WAIT = Object.freeze({ pollMs: 15_000, maxMs: 4 * 60_000 })
+// Job states in which `required` has not read the gates yet.
+const NOT_STARTED = new Set(['queued', 'waiting', 'pending', 'requested'])
 
 // Areas in which two changes can break each other. A path may be in several. Paths in no
 // area (README, PLAN, docs, skills) never make a PR stale; anything not listed is "web".
@@ -90,10 +95,10 @@ function gh(path, method = 'GET') {
   return out.trim() ? JSON.parse(out) : null
 }
 
-function prFiles(R, n) {
+function prFiles(R, n, call = gh) {
   const files = []
   for (let page = 1; page <= 30; page++) {
-    const batch = gh(`${R}/pulls/${n}/files?per_page=100&page=${page}`)
+    const batch = call(`${R}/pulls/${n}/files?per_page=100&page=${page}`)
     files.push(...batch.map((f) => f.filename), ...batch.filter((f) => f.previous_filename).map((f) => f.previous_filename))
     if (batch.length < 100) break
   }
@@ -120,19 +125,69 @@ function readPr(R, n, testedSha) {
   }
 }
 
-/** Re-runs the `required` job of the newest finished Gate run of a commit. */
-function rerunRequired(R, sha, dry, why) {
-  const runs = (gh(`${R}/actions/workflows/gate.yml/runs?head_sha=${sha}&event=pull_request&per_page=5`).workflow_runs || [])
-  const run = runs[0]
-  if (!run) return console.log(`  no Gate run for ${sha.slice(0, 7)} yet: its required job will read the gates when it runs`)
-  if (run.status !== 'completed') return console.log(`  Gate run ${run.id} is ${run.status}: its required job will read the gates when it gets there`)
-  const job = (gh(`${R}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []).find((j) => j.name === 'required')
-  if (!job) return console.log(`  Gate run ${run.id} has no required job`)
-  console.log(`  ${dry ? 'dry run: would re-run' : 're-running'} required (job ${job.id}, run ${run.id}): ${why}`)
-  if (!dry) gh(`${R}/actions/jobs/${job.id}/rerun`, 'POST')
+/**
+ * Re-runs the `required` job of the newest Gate run of a commit. A run still in progress is
+ * waited for and then re-run anyway: its `required` may already have read the gates (it
+ * finishes before e2e-report), so a label added in that window would otherwise be dropped.
+ * `gh` and `sleep` are passed in so the tests can drive it. Returns what it did.
+ */
+export async function rerunRequired(R, sha, { dry = false, why = '', gh: call = gh, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), wait = RERUN_WAIT, log = console.log } = {}) {
+  const newest = () => (call(`${R}/actions/workflows/gate.yml/runs?head_sha=${sha}&event=pull_request&per_page=5`).workflow_runs || [])[0]
+  let run = newest()
+  if (!run) {
+    log(`  no Gate run for ${sha.slice(0, 7)} yet: its required job will read the gates when it runs`)
+    return 'no-run'
+  }
+  if (run.status !== 'completed') {
+    // A required job that has not started reads the gates when it does: nothing to wait for (and
+    // a Gate run with the macOS builds outlasts the wait, so waiting would only fail this check).
+    const job = (call(`${R}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []).find((j) => j.name === 'required')
+    if (!job || NOT_STARTED.has(job.status)) {
+      log(`  Gate run ${run.id} is ${run.status} and its required job has not started: it will read the gates`)
+      return 'pending'
+    }
+  }
+  for (let waited = 0; run.status !== 'completed'; waited += wait.pollMs) {
+    if (waited >= wait.maxMs) throw new Error(`Gate run ${run.id} still ${run.status} after ${Math.round(wait.maxMs / 1000)} s; re-run this check once it finishes`)
+    log(`  Gate run ${run.id} is ${run.status}: waiting for it, then re-running required`)
+    await sleep(wait.pollMs)
+    run = newest()
+  }
+  const job = (call(`${R}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []).find((j) => j.name === 'required')
+  if (!job) {
+    log(`  Gate run ${run.id} has no required job`)
+    return 'no-job'
+  }
+  log(`  ${dry ? 'dry run: would re-run' : 're-running'} required (job ${job.id}, run ${run.id}): ${why}`)
+  if (!dry) call(`${R}/actions/jobs/${job.id}/rerun`, 'POST')
+  return dry ? 'dry-run' : 'rerun'
 }
 
-function main() {
+/**
+ * Re-checks the open PRs after a push to main. One PR's failure (a 404, a run that can no
+ * longer be re-run) does not stop the others; the failures are returned, so the job goes red.
+ */
+export async function recheckMain(R, { pushed, pushedAt, dry = false, gh: call = gh, rerun = rerunRequired, log = console.log } = {}) {
+  const errors = []
+  const open = call(`${R}/pulls?state=open&base=main&per_page=100`)
+  for (const p of open) {
+    try {
+      const files = prFiles(R, p.number, call)
+      const hit = evaluate({ labels: [], body: '', files }, { aheadBy: 1, files: pushed }).failures.find((f) => f.gate === 'up-to-date')
+      const check = (call(`${R}/commits/${p.head.sha}/check-runs?check_name=required&per_page=5`).check_runs || [])[0]
+      log(`PR #${p.number}: ${hit ? 'shares an area with this push' : 'unaffected'}, required ${check ? check.conclusion || check.status : 'missing'}`)
+      if (check && check.started_at > pushedAt) log('  its checks started after this push, so they saw it')
+      // A required still running may have read main before this push: re-run it too.
+      else if (hit && check && (check.conclusion === 'success' || check.status !== 'completed')) await rerun(R, p.head.sha, { dry, why: hit.message, gh: call, log })
+    } catch (e) {
+      log(`::error title=gates: PR #${p.number}::${e.message}`)
+      errors.push({ pr: p.number, message: e.message })
+    }
+  }
+  return errors
+}
+
+async function main() {
   const argv = process.argv.slice(2)
   const R = `repos/${process.env.GITHUB_REPOSITORY || 'akashdesai93/routeiq'}`
   const dry = argv.includes('--dry-run')
@@ -156,7 +211,7 @@ function main() {
   if (num('--recheck-pr')) {
     const s = readPr(R, num('--recheck-pr'))
     console.log(`PR #${s.number}: labels or body changed`)
-    rerunRequired(R, s.head_sha, dry, 'labels or body changed')
+    await rerunRequired(R, s.head_sha, { dry, why: 'labels or body changed' })
     return
   }
   if (argv.includes('--recheck-main')) {
@@ -166,19 +221,15 @@ function main() {
     if (!before || !after || /^0+$/.test(before)) return console.log('no previous main commit: nothing to re-check')
     const pushed = (gh(`${R}/compare/${before}...${after}`).files || []).map((f) => f.filename)
     const pushedAt = gh(`${R}/commits/${after}`).commit.committer.date
-    const open = gh(`${R}/pulls?state=open&base=main&per_page=100`)
-    for (const p of open) {
-      const files = prFiles(R, p.number)
-      const hit = evaluate({ labels: [], body: '', files }, { aheadBy: 1, files: pushed }).failures.find((f) => f.gate === 'up-to-date')
-      const check = (gh(`${R}/commits/${p.head.sha}/check-runs?check_name=required&per_page=5`).check_runs || [])[0]
-      console.log(`PR #${p.number}: ${hit ? 'shares an area with this push' : 'unaffected'}, required ${check ? check.conclusion || check.status : 'missing'}`)
-      if (check && check.started_at > pushedAt) console.log('  its checks started after this push, so they saw it')
-      else if (hit && check && check.conclusion === 'success') rerunRequired(R, p.head.sha, dry, hit.message)
-    }
+    const errors = await recheckMain(R, { pushed, pushedAt, dry })
+    if (errors.length) process.exitCode = 1
     return
   }
   console.error('usage: gates.mjs --pr N | --recheck-pr N | --recheck-main [--dry-run]')
   process.exitCode = 2
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().catch((e) => {
+  console.error(`::error title=gates::${e.message}`)
+  process.exitCode = 1
+})
