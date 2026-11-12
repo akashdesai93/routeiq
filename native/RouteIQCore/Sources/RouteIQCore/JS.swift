@@ -149,6 +149,27 @@ package enum JS {
         return String(out)
     }
 
+    /// `encodeURIComponent`: every UTF-8 byte as `%XX` except the letters,
+    /// digits and `-_.!~*'()`. (A lone surrogate, which JavaScript would
+    /// reject, cannot occur in a Swift String.)
+    package static func encodeURIComponent(_ s: String) -> String {
+        var out = ""
+        for byte in s.utf8 {
+            switch byte {
+            case 0x30...0x39, 0x41...0x5A, 0x61...0x7A, 0x2D, 0x5F, 0x2E, 0x21, 0x7E, 0x2A, 0x27, 0x28, 0x29:
+                out.append(Character(UnicodeScalar(byte)))
+            default:
+                out += String(format: "%%%02X", byte)
+            }
+        }
+        return out
+    }
+
+    /// The sign of a comparator's number, as `Array.prototype.sort` reads it: NaN counts as 0.
+    package static func sign(_ x: Double) -> Int {
+        x < 0 ? -1 : (x > 0 ? 1 : 0)
+    }
+
     /// A string as a JavaScript Map or Set key: equal only when the UTF-16
     /// code units are equal. Swift's String equality also merges canonically
     /// equivalent strings ("é" and "e" + combining accent), JavaScript's does not.
