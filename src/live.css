@@ -8,14 +8,7 @@
    in a box that does not grow, the two cards are their own layout islands (contain), and the
    only motion is a transform. */
 .app.live {
-  --bg: #050607;
-  --glass: #0b0d10;
-  --raised: #171a1f;
-  --hair: #2c3138;
-  --hair2: #59616c;
-  --fg: #f2f4f6;
-  --dim: #9aa1ab;
-  --figure: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  /* The tokens (--bg, --glass, --fg, ...) are on :root in index.css. */
   background: var(--bg);
   color: var(--fg);
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -33,7 +26,7 @@
 .app.live .map .mapboxgl-ctrl-bottom-left, .app.live .map .mapboxgl-ctrl-bottom-right { bottom: 30px; }
 /* Everything that is tapped is 44px or more; the two controls are 60px. */
 .app.live button { min-height: 44px; border-color: var(--hair); background: var(--raised); color: var(--fg); font-family: inherit; font-weight: 600; }
-.app.live button:hover { background: #20242b; }
+.app.live button:hover { background: var(--raised2); }
 .app.live button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .app.live .hint { color: var(--dim); }
 

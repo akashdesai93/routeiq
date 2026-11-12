@@ -1,6 +1,7 @@
 /* The approved design (design/README.md, "The merged direction"; #85): black glass, Inter for
    words, Barlow Condensed for figures, white for the one primary action, amber for news only.
-   The same tokens as the drive view (live.css), on every screen. Fonts: fonts.css (bundled). */
+   The one place the tokens live (.claude/skills/design-tokens): every screen, the drive view
+   (live.css) included, reads them from here. Fonts: fonts.css (bundled). */
 :root {
   --bg: #050607;
   --glass: #0b0d10;
@@ -11,7 +12,8 @@
   --fg: #f2f4f6;
   --dim: #9aa1ab;
   --amber: #ffb000;
-  --focus: #f2f4f6;
+  --on-amber: #0a0a0a;
+  --old: #646c77;
   --danger: #ff8a80;
   --figure: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
   color-scheme: dark;
@@ -35,7 +37,7 @@ html, body, #root { height: 100%; margin: 0; }
 /* --pin is set inline from PIN_COLOR in src/map/pins.ts, the one source for pin colors. */
 .dot::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: var(--pin); }
 button { font: inherit; font-size: 14px; padding: 4px 10px; border: 1px solid var(--hair); border-radius: 10px; background: var(--raised); color: inherit; cursor: pointer; }
-button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 a { color: var(--fg); }
 button:hover { background: var(--raised2); }
 .main { flex: 1; display: flex; min-height: 0; }
@@ -88,8 +90,8 @@ button:hover { background: var(--raised2); }
 .route-facts { grid-area: facts; justify-self: end; display: flex; gap: 12px; color: var(--dim); font-size: 15px; font-variant-numeric: tabular-nums; }
 .route-signal-note { grid-area: note; justify-self: end; text-align: right; color: var(--dim); font-size: 13px; font-weight: 500; }
 .route-delay { grid-area: delay; color: var(--dim); font-size: 13px; font-weight: 500; }
-.route-badge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 10px; background: var(--fg); color: var(--bg); font-size: 12.5px; }
-.route-source { display: inline-block; margin-left: 6px; padding: 1px 8px; border: 1.5px solid var(--hair2); border-radius: 10px; color: var(--fg); font-size: 12.5px; }
+.route-badge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 10px; background: var(--fg); color: var(--bg); font-size: 13px; }
+.route-source { display: inline-block; margin-left: 6px; padding: 1px 8px; border: 1.5px solid var(--hair2); border-radius: 10px; color: var(--fg); font-size: 13px; }
 .route-reasons { grid-area: reasons; color: var(--dim); font-size: 13px; font-weight: 500; }
 /* "−8 min · −2 lights · −3 mi": what Route 1 gives against Route 2, three cells between hairlines. */
 .route-delta { display: grid; grid-template-columns: repeat(3, 1fr); margin: 12px 0 0; border-top: 1.5px solid var(--hair); border-bottom: 1.5px solid var(--hair); }
