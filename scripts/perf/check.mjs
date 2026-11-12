@@ -52,13 +52,6 @@ console.log(`Directions answer: 3 routes x ${a.geometry.length} vertices, ${kb(t
 console.log(`Signal data: ${tileIds.length} tiles, ${data.primary.length} signal points; counts ${counted.routes.map((r) => r.signalCount).join(', ')}.`)
 console.log(`Node ${process.version}, ${process.arch}. Budget: ${CHECK_BUDGET_MS} ms per check on a desktop CPU (phones are 3 to 5 times slower).`)
 
-// A check 2 km into the drive: nearly the whole route is still ahead (the worst case).
-const ALONG_M = 2000
-const fresh = freshFrom(counted.routes, ALONG_M)
-// The same check when the route being driven is NOT among the fresh routes (it gets asked for through via points).
-const withoutCurrent = fresh.slice(1)
-const observation = (candidates, baseline) => ({ nowSec: 600, route: a, positionAlongM: ALONG_M, speedMps: 15, candidates, baseline })
-
 // The 'routes' event through the state machine: a drive that has just asked for its check.
 function drivingState() {
   const fixes = fixesAlong(a.geometry).slice(0, 140)
@@ -71,7 +64,21 @@ function drivingState() {
 }
 const asking = drivingState()
 
+// The check that drive has just asked for, early in the drive: nearly the whole route is still
+// ahead (the worst case). Matched and decided from where it was asked, as the runner does
+// (src/live/runner.ts passes state.request.alongM to both).
+const ALONG_M = asking.state.request.alongM
+const fresh = freshFrom(counted.routes, ALONG_M)
+// The same check when the route being driven is NOT among the fresh routes (it gets asked for through via points).
+const withoutCurrent = fresh.slice(1)
+const observation = (candidates, baseline) => ({ nowSec: 600, route: a, positionAlongM: ALONG_M, speedMps: 15, candidates, baseline })
+
 const N = { samples: 120, warmup: 15 }
+// Every check gets new routes, so new geometry arrays. A call that matched the same arrays
+// before may look its answer up (src/core/reroute.ts, #96); a sample that reuses one
+// array would time the lookup, not the work. Copied anew for every sample of the
+// matching rows (the copy is part of the time, on every branch alike).
+const anew = (candidates) => candidates.map((r) => ({ ...r, geometry: r.geometry.slice() }))
 const rows = [
   bench('JSON.parse of the answer', () => JSON.parse(text), N),
   bench('parseDirections (adapter, 3 routes)', () => parseDirections(body), N),
@@ -80,29 +87,31 @@ const rows = [
   bench('withSignalCounts (3 routes)', () => withSignalCounts(routes, data), N),
   bench('signalsOnRoute (1 route)', () => signalsOnRoute(a.geometry, data.primary), N),
   bench('rankRoutes (3 routes)', () => rankRoutes(counted.routes), { batch: 50 }),
-  bench('findCurrentRoute (current among 3 fresh)', () => findCurrentRoute(a, ALONG_M, fresh), N),
-  bench('findCurrentRoute (current not among them)', () => findCurrentRoute(a, ALONG_M, withoutCurrent), N),
-  bench('baselineProbe (current among them: no request)', () => baselineProbe(a, ALONG_M, fresh), N),
-  bench('baselineProbe (not among them: via points)', () => baselineProbe(a, ALONG_M, withoutCurrent), N),
-  bench('decideReroute (current among 3 fresh)', () => decideReroute(INITIAL_REROUTE_STATE, observation(fresh)), N),
-  bench('decideReroute (not among them, with baseline)', () => decideReroute(INITIAL_REROUTE_STATE, observation(withoutCurrent, [fresh[0]])), N),
-  bench("liveStep 'routes' (the check's answer)", () => liveStep(asking.state, { type: 'routes', nowMs: asking.nowMs + 800, requestId: asking.state.request.id, routes: fresh }), N),
+  bench('findCurrentRoute (current among 3 fresh)', () => findCurrentRoute(a, ALONG_M, anew(fresh)), N),
+  bench('findCurrentRoute (current not among them)', () => findCurrentRoute(a, ALONG_M, anew(withoutCurrent)), N),
+  bench('baselineProbe (current among them: no request)', () => baselineProbe(a, ALONG_M, anew(fresh)), N),
+  bench('baselineProbe (not among them: via points)', () => baselineProbe(a, ALONG_M, anew(withoutCurrent)), N),
+  bench('decideReroute (current among 3 fresh)', () => decideReroute(INITIAL_REROUTE_STATE, observation(anew(fresh))), N),
+  bench('decideReroute (not among them, with baseline)', () => decideReroute(INITIAL_REROUTE_STATE, observation(anew(withoutCurrent), anew([fresh[0]]))), N),
+  bench("liveStep 'routes' (the check's answer)", () => liveStep(asking.state, { type: 'routes', nowMs: asking.nowMs + 800, requestId: asking.state.request.id, routes: anew(fresh) }), N),
   bench('routeFeatures + stringify (map setData, 3 routes)', () => JSON.stringify(routeFeatures(fresh, null)), N),
 ]
 report('One check during a drive, per call', rows, CHECK_BUDGET_MS)
 
-// The whole check as src/drive/freshRoutes.ts and the runner do it, without the network.
+// The whole check as src/drive/freshRoutes.ts and the runner do it, without the network:
+// the fresh routes are matched (baselineProbe), counted, and the counted routes (which keep
+// the same geometry arrays) go to the engine. New routes, so new arrays, for every check.
 function wholeCheck(candidatesOf) {
   const times = []
   for (let i = 0; i < 80; i++) {
+    const got = anew(candidatesOf())
     const t0 = performance.now()
-    const answer = parseDirections(JSON.parse(text))
-    const got = candidatesOf(answer.routes)
+    parseDirections(JSON.parse(text))
     baselineProbe(a, ALONG_M, got)
-    const ids = [...new Set(answer.routes.flatMap((r) => signalTilesForRoute(r.geometry)))]
+    const ids = [...new Set(got.flatMap((r) => signalTilesForRoute(r.geometry)))]
     const signalData = { primary: osmSignalPoints(tiles), primaryTileIds: new Set(ids) }
-    const withCounts = withSignalCounts(answer.routes, signalData)
-    liveStep(asking.state, { type: 'routes', nowMs: asking.nowMs + 800, requestId: asking.state.request.id, routes: got })
+    const withCounts = withSignalCounts(got, signalData)
+    liveStep(asking.state, { type: 'routes', nowMs: asking.nowMs + 800, requestId: asking.state.request.id, routes: withCounts.routes })
     JSON.stringify(routeFeatures(withCounts.routes, null))
     if (i >= 10) times.push(performance.now() - t0)
   }

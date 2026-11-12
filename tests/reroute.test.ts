@@ -1117,6 +1117,78 @@ describe('determinism', () => {
   })
 })
 
+describe('a match looked up is the match worked out (#96)', () => {
+  // A check matches its fresh routes against the road ahead in baselineProbe and again in
+  // decideReroute; the second time the answer is looked up, by the two geometry arrays, where
+  // the road ahead was cut and the thresholds. These drives keep the same arrays from poll to
+  // poll while the route being driven, the car's position and the thresholds change, so that
+  // the same fresh line is the current route in one poll and not in the next: an answer
+  // looked up under the wrong key shows here. The other side gets new copies of every line,
+  // which nothing has matched before, so everything is worked out afresh.
+  const copyLine = (line: readonly LngLat[]): LngLat[] => line.map(([lng, lat]) => [lng, lat])
+  const copyAll = (routes: readonly RouteCandidate[]) => routes.map((c) => ({ ...c, geometry: copyLine(c.geometry) }))
+  /** The same route drawn `northM` meters north of where it is: another drawing of the same road. */
+  const drawnNorth = (c: RouteCandidate, northM: number): RouteCandidate => ({
+    ...c,
+    geometry: c.geometry.map(([lng, lat]) => [lng, lat + northM / 111_195]),
+  })
+  const driven = (['A', 'B'] as const).map((name) => ({ geometry: candidate(name, at(0, 0), 2000)!.geometry, maneuvers: [], limitedAccessSpansM: null }))
+  // Meters along the route being driven: where the fresh routes start, just behind and just
+  // past it, and 3 km on (past where B leaves A, so the fresh B is not the rest of B from there).
+  const POSITIONS = [3950, 4000, 4050, 7000]
+  const THRESHOLDS: Partial<RerouteOptions>[] = [{}, { matchToleranceM: 5 }, { matchToleranceM: 40, matchMaxGapM: 60 }, { offRouteM: 15 }]
+
+  it('gives the same answers, reasons and states over 12 seeded drives', () => {
+    const outcomes = new Set<string>()
+    for (let seed = 1; seed <= 12; seed++) {
+      const random = seeded(seed)
+      const pick = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!
+      // Fresh routes from 4 km along A (before B and D leave it), kept for the whole drive: A
+      // drawn on the line, A drawn 12 m off it (the same road only with a tolerance above 12 m), B, C and D.
+      const from = at(4000, 0)
+      const routes = (['A', 'B', 'C', 'D'] as const).map((name) => candidate(name, from, 1000)!)
+      const pool = [drawnNorth(routes[0]!, 12), ...routes]
+      let looked = INITIAL_REROUTE_STATE
+      let fresh = INITIAL_REROUTE_STATE
+      for (let poll = 0; poll < 10; poll++) {
+        const route = pick(driven)
+        const positionAlongM = pick(POSITIONS)
+        // Switches on the first winning poll, so that the drives reach switches too.
+        const options = { ...pick(THRESHOLDS), confirmPolls: 1 }
+        // Now and then the A drawn on the line is left out, so only the other drawing can match.
+        const candidates = pool
+          .filter((_, i) => (i === 1 ? random() < 0.5 : random() < 0.85))
+          .map((c) => ({ ...c, durationSec: Math.round(700 + random() * 600), typicalDurationSec: 900 }))
+        const baseline = random() < 0.3 ? [pool[0]!] : undefined
+        const observation = (cs: readonly RouteCandidate[], base: readonly RouteCandidate[] | undefined, line: readonly LngLat[]) => ({
+          nowSec: poll * 60,
+          route: { ...route, geometry: line },
+          positionAlongM,
+          speedMps: 12,
+          candidates: cs,
+          baseline: base,
+        })
+
+        // As a check does it: the path check first, on the same arrays the decision then gets.
+        const probe = baselineProbe(route, positionAlongM, candidates, options)
+        const current = findCurrentRoute(route, positionAlongM, candidates, options)
+        const decided = decideReroute(looked, observation(candidates, baseline, route.geometry), options)
+        // Afresh, on lines nobody has matched.
+        expect(probe).toEqual(baselineProbe({ geometry: copyLine(route.geometry) }, positionAlongM, copyAll(candidates), options))
+        const again = findCurrentRoute({ geometry: copyLine(route.geometry) }, positionAlongM, copyAll(candidates), options)
+        expect(current?.id ?? null).toBe(again?.id ?? null)
+        const afresh = decideReroute(fresh, observation(copyAll(candidates), baseline && copyAll(baseline), copyLine(route.geometry)), options)
+        expect(decided).toEqual(afresh)
+        looked = decided.nextState
+        fresh = afresh.nextState
+        outcomes.add(decided.action === 'switch' ? 'switch' : current === null ? 'not found' : 'found')
+      }
+    }
+    // The drives reach every kind of answer, so each is compared.
+    expect([...outcomes].sort()).toEqual(['found', 'not found', 'switch'])
+  })
+})
+
 describe('property: seeded random ETAs', () => {
   const runs = Array.from({ length: 40 }, (_, i) => i + 1).map((seed) => {
     const random = seeded(seed)
