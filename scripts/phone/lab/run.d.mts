@@ -4,10 +4,14 @@ import type { Verdict } from './assertions.mjs'
 
 export const SCENARIOS: Readonly<Record<string, string>>
 export const USAGE: string
+export const NATIVE_SWITCHES: readonly string[]
+export const EARLY_NAMES: readonly string[]
 
 export interface LabRunOptions {
   scenario: string
   fix: string | null
+  early: string | null
+  native: string[]
   lock: boolean
   ownerUnlocksAfter: boolean
   inApp: boolean
@@ -36,3 +40,6 @@ export function summaryMarkdown(run: {
   files: readonly string[]
   result: string
 }): string
+
+export function labLaunchArgs(name: string, options: Pick<LabRunOptions, 'web' | 'native'>): string[]
+export function driveScreenScenario(options: Pick<LabRunOptions, 'early' | 'fix'>): string

@@ -22,6 +22,8 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 /** Where the lab's files live inside the app (its temporary folder). Must match RouteIQLab.swift. */
 export const REPORT_IN_APP = '/tmp/routeiq-lab-report.txt'
 export const WEB_IN_APP = '/tmp/routeiq-lab-www'
+/** The native snapshot the app writes with the lab switch `snapshot` (#136). */
+export const SNAPSHOT_IN_APP = '/tmp/routeiq-lab-snapshot.png'
 /** A plain app with nothing personal on it, opened to put RouteIQ in the background. */
 export const BACKGROUND_APP = 'com.apple.calculator'
 /** The shell app's own process, and the process that runs its web code. */
@@ -238,6 +240,12 @@ export async function connectPhone({ log = () => {} } = {}) {
       return r.ok && existsSync(localFile)
     },
 
+    /** Pulls any one file of the app's folder (the native snapshot). True when it arrived. */
+    pullFile(inApp, localFile) {
+      const r = run(['apps', 'pull', bundle, inApp, localFile])
+      return r.ok && existsSync(localFile)
+    },
+
     /** Removes the last run's report, so that a new run cannot read an old one. */
     removeReport() {
       run(['apps', 'rm', bundle, REPORT_IN_APP])
@@ -308,6 +316,10 @@ export async function connectPhone({ log = () => {} } = {}) {
       const sources = [
         collect(['-pn', APP_PROCESS], (line) => !line.includes('<DEBUG>'), 1500),
         collect(['-pn', 'SpringBoard', '-m', 'dev.routeiq.shell'], (line) => /<NOTICE>|<ERROR>|<FAULT>/.test(line) && /state update|Front display|open application|Executing request|termina|exit|crash|jetsam/i.test(line), 1500),
+        // #136: the web view's own processes. A GPU or web content process that ends or is held back
+        // would leave the page alive in script but missing from the glass.
+        collect(['-pn', 'com.apple.WebKit.GPU'], (line) => /<ERROR>|<FAULT>/.test(line) || /termina|exit|crash|jetsam|suspend|lost|context|memory/i.test(line), 800),
+        collect(['-pn', WEB_PROCESS], (line) => /<ERROR>|<FAULT>/.test(line) || /termina|exit|crash|jetsam|suspend|layer|commit|throttl|visib/i.test(line), 800),
       ]
       return () => {
         for (const source of sources) source.child.kill()

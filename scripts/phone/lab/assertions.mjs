@@ -14,6 +14,10 @@ export const DEFAULT_LAB_CHECKS = Object.freeze({
   minBeatsPerAwayMinute: 30,
   /** A screenshot with this share of its pixels in one flat colour, or more, is a screen that was not drawn. */
   maxFlatShare: 0.97,
+  /** drive-screen: the driving screen must be drawn this soon after Start drive, in seconds (#136). */
+  maxDrawnSec: 2,
+  /** drive-screen: how long the screen is watched after Start drive, in seconds. */
+  drawWatchSec: 40,
   /** The longest the drive may stand still (no tick) while the app is away, in seconds. The app logs waits from 5 s up. */
   maxStallSec: 5,
 })
@@ -63,7 +67,16 @@ export function parseLabReport(text) {
   if (head === null || screen === null || split === -1) return null
   const history = []
   for (const m of text.slice(0, split).matchAll(/^(\d\d:\d\d:\d\d) (.+)$/gm)) history.push({ time: m[1], what: m[2] })
+  const native = text.match(/^native (\{.*\})$/m)
+  let nativeProbe = null
+  try {
+    nativeProbe = native === null ? null : JSON.parse(native[1])
+  } catch {
+    nativeProbe = null
+  }
   return {
+    native: nativeProbe,
+    startPressedAt: history.find((h) => h.what === 'pressed "Start drive"')?.time ?? null,
     scenario: head[1],
     writtenAt: head[2],
     number: Number(head[3]),
@@ -293,4 +306,51 @@ export function redact(line) {
     .replace(/\b[ps]k\.[A-Za-z0-9_-]{10,}(\.[A-Za-z0-9_-]+)?/g, '<token>')
     .replace(/(?<![:\d])-?\d{1,3}\.\d{4,}/g, '<number>')
     .replace(/(dev\.routeiq\.shell)\.[A-Z0-9]{6,}/g, '$1.<team>')
+}
+
+/**
+ * When the driving screen was first drawn, from screenshots taken one after another after Start
+ * drive (#136): `samples` are `{ sec, look }` with `sec` the seconds since the drive started.
+ * `drawnSec`: the first sample that was drawn, or null when none was. `blackAgain`: a sample
+ * after it was flat again (the screen went black once more). `watchedSec`: the last sample.
+ */
+export function firstDrawn(samples, max = DEFAULT_LAB_CHECKS.maxFlatShare) {
+  const list = (Array.isArray(samples) ? samples : []).filter((s) => typeof s?.sec === 'number' && s.look != null).sort((a, b) => a.sec - b.sec)
+  const at = list.findIndex((s) => s.look.flat < max)
+  return {
+    drawnSec: at === -1 ? null : list[at].sec,
+    blackAgain: at !== -1 && list.slice(at + 1).some((s) => s.look.flat >= max),
+    watchedSec: list.length === 0 ? null : list[list.length - 1].sec,
+    measured: list.length,
+  }
+}
+
+/** The driving screen was drawn within `limitSec` of Start drive and stayed drawn. */
+export function checkDrawnWithin(samples, limitSec = DEFAULT_LAB_CHECKS.maxDrawnSec, max = DEFAULT_LAB_CHECKS.maxFlatShare) {
+  const name = `the driving screen is drawn within ${limitSec} s of Start drive and stays drawn`
+  const seen = firstDrawn(samples, max)
+  if (seen.measured === 0) return notRun(name, 'no screenshot could be taken or measured')
+  if (seen.drawnSec === null) return verdict(name, false, `never drawn in ${Math.round(seen.watchedSec)} s (${seen.measured} screenshots)`)
+  const when = `first drawn ${seen.drawnSec.toFixed(1)} s after Start drive`
+  if (seen.blackAgain) return verdict(name, false, `${when}, then flat again`)
+  return verdict(name, seen.drawnSec <= limitSec, `${when} (${seen.measured} screenshots over ${Math.round(seen.watchedSec)} s)`)
+}
+
+/** The native probe's numbers worth a line each in the summary (#136). Empty without a probe. */
+export function nativeMetrics(probe) {
+  if (probe === null || typeof probe !== 'object') return []
+  const out = []
+  const stall = probe.stall ?? {}
+  if (typeof stall.longestMs === 'number') out.push(['longest main-thread stall, ms (at s after launch)', `${stall.longestMs} (${stall.longestAt})`])
+  if (typeof stall.longestSinceDriveMs === 'number') out.push(['longest main-thread stall since Start drive, ms', stall.longestSinceDriveMs])
+  if (typeof probe.terminations === 'number') out.push(['web content process ended', probe.terminations])
+  const web = probe.webView
+  if (web !== null && typeof web === 'object') {
+    out.push(['web view: in window, hidden, opaque, layer in tree', `${web.inWindow}, ${web.hidden}, ${web.opaque}, ${web.layerInTree}`])
+    out.push(['web view frame, safe area (top left bottom right)', `${JSON.stringify(web.frame)}, ${JSON.stringify(web.safeArea)}`])
+  }
+  const scroll = probe.scrollView
+  if (scroll !== null && typeof scroll === 'object') out.push(['scroll view: offset, content size, adjusted inset, behaviour', `${JSON.stringify(scroll.offset)}, ${JSON.stringify(scroll.contentSize)}, ${JSON.stringify(scroll.adjustedInset)}, ${scroll.behavior}`])
+  if (probe.snapshot) out.push(['native snapshot (flat share, shade)', `${probe.snapshot.flat ?? '?'}, ${probe.snapshot.shade ?? '?'}`])
+  return out
 }

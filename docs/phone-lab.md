@@ -101,7 +101,7 @@ place names; it is for the person at the console and is never written to the rep
 | `starts-and-plans` | Starts the app, waits for the plan screen, takes a screenshot. No simulated position. | 30 s |
 | `locked-wrong-turn` | Stands 4.4 km into the Uptown → SouthPark drive, starts the app in lab mode (it starts the drive), sends it to the background, replays the `wrong-turn` track for 170 s (the turn comes about 70 s in), waits 15 s, brings the app back. | 5 min |
 | `background-soak` | The same with the track that stays on the route, from its start, for `--minutes` (default 10). One CPU, memory and battery sample a minute. | 12 min |
-| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots 3, 9, 18 and 30 s into the drive. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 45 s |
+| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots one after another for up to 40 s, each stamped with its seconds since Start drive (`drawn.json`). Passes when the driving screen is drawn **within 2 s of Start drive and stays drawn**. With `--fix <name>` the app tries one thing 12 s in (page: `resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`; native: `kick-layout` … `kick-readd`, `snapshot`); with `--early <name>` it changes the page before Start drive (`nomap`, `red`, `rednomap`); with `--native <list>` the app starts with native lab switches (below, #136). The report's `layout` and `native` lines say how the page and the web view are laid out. No simulated position. | 30–60 s |
 
 Options: `--lock --owner-unlocks-after` (put the phone to sleep while away; the car is then the
 in-app test drive; the screen stays off afterwards, so nothing visual can be checked after it),
@@ -147,7 +147,49 @@ answered and failed, spoken lines, and new routes after leaving the route.
 `background-soak`: fixes and ticks at 30 a minute or more for the whole time away, the same tick
 and request checks, no failed route request, and the speech check.
 
-`drive-screen`: the screen is drawn at each of the four moments.
+`drive-screen`: the driving screen is drawn within 2 s of Start drive (`DEFAULT_LAB_CHECKS.maxDrawnSec`) and is not flat again later in the watch. The summary says when it was first drawn, so a run that drew by itself at 18 s reads as "first drawn 18.2 s after Start drive", not as a pass.
+
+### The screen-drawn check is part of every build's lab run (#136)
+
+The driving screen was black on the owner's iPhone after Start drive while the page was laid
+out, answered script and spoke (#136). Nothing off the phone shows that: Linux WebKit in
+Playwright drew it, and the iOS Simulator job runs without WebGL. So:
+
+- **Every build that touches `native/shell`, the drive view (`src/LiveDriveView.tsx`, `src/live.css`,
+  `src/index.css`, `src/useLiveDrive.ts`) or the map (`src/map/`) gets `drive-screen` on the phone before
+  it is kept or merged**, five starts in a row when the change is to one of those, and the PR
+  says what the phone showed ("first drawn 0.8 s after Start drive, 5 of 5").
+- `queue.mjs` refuses a build whose runs leave `drive-screen` out, unless the plan says why in
+  `"noDriveScreen"`. The default runs have it.
+- A real lock and unlock, and Start drive pressed with a finger, are not things the lab can do
+  (passcode; no touch). The owner does those once per such build.
+
+### Lab switches for the black driving screen (#136)
+
+`--native a,b` starts the app with `-routeiqLabSwitch a,b`. RouteIQLab.swift reads it only when
+`-routeiqLab` is there too; opened by hand, none of this exists. One switch per run unless the
+run list says otherwise.
+
+| Switch | What it does |
+| --- | --- |
+| `no-idle` | Start drive does not set `isIdleTimerDisabled`. |
+| `no-audio` | No audio session category or activation; the synthesizer still speaks. |
+| `no-speech` | Nothing is spoken at all (no audio session, no synthesizer). |
+| `no-bglocation` | `allowsBackgroundLocationUpdates` and the blue indicator are not set. |
+| `no-location` | `CLLocationManager` is not started for the drive (the native tick still runs). |
+| `no-always` | "Always" location is not asked for. |
+| `no-testdrive` | The test drive's made-up car is not started (the drive waits for a fix). |
+| `audio-offmain` | Remedy: the audio session is set up off the main thread. |
+| `insets-never` | Remedy: the web view's scroll view does not add the safe area to its insets (`contentInsetAdjustmentBehavior = .never`, what `"contentInset": "never"` would do). |
+| `kick-layout`, `kick-display`, `kick-scroll`, `kick-frame`, `kick-opaque`, `kick-readd` | Remedy: that kick on the web view 0.5, 2 and 5 s after the drive starts and each time the app becomes active. `--fix kick-<name>` runs it once, 12 s in, on a screen that is already black. |
+| `marks` | Probe: window cyan, web view magenta, scroll view green. The screenshot's colour (`rgb` in `drawn.json`) says which layer is on the glass where the page should be. |
+| `snapshot` | Probe: a native `takeSnapshot` of the web view 3, 9 and 18 s in (`native-snapshot.png`, and its flatness in the report). Off by default: asking for a snapshot makes the page render, which could itself cure a black screen. |
+
+In lab mode the app also always keeps (in the report's `native` line): the main-thread stalls of
+100 ms or more with their time since Start drive, whether the web content process ended, the
+web view's and scroll view's frames, insets, offset, opacity and colours, the window's safe
+area, and the app's state changes. `syslog.txt` of a `drive-screen` run now also has the
+WebKit GPU and web content processes' errors and exits.
 
 `starts-and-plans`: at least one route is listed and Start drive is there.
 
