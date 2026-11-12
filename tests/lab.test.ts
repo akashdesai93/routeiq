@@ -292,7 +292,9 @@ describe('what the lab reads and what it writes out', () => {
   })
 
   it('the report holds no road name, place, position or token, whatever the screen shows', () => {
-    const diagnostics = createDriveDiagnostics()
+    // A fixed clock: the diagnostics text says "now <clock>", and it is read twice below (in the
+    // report and in the check). On the wall clock a second can tick in between and fail the check.
+    const diagnostics = createDriveDiagnostics(() => Date.UTC(2026, 10, 12, 2, 40))
     const lab = createLab({
       scenario: 'drive',
       doc: drivePage('Route via Providence Road saves 4 min at -80.84316, 35.22716 pk.eyJ1Ijoibm90LWEtcmVhbC10b2tlbiJ9.c2lnbmF0dXJl'),

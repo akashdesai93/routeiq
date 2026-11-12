@@ -1,2 +1,9 @@
 # Shell scripts run in Linux cloud sessions and in Git Bash hooks; CRLF breaks them.
 *.sh text eol=lf
+
+# The fleet's role templates, rules and scripts are parsed line by line (scripts/orch). Keep them
+# LF on every checkout, Windows included; the parsers also accept CRLF (scripts/orch/lib/eol.mjs)
+# for checkouts made before this rule.
+.claude/orch/** text eol=lf
+scripts/orch/** text eol=lf
+tests/orch/** text eol=lf
