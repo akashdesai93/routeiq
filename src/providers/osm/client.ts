@@ -158,7 +158,6 @@ export function isOverpassPause(value: unknown): value is OverpassPause {
 const PAUSE_KEY = 'pause'
 
 export interface OverpassClientOptions extends Omit<FetchSignalTileOptions, 'signal'> {
-  maxConcurrent?: number
   cooldownMs?: number
   maxCooldownMs?: number
   /** Where the pause is remembered across page loads. Left out, it lasts only as long as the page. */
@@ -172,7 +171,7 @@ export interface OverpassClient {
 
 /**
  * The polite way to use fetchSignalTile, and the only way the app does:
- * - at most `maxConcurrent` requests (2) are in flight; the rest wait in line;
+ * - at most OVERPASS_MAX_CONCURRENT requests (2) are in flight; the rest wait in line;
  * - two callers asking for the same tile at once share one request;
  * - after a busy answer (HTTP 429, 502, 503, 504, a timeout remark, or no
  *   answer in time) nothing
@@ -188,7 +187,6 @@ export interface OverpassClient {
  */
 export function createOverpassClient(options: OverpassClientOptions = {}): OverpassClient {
   const {
-    maxConcurrent = OVERPASS_MAX_CONCURRENT,
     cooldownMs = OVERPASS_COOLDOWN_MS,
     maxCooldownMs = OVERPASS_MAX_COOLDOWN_MS,
     now = Date.now,
@@ -215,7 +213,7 @@ export function createOverpassClient(options: OverpassClientOptions = {}): Overp
   const remember = () => void pauseStore?.put(PAUSE_KEY, { until: pausedUntil, nextMs: nextPauseMs })
 
   const acquire = (): Promise<void> => {
-    if (running < maxConcurrent) {
+    if (running < OVERPASS_MAX_CONCURRENT) {
       running++
       return Promise.resolve()
     }

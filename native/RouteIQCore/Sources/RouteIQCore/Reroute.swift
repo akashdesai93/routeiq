@@ -33,6 +33,9 @@ public struct RerouteOptions: Hashable, Sendable {
     /// current path itself (RerouteObservation.baseline), has answered "no
     /// route that way" this many polls in a row (a closure).
     public var routeLostPolls: Int
+    /// ...and those answers count only while they are this recent, in seconds (#68). 0 counts only
+    /// answers from the same second: no closure switch, which is the safe side.
+    public var routeLostWindowSec: Double
     /// The driver is off the current route when the fresh routes start farther than this from its line, in meters.
     public var offRouteM: Double
     /// How close a point must be to the current route's line to be on it, in
@@ -51,6 +54,10 @@ public struct RerouteOptions: Hashable, Sendable {
     public var matchMaxDivergenceM: Double
     /// The first meters after the query point are not compared.
     public var matchIgnoreStartM: Double
+    /// Where the fresh route starts is looked for on the first this many meters of the current
+    /// path, and on the rest of it only when nothing there is within matchToleranceM: a route
+    /// that crosses itself (a cloverleaf) passes the driver's spot again later (#74).
+    public var matchStartSearchM: Double
     /// Asking for the current path's own travel time (baselineProbe): a via
     /// point at least every this many meters along each stretch the fresh routes do not share.
     public var baselineViaSpacingM: Double
@@ -74,6 +81,7 @@ public struct RerouteOptions: Hashable, Sendable {
         minLeadTimeSec: Double = 20,
         freewayLeadDistanceM: Double = 1200,
         routeLostPolls: Int = 3,
+        routeLostWindowSec: Double = 900,
         offRouteM: Double = 50,
         sameRouteToleranceM: Double = Select.sameRouteToleranceM,
         matchToleranceM: Double = 20,
@@ -81,6 +89,7 @@ public struct RerouteOptions: Hashable, Sendable {
         matchMaxGapM: Double = 400,
         matchMaxDivergenceM: Double = 50,
         matchIgnoreStartM: Double = 150,
+        matchStartSearchM: Double = 200,
         baselineViaSpacingM: Double = 3000,
         baselineMaxViaPoints: Int = 6,
         returnOverlapFraction: Double = 0.5,
@@ -97,6 +106,7 @@ public struct RerouteOptions: Hashable, Sendable {
         self.minLeadTimeSec = minLeadTimeSec
         self.freewayLeadDistanceM = freewayLeadDistanceM
         self.routeLostPolls = routeLostPolls
+        self.routeLostWindowSec = routeLostWindowSec
         self.offRouteM = offRouteM
         self.sameRouteToleranceM = sameRouteToleranceM
         self.matchToleranceM = matchToleranceM
@@ -104,6 +114,7 @@ public struct RerouteOptions: Hashable, Sendable {
         self.matchMaxGapM = matchMaxGapM
         self.matchMaxDivergenceM = matchMaxDivergenceM
         self.matchIgnoreStartM = matchIgnoreStartM
+        self.matchStartSearchM = matchStartSearchM
         self.baselineViaSpacingM = baselineViaSpacingM
         self.baselineMaxViaPoints = baselineMaxViaPoints
         self.returnOverlapFraction = returnOverlapFraction
@@ -130,6 +141,7 @@ public struct RerouteOptions: Hashable, Sendable {
             minLeadTimeSec: numberOr(minLeadTimeSec, d.minLeadTimeSec),
             freewayLeadDistanceM: numberOr(freewayLeadDistanceM, d.freewayLeadDistanceM),
             routeLostPolls: countOr(routeLostPolls, d.routeLostPolls),
+            routeLostWindowSec: numberOr(routeLostWindowSec, d.routeLostWindowSec),
             offRouteM: numberOr(offRouteM, d.offRouteM),
             sameRouteToleranceM: numberOr(sameRouteToleranceM, d.sameRouteToleranceM),
             matchToleranceM: numberOr(matchToleranceM, d.matchToleranceM),
@@ -137,6 +149,7 @@ public struct RerouteOptions: Hashable, Sendable {
             matchMaxGapM: numberOr(matchMaxGapM, d.matchMaxGapM),
             matchMaxDivergenceM: numberOr(matchMaxDivergenceM, d.matchMaxDivergenceM),
             matchIgnoreStartM: numberOr(matchIgnoreStartM, d.matchIgnoreStartM),
+            matchStartSearchM: numberOr(matchStartSearchM, d.matchStartSearchM),
             baselineViaSpacingM: max(1, numberOr(baselineViaSpacingM, d.baselineViaSpacingM)),
             baselineMaxViaPoints: countOr(baselineMaxViaPoints, d.baselineMaxViaPoints),
             returnOverlapFraction: numberOr(returnOverlapFraction, d.returnOverlapFraction),
@@ -192,6 +205,10 @@ public struct RerouteState: Hashable, Sendable {
     /// A poll that could not ask leaves it as it is; one that finds the
     /// current route sets it back to 0.
     public var lostPolls: Int
+    /// When each of those "no route" answers came (the nowSec of its poll), oldest first. This is
+    /// what the engine counts: an answer drops out once it is more than routeLostWindowSec old (#68).
+    /// lostPolls is always its length.
+    public var lostAtSec: [Double]
     /// Routes the driver turned down ("Keep previous route"), each as the
     /// path that was ahead then and the time until which it is not to be
     /// offered again (see declineRoute). Empty when there are none (the
@@ -204,6 +221,7 @@ public struct RerouteState: Hashable, Sendable {
         abandoned: [Abandoned] = [],
         failedPolls: Int = 0,
         lostPolls: Int = 0,
+        lostAtSec: [Double] = [],
         declined: [Declined] = []
     ) {
         self.pending = pending
@@ -211,6 +229,7 @@ public struct RerouteState: Hashable, Sendable {
         self.abandoned = abandoned
         self.failedPolls = failedPolls
         self.lostPolls = lostPolls
+        self.lostAtSec = lostAtSec
         self.declined = declined
     }
 
@@ -359,19 +378,6 @@ public struct RerouteDecision: Hashable, Sendable {
     public var nextState: RerouteState
 }
 
-/// Counts the work of matching (findCurrentRoute), for tests and benchmarks:
-/// point-to-segment distance checks, and entries put in a segment grid. A
-/// count, not a time, so that it is the same on every machine.
-public final class MatchMeter {
-    public var segmentChecks: Int
-    public var gridEntries: Int
-
-    public init(segmentChecks: Int = 0, gridEntries: Int = 0) {
-        self.segmentChecks = segmentChecks
-        self.gridEntries = gridEntries
-    }
-}
-
 /// A point for the provider to route through, with the direction of travel there.
 public struct BaselineViaPoint: Hashable, Sendable {
     public var point: LngLat
@@ -424,14 +430,19 @@ public enum Reroute {
         let t: Double
     }
 
-    /// The closest point of a line to P: how far it is, and where along the line.
-    static func nearestOnLine(_ p: XY, _ line: [XY], _ meter: MatchMeter? = nil) -> Nearest {
+    /// The closest point of a line to P: how far it is, and where along the line. With
+    /// `firstM`, only the segments that begin within the first `firstM` meters are looked at.
+    static func nearestOnLine(_ p: XY, _ line: [XY], _ meter: MatchMeter? = nil, _ firstM: Double = .infinity) -> Nearest {
         if line.count == 1 { return Nearest(distanceM: hypot(p.x - line[0].x, p.y - line[0].y), index: 0, t: 0) }
-        meter?.segmentChecks += line.count - 1
         var best = Nearest(distanceM: .infinity, index: 0, t: 0)
-        for i in stride(from: 1, to: line.count, by: 1) {
+        var beginsAtM = 0.0
+        var i = 1
+        while i < line.count && beginsAtM <= firstM {
+            meter?.segmentChecks += 1
             let hit = Geo.pointToSegment(p, line[i - 1], line[i])
             if hit.distanceM < best.distanceM { best = Nearest(distanceM: hit.distanceM, index: i - 1, t: hit.t) }
+            beginsAtM += apart(line[i - 1], line[i])
+            i += 1
         }
         return best
     }
@@ -453,93 +464,6 @@ public enum Reroute {
     }
 
     static func lengthOf(_ line: [XY]) -> Double { lengthOf(line[...]) }
-
-    /// A bounding-box index of a line's segments: square cells as wide as
-    /// `reachM`, each listing the segments that pass through it (a long
-    /// segment is cut into pieces no longer than a cell). A point then looks
-    /// at the segments of the 3 x 3 cells around it.
-    final class SegmentGrid {
-        struct Cell: Hashable {
-            let x: Double
-            let y: Double
-        }
-
-        let line: [XY]
-        let cellM: Double
-        var cells: [Cell: [Int]] = [:]
-        let meter: MatchMeter?
-        /// Which segments this query has measured already (a segment can be listed in several of its cells).
-        var seen: [Int]
-        var query = 0
-
-        init(_ line: [XY], reachM: Double, meter: MatchMeter?) {
-            self.line = line
-            self.meter = meter
-            let cellM = JS.max(1, reachM)
-            self.cellM = cellM
-            seen = Array(repeating: 0, count: line.count)
-            func cellOf(_ v: Double) -> Double { (v / cellM).rounded(.down) }
-            for i in stride(from: 1, to: line.count, by: 1) {
-                let a = line[i - 1]
-                let b = line[i]
-                let pieces = JS.max(1, (Reroute.apart(a, b) / cellM).rounded(.up))
-                var k = 0.0
-                while k < pieces {
-                    let x0 = a.x + (b.x - a.x) * k / pieces
-                    let y0 = a.y + (b.y - a.y) * k / pieces
-                    let x1 = a.x + (b.x - a.x) * (k + 1) / pieces
-                    let y1 = a.y + (b.y - a.y) * (k + 1) / pieces
-                    var ix = cellOf(JS.min(x0, x1))
-                    let ixEnd = cellOf(JS.max(x0, x1))
-                    while ix <= ixEnd {
-                        var iy = cellOf(JS.min(y0, y1))
-                        let iyEnd = cellOf(JS.max(y0, y1))
-                        while iy <= iyEnd {
-                            let key = Cell(x: ix, y: iy)
-                            // A segment's pieces come one after another, so it can only be listed twice at the end.
-                            if cells[key] == nil {
-                                cells[key] = [i]
-                                meter?.gridEntries += 1
-                            } else if cells[key]!.last != i {
-                                cells[key]!.append(i)
-                                meter?.gridEntries += 1
-                            }
-                            iy += 1
-                        }
-                        ix += 1
-                    }
-                    k += 1
-                }
-            }
-        }
-
-        /// The distance from `p` to the line when it is at most the grid's
-        /// reach, infinity when it is farther. Stops looking at the first
-        /// segment within `enoughM`.
-        func distanceWithin(_ p: XY, _ enoughM: Double) -> Double {
-            query += 1
-            var best = Double.infinity
-            func cellOf(_ v: Double) -> Double { (v / cellM).rounded(.down) }
-            var ix = cellOf(p.x - cellM)
-            let ixEnd = cellOf(p.x + cellM)
-            while ix <= ixEnd {
-                var iy = cellOf(p.y - cellM)
-                let iyEnd = cellOf(p.y + cellM)
-                while iy <= iyEnd {
-                    for i in cells[Cell(x: ix, y: iy)] ?? [] {
-                        if seen[i] == query { continue }
-                        seen[i] = query
-                        meter?.segmentChecks += 1
-                        best = JS.min(best, Geo.pointToSegment(p, line[i - 1], line[i]).distanceM)
-                        if best <= enoughM { return best }
-                    }
-                    iy += 1
-                }
-                ix += 1
-            }
-            return best <= cellM ? best : .infinity
-        }
-    }
 
     /// A stretch of a line, in meters from its start.
     struct Stretch: Hashable {
@@ -637,7 +561,11 @@ public enum Reroute {
     /// Nil when either line cannot be driven.
     static func setUp(_ path: [XY], _ given: [XY], _ options: RerouteOptions, _ meter: MatchMeter?) -> SetUp? {
         guard let start = given.first, given.count >= 2, path.count >= 2 else { return nil }
-        let at = nearestOnLine(start, path, meter)
+        // The start is near the beginning of the path, which is where the driver is (#74): the
+        // whole path is searched only when it is not, so a later pass of the same spot (a
+        // cloverleaf) is never taken for where the driver is.
+        let near = nearestOnLine(start, path, meter, options.matchStartSearchM)
+        let at = near.distanceM <= options.matchToleranceM ? near : nearestOnLine(start, path, meter)
         let rest = fromNearest(path, at)
         // A fresh route that starts behind the path is compared from where it
         // reaches the path's start, when it does, but only for a straight approach.
@@ -1043,6 +971,7 @@ public enum Reroute {
                     )],
                     failedPolls: 0,
                     lostPolls: 0,
+                    lostAtSec: [],
                     declined: base.declined
                 )
             )
@@ -1107,9 +1036,13 @@ public enum Reroute {
             // Only "no route that way" is evidence against the road ahead, and adds to the count.
             // Not asked, or answered with another path: no evidence either way, and the count is
             // kept. Only a poll that finds the current route again starts it over.
-            let lostPolls = baseline?.isEmpty == true ? JS.increment(base.lostPolls) : base.lostPolls
+            // Answers from longer ago than the window are about a road that may be well behind (#68).
+            let recent = base.lostAtSec.filter { nowSec - $0 <= opts.routeLostWindowSec }
+            let lostAtSec = baseline?.isEmpty == true ? recent + [nowSec] : recent
+            let lostPolls = lostAtSec.count
             var lost = noWinner
             lost.lostPolls = lostPolls
+            lost.lostAtSec = lostAtSec
             guard let baseline, baseline.isEmpty else {
                 return stay(
                     .routeUnconfirmed,
@@ -1141,6 +1074,7 @@ public enum Reroute {
         }
         var found = base
         found.lostPolls = 0
+        found.lostAtSec = []
         var foundNoWinner = found
         foundNoWinner.pending = nil
         // Only a time that may be compared (rule 6) is passed on as the current route's ETA.
@@ -1252,6 +1186,7 @@ public enum Reroute {
         next.pending = nil
         // Counting lost polls is a confirmation in progress too: start it again.
         next.lostPolls = 0
+        next.lostAtSec = []
         next.declined = state.declined + [RerouteState.Declined(geometry: geometryAhead, untilSec: untilSec)]
         return next
     }
