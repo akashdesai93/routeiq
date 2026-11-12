@@ -347,7 +347,7 @@ describe('Start drive and the live drive view', () => {
     expect(html).toContain('>End</button>')
     expect(html).not.toContain('aria-label="Mute"')
     expect(render(play(started), T0, { initiallyOpen: true })).toContain('aria-label="Mute"')
-    expect(html).not.toContain('Keep previous route')
+    expect(html).not.toContain('Keep my route')
     expect(render(play([started[0]!]), T0)).toContain('Finding your position…')
   })
 

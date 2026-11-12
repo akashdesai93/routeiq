@@ -74,9 +74,11 @@ test('when a route check never answers, it gives up on it and the next checks st
   expect(app.directionsRequests).toBeGreaterThanOrEqual(4)
   expect(log.arrived).toBe(true)
   expect(log.banners).toHaveLength(1)
-  expect(log.banners[0]!.text).toContain('Switched to a faster route')
   const spoken = await app.spoken()
-  expect(spoken.filter((line) => line.startsWith('Switching'))).toHaveLength(1)
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toHaveLength(1)
+  // The banner says what was said (#22, #84).
+  expect(log.banners[0]!.text).toContain(switches[0])
   expect(spoken).toContain('Turn left onto East Loop.')
   expect(spoken).not.toContain(OFF_ROUTE)
 })
