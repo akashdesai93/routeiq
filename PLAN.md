@@ -65,10 +65,11 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    "Checked against real data". The city list added nothing on eight ordinary
    trips (18 of its 909 points have no OpenStreetMap match within 60 m), so it was
    removed (#13).
-   Open for later: the bundle is a snapshot and ages (rebuild it; nothing refreshes
-   it tile by tile); 60 m single-linkage grouping merges two pairs of Charlotte
+   Open for later: 60 m single-linkage grouping merges two pairs of Charlotte
    intersections 54 and 56 m apart; a slip-lane turn beside a signal and a ramp fork
-   on a `trunk` expressway can each add a signal. (Done: the city list was removed
+   on a `trunk` expressway can each add a signal. (Done: the bundle no longer only
+   ages: `signals-refresh.yml` rebuilds it monthly and opens a PR with a before/after
+   report, failing closed when the new data looks wrong (#12). Done: the city list was removed
    (#13). Done: Overpass tiles are now filtered by
    signal subtype with the same rule and list as bundled tiles, #11.)
 5. **Done: ranking** (`src/core/rank.ts`). Best traffic-aware ETA first; signal count

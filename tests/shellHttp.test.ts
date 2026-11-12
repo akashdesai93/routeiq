@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createDriveDiagnostics, FIX_GAP_EVENT_MS, TICK_GAP_EVENT_MS, type RequestOutcome } from '../src/device/native/diagnostics.ts'
+import { CHECK_ROUTES_CAP, createDriveDiagnostics, FIX_GAP_EVENT_MS, TICK_GAP_EVENT_MS, type RequestOutcome } from '../src/device/native/diagnostics.ts'
 import { NATIVE_HTTP_GRACE_MS, NATIVE_HTTP_TIMEOUT_MS, nativeTransport } from '../src/device/native/http.ts'
 import { nativeDeviceFor, startNativeShell } from '../src/device/native/index.ts'
 import type { RouteIQNativePlugin } from '../src/device/native/plugin.ts'
@@ -391,5 +391,68 @@ describe('side-street probes in the drive diagnostics (#5 review)', () => {
     expect(text).toContain('of those: 1 side-street probes (no road or no route is a normal answer for one), 1 path checks')
     expect(text).not.toContain('pk.test')
     expect(text).not.toContain('35.1')
+  })
+})
+
+describe('what each drive check concluded, in the diagnostics (so "was there a faster way?" can be answered, #175)', () => {
+  it('tallies the outcomes, most first, and keeps the largest saving any check saw', () => {
+    let now = Date.UTC(2026, 10, 12, 11, 42, 0)
+    const log = createDriveDiagnostics(() => now)
+    log.checked('confirming', 2, 150)
+    for (const s of [45, 95]) {
+      now += 60_000
+      log.checked('saving-too-small', 3, s)
+    }
+    for (let i = 0; i < 40; i++) {
+      now += 60_000
+      log.checked('current-best', 3, -30)
+    }
+    const text = log.text()
+    expect(text).toContain('checks: 43: yours was the fastest 40, another was faster, by less than the minimum saving 2, a faster one, waiting for the next check to confirm it 1')
+    expect(text).toContain('best saving another route offered: 150 s')
+  })
+
+  it('notes a check in the events only when its outcome changes, so a long drive keeps its other events', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (let i = 0; i < 30; i++) log.checked('current-best', 3, -12)
+    log.checked('saving-too-small', 14, 61.4)
+    log.checked('poll-failed', null, null)
+    const checkEvents = log.text().split('\n').filter((l) => l.includes(' check: '))
+    expect(checkEvents).toHaveLength(3)
+    expect(checkEvents[0]).toContain('check: yours was the fastest (3 routes)')
+    expect(checkEvents[1]).toContain(`another was faster, by less than the minimum saving (${CHECK_ROUTES_CAP} routes, the best other saves 61 s)`)
+    expect(checkEvents[2]).toContain('check: the check failed (no answer)')
+  })
+
+  it('says 0 s when every check found yours the fastest (a drive with nothing better, not "unknown")', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (let i = 0; i < 38; i++) log.checked('current-best', 3, 0)
+    expect(log.text()).toContain('best saving another route offered: 0 s')
+  })
+
+  it('keeps an unknown outcome as "other", and nothing that could be a place', () => {
+    const log = createDriveDiagnostics(() => 0)
+    log.checked('<script>', 3, null)
+    log.checked({ code: 'current-best' }, 99, 12.6)
+    const text = log.text()
+    expect(text).toContain('checks: 2: other 2')
+    expect(text).toContain('best saving another route offered: 13 s')
+    expect(text).not.toMatch(/\d\.\d|-\d|script/)
+  })
+
+  it('takes only the table\'s own words: a name from the object prototype is "other" too', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (const code of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) log.checked(code, 1, null)
+    const text = log.text()
+    expect(text).toContain('checks: 4: other 4')
+    expect(text).not.toMatch(/function|native code|toString|constructor|__proto__/)
+  })
+
+  it('says unknown when no check could compare, and shows no check lines before the first check', () => {
+    const log = createDriveDiagnostics(() => 0)
+    expect(log.text()).not.toContain('checks:')
+    log.checked('route-unconfirmed', 2, null)
+    log.checked('poll-failed', null, null)
+    expect(log.text()).toContain('best saving another route offered: unknown')
   })
 })

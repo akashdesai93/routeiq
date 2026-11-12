@@ -332,6 +332,9 @@ scripts/        Plain Node 24, no dependencies. The script imports the app's own
                 build-signal-tiles.mjs: builds the OpenStreetMap signal tiles from
                 regional extracts on disk (no network), with lib/osm-pbf.mjs, a minimal
                 streaming reader for .osm.pbf files.
+                refresh-signal-bundle.mjs: the monthly refresh (#12): builds a new
+                bundle into a scratch folder, compares it with the shipped one
+                (src/providers/osm/refresh.ts) and writes it only if it passes.
 public/seed/    The signal data shipped with the app, served as static files and copied
                 into the build: osm-signals/ (one JSON file per tile with signals,
                 index.json, LICENSE.md: ODbL).
@@ -448,7 +451,8 @@ to look at are in `design/exports/merged/`.
      and shipped with the app in `public/seed/osm-signals/`: one file per tile that has a
      signal, in the same shape as the device cache, an `index.json` and a `LICENSE.md`.
      Built Nov 11, 2026 from the extracts of Nov 10, 2026: 22,613 signal nodes in 902
-     tile files, 1.2 MB. The index lists the 2,500 tiles that lie ENTIRELY inside the
+     tile files, 1.2 MB (a monthly refresh pull request updates the files; its body
+     gives the counts of the day, see "Monthly refresh" below). The index lists the 2,500 tiles that lie ENTIRELY inside the
      two states' extract boundaries (as 51 runs along 44 rows, 5 KB). Inside that set
      the bundle is the whole answer: a tile with a file is read from the app's own
      server, a tile without one is known to have no signals (no file, no request), and
@@ -526,6 +530,50 @@ to look at are in `design/exports/merged/`.
   demand. A server that answers something else for a missing file, such as the Vite dev
   server's page with status 200, leaves coverage unknown instead: counts stay partial
   and Overpass is not asked.
+
+  **Monthly refresh** (#12). `.github/workflows/signals-refresh.yml` runs at 06:23 UTC on
+  the 3rd of each month (and by hand: Actions, "Signals refresh", Run workflow). It
+  downloads the two extracts with their `.md5` and `.poly` (about 600 MB, one after the
+  other, once a month), and runs `node scripts/refresh-signal-bundle.mjs`, which builds a
+  new bundle into a scratch folder with the script above and compares it with the one in
+  `public/seed/osm-signals`. Then:
+
+  - the extracts are no newer than the shipped data: nothing happens (exit 3, run green);
+  - any check below fails: **it fails closed.** Nothing is written, nothing is committed,
+    no pull request; the run goes red and its summary lists every check (exit 4; exit 2
+    when an extract is missing or fails its checksum);
+  - otherwise the new files replace the old ones (the index last, stale tiles removed),
+    are committed on `bot/signals-refresh-<data date>` and go to `main` as a pull request
+    whose body is the before/after report: data date, signals, tile files, covered tiles
+    and bytes before and after, every check, the tiles whose count changed (largest
+    first) and the OpenStreetMap node ids added and removed (40 of each at most). It never
+    pushes to `main` or merges: the PR goes through `required` and review like any other.
+    While a refresh PR is open, the next run opens no second one.
+
+  | `DEFAULT_BUNDLE_REFRESH_CHECKS` | Default | Fails closed when |
+  | --- | --- | --- |
+  | `maxSignalDrop` | 3 % | the signal count falls by more (a truncated extract, a mass deletion) |
+  | `maxRemovedShare` | 5 % | more of the old signals are gone, even if as many new ones hide it |
+  | `maxSignalGrowth` | 15 % | the count grows by more (a wrong region, a bulk import to look at first) |
+  | `maxBytesGrowth` | 15 % | the bundle's bytes grow by more |
+  | `localTileMinSignals`, `maxLocalTileDrop` | 20, 25 % | a tile with 20 or more signals loses more than a quarter (a city-sized hole) |
+  | `maxMovedShare` | 5 % | more of the signals that stay have a new position (a reader or extract defect) |
+  | `maxCoveredTilesGained` | 0 | a tile joins the covered set (a boundary larger than its extract: the app would show 0 signals where the data was clipped) |
+  | `maxCoveredTilesLost` | 0 | a tile leaves the covered set (safe for the app, which then asks Overpass, but a sign of a damaged boundary) |
+  | `maxFutureMs` | 1 day | the data date is ahead of the clock |
+
+  Always checked as well: the same extracts as before, a data date that does not go
+  backwards, and both bundles sound (the index lists exactly the tile files present, each
+  file is a valid tile with the index's date, and the index's signal count matches).
+  The seed tiles are not in the bundle-size budget (that covers the app's JavaScript and
+  CSS), so the bytes check is what keeps them from growing unseen. The run takes a few
+  minutes on one ubuntu runner and needs no `npm ci`.
+
+  The PR is opened with the `SIGNALS_REFRESH_TOKEN` secret when it is set (a fine-grained
+  token for this repository with contents and pull requests read/write), so that the PR
+  starts the gate. Without it the workflow's own token is used: that needs "Allow GitHub
+  Actions to create and approve pull requests" in the repository settings, and a PR it
+  opens starts no workflow, so `required` first runs when the branch is next updated.
 - **Traffic signals, fallback:** the `traffic_signal` flags Mapbox puts on the
   intersections of a route, used only on stretches whose OpenStreetMap tile could not be
   loaded (outside the bundle, with Overpass failing).
@@ -1205,8 +1253,13 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **Drive diagnostics** (top bar, and behind More in the drive view; shell only): a log
   with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
   ticks received and the longest wait between them, route requests with their times,
-  spoken lines started and finished, and when the app went to the background. Counts and
-  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  spoken lines started and finished, when the app went to the background, and what each
+  drive check concluded: a tally of the outcomes in words ("yours was the fastest",
+  "another was faster, by less than the minimum saving", "waiting for the next check to
+  confirm it" ...) and the best saving another route offered, in whole seconds, from the
+  reroute engine's own like-for-like comparison of the alternative it weighed (0 when yours
+  was the fastest, unknown when it could not compare). Counts
+  and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
@@ -1509,8 +1562,9 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
-position, no address, no token. The last drive's text is also kept in the app's storage
+and timings (fixes, ticks, route requests, spoken lines, app in front or not, what each
+check concluded from a fixed list of words, and seconds saved): no position, no address,
+no road name, no token. The last drive's text is also kept in the app's storage
 on the phone, and a text that looked as if it held a position, a token or an address is
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own
@@ -1603,7 +1657,10 @@ the city's server.
 
 The data script is run by hand by a developer, not by the app.
 `npm run build:signals` makes no network request at all (the extracts are downloaded
-separately, as whole states).
+separately, as whole states). The monthly refresh workflow (`signals-refresh.yml`)
+downloads the same two whole-state extracts from Geofabrik on a GitHub Actions runner;
+it sends nothing about any user or trip (it has none), only the request for the files,
+with a user agent naming the repository.
 
 Signal data is kept on the device, in the browser's IndexedDB, so it does not have to be
 downloaded again: the OpenStreetMap signal tiles of the areas outside the bundle that

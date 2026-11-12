@@ -164,6 +164,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     // state waits here and is drawn in one update when the screen is back.
     const screen = replaySource === null && native !== null ? native.screen : pageVisibility()
     let unseen: LiveState | null = null
+    // Each decided check once, for the drive diagnostics: what it saw, never where.
+    let seenCheckAtMs: number | null = null
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
@@ -192,6 +194,12 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           unseen = null
           setState(next)
           setNowMs(now())
+        }
+        // The drive diagnostics go on while the screen is hidden, like the drive log.
+        const decided = next.lastDecision
+        if (native !== null && decided !== null && decided.atMs !== seenCheckAtMs) {
+          seenCheckAtMs = decided.atMs
+          native.checked(decided.code, decided.routes, decided.savingSec)
         }
         const spent = next.switches.length > seenSwitches && whatIfInPlay.current
         seenSwitches = next.switches.length
