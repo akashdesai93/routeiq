@@ -80,6 +80,33 @@ test('when a route check never answers, it gives up on it and the next checks st
   expect(spoken).not.toContain(OFF_ROUTE)
 })
 
+test('when the phone clock is put back half a minute mid-drive, the car keeps moving and every turn is spoken', async ({ app }) => {
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  // Three minutes in, just before the first turn prompt, the wall clock goes back 30 s (#30).
+  const log = await app.drive({ clockBackAtSec: 180, snapAtSec: [200], readTurnAtSec: [178, 188, 198, 208] })
+  await app.snap('arrived: the summary')
+
+  // The next turn keeps coming nearer through the half minute the clock went back: the car never stood still.
+  const meters = log.turnDistances.map((d) => d.meters)
+  expect(meters).toHaveLength(4)
+  expect(meters.every((m) => m !== null)).toBe(true)
+  for (let i = 1; i < meters.length; i++) expect(meters[i]!).toBeLessThan(meters[i - 1]!)
+  expect(log.arrived).toBe(true)
+  expect(log.banners).toEqual([])
+  expect(await app.spoken()).toEqual([
+    STARTED,
+    'In half a mile, turn left onto Cross Street.',
+    'Turn left onto Cross Street.',
+    'Turn right onto Main Corridor.',
+    'In half a mile, turn right onto Cross Street.',
+    'Turn right onto Cross Street.',
+    'Turn left onto Main Corridor.',
+    'Your destination is ahead.',
+    'You have arrived. Trip time 17 minutes.',
+  ])
+})
+
 test('when nothing is faster, it never switches', async ({ app }) => {
   // Traffic wobbles by up to 6 % from check to check, and the GPS wanders up to 8 m off the road.
   app.outside.traffic = NOISY_BUT_NOTHING_FASTER

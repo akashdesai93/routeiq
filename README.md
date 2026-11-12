@@ -1135,6 +1135,16 @@ browser keeps a request going for minutes, while the iPhone shell's own limit is
 request, and a check can be two or three requests one after another. In a replay the
 limit is stretched by the replay speed, like the request gap.
 
+**The drive's clock** (#30, `src/device/clock.ts`). Tracking only believes a fix that is
+newer than the last one, so every fix is stamped on arrival with one session clock, the
+same one the drive itself runs on (the browser's GPS, the iPhone shell's GPS and the
+session all share it). It follows the wall clock forward, so time with the phone asleep
+counts, but a step back of the wall clock (NTP or the carrier correcting it, or the time
+set by hand) is absorbed: the clock carries on from where it was. Before, a step back of
+30 s left every fix for 30 s "out of order" and the car stood still on the map, with no
+turn prompts. `performance.now()` was not used because it does not advance while an
+Apple device sleeps (w3c/hr-time#115). The arrival time is still shown on the wall clock.
+
 **Turn guidance.** Requests carry `steps=true`, `banner_instructions=true`,
 `voice_instructions=true` and `voice_units=imperial` (Mapbox Directions docs, checked
 Nov 11, 2026: both instruction parameters need `steps=true`, no profile is excluded,

@@ -1,4 +1,5 @@
 import { isValidLngLat } from '../../core/index.ts'
+import { sessionNow } from '../clock.ts'
 import type { GeolocationLike, LocationErrorKind, PositionSource } from '../geolocation.ts'
 import { removeListener, type NativeFix, type RouteIQNativePlugin } from './plugin.ts'
 
@@ -14,9 +15,10 @@ const validFix = (fix: NativeFix | null | undefined): fix is NativeFix =>
  * background updates), in place of the browser's watchPosition: it keeps
  * coming while the phone is locked or another app is in front. Like the
  * browser source, each fix is stamped with this clock on arrival, handed
- * over and kept nowhere; nothing is logged.
+ * over and kept nowhere; nothing is logged. The default clock is the
+ * session clock (../clock.ts), the one the live drive itself runs on.
  */
-export function nativePositionSource(plugin: RouteIQNativePlugin, now: () => number = Date.now): PositionSource {
+export function nativePositionSource(plugin: RouteIQNativePlugin, now: () => number = sessionNow): PositionSource {
   return {
     start(onFix, onError) {
       let stopped = false

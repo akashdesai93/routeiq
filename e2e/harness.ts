@@ -81,6 +81,11 @@ export interface DriveOptions {
   hideAtSec?: number
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
+  /** At this simulated second the page's wall clock (Date.now) is put back `clockBackSec` seconds, as NTP or a carrier can. */
+  clockBackAtSec?: number
+  clockBackSec?: number
+  /** The next turn's distance, as the drive view shows it, is read at these simulated seconds (DriveLog.turnDistances). */
+  readTurnAtSec?: readonly number[]
 }
 
 export interface DriveLog {
@@ -90,6 +95,8 @@ export interface DriveLog {
   statusLines: { atSec: number; text: string }[]
   arrived: boolean
   seconds: number
+  /** The next turn's distance in meters, read at DriveOptions.readTurnAtSec. */
+  turnDistances: { atSec: number; meters: number | null }[]
 }
 
 export class App {
@@ -244,7 +251,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [] } = options
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
     await page.getByRole('button', { name: 'Start drive' }).click()
@@ -259,7 +266,7 @@ export class App {
     let position: LngLat = UPTOWN
     let heading = 180
     let speed = 0
-    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0 }
+    const log: DriveLog = { banners: [], statusLines: [], arrived: false, seconds: 0, turnDistances: [] }
     let lastBanner = ''
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
@@ -268,6 +275,11 @@ export class App {
           Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
           document.dispatchEvent(new Event('visibilitychange'))
         })
+      }
+      if (clockBackAtSec !== undefined && sec === clockBackAtSec) {
+        // Only the wall clock moves: timers keep their pace, as on a phone.
+        const wall = await page.evaluate(() => Date.now())
+        await page.clock.setSystemTime(wall - clockBackSec * 1000)
       }
       if (route !== null && astray === null && wrongTurnAtSec !== undefined && sec === wrongTurnAtSec) {
         const here = along(route, alongM)
@@ -315,6 +327,11 @@ export class App {
       }
       lastBanner = state.banner
       if (snapAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) await this.snap(`driving, minute ${Math.floor(sec / 60)}`)
+      if (readTurnAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) {
+        const text = (await page.getByLabel('Next turn').textContent()) ?? ''
+        const m = /([\d.]+)\s*(mi|ft)/.exec(text)
+        log.turnDistances.push({ atSec: sec, meters: m === null ? null : Number(m[1]) * (m[2] === 'mi' ? 1609.344 : 0.3048) })
+      }
       log.seconds = sec + STEP_SEC
       if (state.arrived) {
         log.arrived = true

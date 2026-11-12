@@ -10,6 +10,7 @@ import {
   type RerouteOptions,
   type RouteCandidate,
 } from './core/index.ts'
+import { sessionClock, sessionNow } from './device/clock.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
 import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
@@ -119,7 +120,8 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const speaker = (speakerRef.current ??= native?.speaker ?? createSpeaker())
     const replaySource = replay === null ? null : createReplaySource({ origin: replay.origin, plan: replay.plan, multiplier: () => latest.current.replay?.multiplier ?? replay.multiplier })
     const source: PositionSource = replaySource ?? native?.source ?? geolocationSource()
-    const now = replaySource === null ? Date.now : replaySource.now
+    // The session clock never steps back with the wall clock (#30); the GPS sources stamp with it too.
+    const now = replaySource === null ? sessionNow : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
@@ -207,16 +209,16 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
 
   const multiplier = replaying ? (config.replay?.multiplier ?? null) : null
   const { settings, rerouteOptions } = config
-  const view = useMemo(
-    () =>
-      liveView(state, nowMs, {
-        ...(multiplier === null ? {} : replayLiveOptions(multiplier)),
-        pollIntervalSec: settings.pollIntervalSec,
-        maxRequests: settings.maxRequests,
-        reroute: rerouteOptions,
-      }),
-    [state, nowMs, multiplier, settings, rerouteOptions],
-  )
+  const view = useMemo(() => {
+    const v = liveView(state, nowMs, {
+      ...(multiplier === null ? {} : replayLiveOptions(multiplier)),
+      pollIntervalSec: settings.pollIntervalSec,
+      maxRequests: settings.maxRequests,
+      reroute: rerouteOptions,
+    })
+    // The arrival time is shown as a time of day: on the wall clock, whatever the session clock absorbed.
+    return replaying || v.arrivalAtMs === null ? v : { ...v, arrivalAtMs: sessionClock.toWall(v.arrivalAtMs) }
+  }, [state, nowMs, multiplier, settings, rerouteOptions, replaying])
 
   return {
     state,
