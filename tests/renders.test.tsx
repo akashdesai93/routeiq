@@ -52,8 +52,12 @@ vi.mock('mapbox-gl/esm', () => {
       return this.sources[id]
     }
     getCanvas() {
-      return { style: {} }
+      return { style: {}, clientWidth: 0, clientHeight: 0 }
     }
+    getContainer() {
+      return { clientWidth: 0, clientHeight: 0 }
+    }
+    triggerRepaint() {}
     getBounds() {
       return { contains: () => true }
     }
