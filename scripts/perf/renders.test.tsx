@@ -4,7 +4,7 @@
 // 3000-vertex route, the Directions answers come from scripts/perf/lib.mjs, and Mapbox GL is
 // replaced by a recorder. Counted per second of driving: renders of each component, React
 // commits, and what is handed to the map (setData per source, with its size, and easeTo).
-import { act, Profiler, type ReactNode } from 'react'
+import { act, memo, Profiler, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 // @ts-expect-error plain JavaScript helper without types
@@ -19,11 +19,17 @@ const counts = vi.hoisted(() => ({
   commitMs: 0,
 }))
 
+/** What memo() returns, as far as counting needs it. */
+type MemoLike<P> = { type: (props: P) => ReactNode; compare?: ((a: P, b: P) => boolean) | null }
+
 /** Wraps a component so that each render is counted, with the props that changed since the last one. */
 const counting = vi.hoisted(() => {
-  return <P extends Record<string, unknown>>(name: string, component: (props: P) => ReactNode) => {
+  return <P extends Record<string, unknown>>(name: string, component: ((props: P) => ReactNode) | MemoLike<P>): never => {
+    // A memo()'d component: count the inner function and keep the memo, so a render the
+    // memo skips is not counted.
+    if (typeof component !== 'function') return memo(counting(name, component.type), component.compare ?? undefined) as never
     let last: P | null = null
-    return (props: P) => {
+    return ((props: P) => {
       counts.renders[name] = (counts.renders[name] ?? 0) + 1
       const changed = (counts.changedProps[name] ??= {})
       if (last !== null) {
@@ -33,7 +39,7 @@ const counting = vi.hoisted(() => {
       }
       last = props
       return component(props)
-    }
+    }) as never
   }
 })
 
