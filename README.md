@@ -73,7 +73,10 @@ request. See [docs/branch-protection.md](docs/branch-protection.md).
 On a pull request CI also builds the `main` it was tested on, and the Gate fails a PR that adds
 more than 4 kB of JavaScript or 2 kB of CSS unless the reviewer adds the label `size-ok` with a
 reason. The fleet board flags `main` above 90 % of the ceiling, so the ceiling is raised (or code
-cut) by decision. Feature PRs never change the ceiling. See
+cut) by decision. Feature PRs never change the ceiling. What the page loads before its first paint (the files
+`dist/index.html` names) is measured too: the map (Mapbox GL JS and its CSS) is loaded after
+the first screen (`src/map/LazyMapView.tsx`), so a static import that pulls Mapbox back into
+the first load fails the up-front ceiling. See
 [docs/branch-protection.md](docs/branch-protection.md#bundle-size).
 
 ## End-to-end scenarios
