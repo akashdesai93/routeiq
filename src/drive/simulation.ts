@@ -1,4 +1,4 @@
-import { findCurrentRoute, type RerouteOptions, type RouteCandidate } from '../core/index.ts'
+import { checkProbeAllowance, findCurrentRoute, plainCheckReserve, type RerouteOptions, type RouteCandidate } from '../core/index.ts'
 
 /**
  * The pure parts of the simulated drive (PLAN step 6): the simulated clock,
@@ -111,6 +111,34 @@ export function afterSwitch(clock: DriveClock): DriveClock {
 export function cruiseSpeedMps(route: Pick<RouteCandidate, 'distanceM' | 'durationSec'>): number {
   const speed = route.distanceM / route.durationSec
   return Number.isFinite(speed) ? Math.min(45, Math.max(1.5, speed)) : 13
+}
+
+/**
+ * The simulated drive's own time to the destination, in seconds: the meters
+ * of the route line still ahead at the speed the car now drives (which each
+ * check sets from the fresh travel time, cruiseSpeedMps). This, not the
+ * planned duration, is what the probe budget keeps requests back for (#183):
+ * on a slow drive the plan's time would keep too few. Null when it cannot be
+ * worked out (no length or no speed): an unknown reserve allows no probe.
+ */
+export function simulatedTimeLeftSec(routeLengthM: number, alongM: number, speedMps: number): number | null {
+  if (![routeLengthM, alongM, speedMps].every(Number.isFinite) || speedMps <= 0) return null
+  return Math.max(0, routeLengthM - alongM) / speedMps
+}
+
+/**
+ * How many side-street probes a simulated check may make: the live drive's
+ * rule (checkProbeAllowance), with the requests for the plain checks until the
+ * simulated arrival kept back (simulatedTimeLeftSec, plainCheckReserve).
+ * `requestsUsed` counts this check.
+ */
+export function simulatedProbeAllowance(
+  used: { readonly requestsUsed: number; readonly probesUsed: number },
+  settings: DriveSettings,
+  drive: { readonly routeLengthM: number; readonly alongM: number; readonly speedMps: number },
+): number {
+  const leftSec = simulatedTimeLeftSec(drive.routeLengthM, drive.alongM, drive.speedMps)
+  return checkProbeAllowance(used, settings.maxRequests, {}, plainCheckReserve(leftSec, settings.pollIntervalSec))
 }
 
 /**
