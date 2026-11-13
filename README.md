@@ -1342,15 +1342,6 @@ from the token gaps (8, 12, 14 px). The map's share, before and after, at 390 x 
 56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). On the
 iPhone (phone lab, 2026-11-13) the drive map grew from 676 to 695 points of an 860-point
 page, and the plan map from about 40 % to 55 % of the screen.
-**The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
-the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
-casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and
-the turn card's and the sheet's edge a lighter `--hair-night` so they don't melt into the
-streets. A change of appearance takes effect the next time the map starts, never with a
-style reload under a drive. While following the car, the base map's points of interest,
-transit and traffic layers are off (traffic's orange sits next to amber); they come back on
-the trip screen. Same Mapbox style service as before, with the same token: no new network
-call.
 **The switch moment** (#84; design #22, #43, #44) has three stages in the sheet, each a
 banner over the time line. Amber appears only here, and only for news.
 - **Pending**: the engine is confirming a faster route (`confirming`, or held by its
