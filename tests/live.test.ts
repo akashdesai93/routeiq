@@ -11,6 +11,9 @@ import {
   SPOKEN,
   WITHDRAWN_TITLE,
   canTakeOffer,
+  INITIAL_OFFER_LIFE,
+  offerLife,
+  type OfferLifeEvent,
   synthesizeAnnouncements,
   WAKE_LOCK_WARNING,
   type GuidanceStep,
@@ -37,9 +40,13 @@ function session(options: Partial<LiveOptions> = {}) {
   let state: LiveState = LIVE_IDLE
   const effects: { atSec: number; effect: LiveEffect }[] = []
   let nowSec = 0
+  /** Told of every step that changed the state, as the live drive hook is (#202). */
+  const watchers: ((before: LiveState, after: LiveState, nowMs: number) => void)[] = []
   const send = (event: LiveEvent) => {
     const step = liveStep(state, event, options)
+    const before = state
     state = step.state
+    if (state !== before) watchers.forEach((w) => w(before, state, nowMs()))
     step.effects.forEach((effect) => effects.push({ atSec: nowSec, effect }))
     return step.effects
   }
@@ -54,6 +61,7 @@ function session(options: Partial<LiveOptions> = {}) {
     nowMs,
     effects,
     send,
+    watchers,
     setTime(sec: number) {
       nowSec = sec
     },
@@ -1822,4 +1830,139 @@ describe('taking or losing a faster route on offer (#197)', () => {
     expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE.unconfirmed, canKeep: false })
   })
 
+})
+
+describe('the life of each offer, for the drive diagnostics (#202)', () => {
+  const guided = (c: RouteCandidate): RouteCandidate => ({
+    ...c,
+    guidance: c.maneuvers.map((m, i) => ({
+      atDistanceM: m.atDistanceM,
+      location: m.location,
+      type: m.kind,
+      modifier: m.kind === 'turn' ? 'left' : null,
+      primaryText: `${nameOf(c)} road ${i}`,
+      secondaryText: null,
+      announcements: [],
+      synthesized: true,
+    })),
+  })
+  const plain = (xM: number) => routesAt(xM, { A: 1300 }).map(guided)
+  const faster = (xM: number) => routesAt(xM, { A: 1300, B: 1000 }).map(guided)
+
+  /** A drive whose every step goes through offerLife, as the hook does: the events it gives, with the time. */
+  function logged(options: Partial<LiveOptions> = {}) {
+    const s = driving(options, guided(candidate('A', at(0, 0), 1300)!))
+    const events: (OfferLifeEvent & { atSec: number })[] = []
+    let memory = INITIAL_OFFER_LIFE
+    s.watchers.push((before, after, nowMs) => {
+      const life = offerLife(memory, before, after, nowMs, options)
+      memory = life.memory
+      life.events.forEach((e) => events.push({ ...e, atSec: (nowMs - T0) / 1000 }))
+    })
+    return { s, events }
+  }
+  const take = (s: ReturnType<typeof session>) => s.send({ type: 'take-offer', nowMs: s.nowMs() })
+
+  it('an offer is shown once, with its saving and why, however many checks renew it', () => {
+    const { s, events } = logged({ reroute: { confirmPolls: 3 } })
+    cruise(s, 179, faster)
+    expect(events).toEqual([{ kind: 'shown', why: 'confirming', savingSec: 300, atSec: 60 }])
+  })
+
+  it('an offer whose saving is unknown is shown as unknown, never as 0', () => {
+    const { s } = logged()
+    cruise(s, 59, faster)
+    const before = s.state
+    cruise(s, 60, faster)
+    const unknown = { ...s.state, offer: { ...s.state.offer!, savingSec: null } }
+    expect(offerLife(INITIAL_OFFER_LIFE, before, unknown, s.nowMs()).events).toEqual([{ kind: 'shown', why: 'confirming', savingSec: null }])
+  })
+
+  it('Take it: taken by the driver, with the time since it was shown and the directions changed', () => {
+    const { s, events } = logged()
+    cruise(s, 90, faster)
+    take(s)
+    expect(events.at(-1)).toEqual({ kind: 'ended', how: 'taken', reason: null, afterSec: 30, directions: 'changed', atSec: 90 })
+  })
+
+  it('Keep my route while it is offered: kept by the driver', () => {
+    const { s, events } = logged()
+    cruise(s, 75, faster)
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    expect(events.at(-1)).toEqual({ kind: 'ended', how: 'kept', reason: null, afterSec: 15, directions: null, atSec: 75 })
+  })
+
+  it('the next check confirms it: confirmed by the app', () => {
+    const { s, events } = logged()
+    cruise(s, 120, faster)
+    expect(nameOf(s.state.route!)).toBe('B')
+    expect(events.at(-1)).toEqual({ kind: 'ended', how: 'confirmed', reason: null, afterSec: 60, directions: 'changed', atSec: 120 })
+  })
+
+  it('the next check finds it no longer faster: withdrawn, and why', () => {
+    const { s, events } = logged()
+    cruise(s, 120, (xM) => (xM < 1500 ? faster(xM) : plain(xM)))
+    expect(events.at(-1)).toMatchObject({ kind: 'ended', how: 'withdrawn', reason: 'not-faster', afterSec: 60 })
+  })
+
+  it('its turn-off comes too close before the next check: expired', () => {
+    const { s, events } = logged()
+    // Nothing faster until the car is 4 km along; then B, whose turn-off is 500 m ahead.
+    cruise(s, 307, (xM) => (xM < 4000 ? plain(xM) : faster(xM)))
+    expect(events).toEqual([
+      { kind: 'shown', why: 'confirming', savingSec: 300, atSec: 300 },
+      { kind: 'ended', how: 'expired', reason: 'too-late', afterSec: 7, directions: null, atSec: 307 },
+    ])
+  })
+
+  it('leaving the route, or ending the drive, with an offer on screen: expired, and why', () => {
+    const off = logged()
+    cruise(off.s, 60, faster)
+    for (let t = 61; t <= 70; t++) {
+      off.s.setTime(t)
+      off.s.fix(15 * t, 200)
+    }
+    expect(off.events.at(-1)).toMatchObject({ kind: 'ended', how: 'expired', reason: 'off-route' })
+
+    const ended = logged()
+    cruise(ended.s, 70, faster)
+    ended.s.send({ type: 'end' })
+    expect(ended.events.at(-1)).toMatchObject({ kind: 'ended', how: 'expired', reason: 'drive-ended', afterSec: 10 })
+  })
+
+  it('the next check offers a route that turns off somewhere else: the first is withdrawn, replaced, and the new one shown', () => {
+    const { s, events } = logged()
+    const other = (xM: number) => routesAt(xM, { A: 1300, C: 1000 }).map(guided)
+    cruise(s, 120, (xM) => (xM < 1500 ? faster(xM) : other(xM)))
+    expect(events.map((e) => (e.kind === 'shown' ? 'shown' : `${e.how} ${e.reason}`))).toEqual(['shown', 'withdrawn replaced', 'shown'])
+  })
+
+  it('every offer shown has exactly one ending', () => {
+    const { s, events } = logged()
+    // Offered, withdrawn, offered again, kept.
+    cruise(s, 120, (xM) => (xM < 1500 ? faster(xM) : plain(xM)))
+    cruise(s, 180, faster)
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    const kinds = events.map((e) => (e.kind === 'shown' ? 'shown' : e.how))
+    expect(kinds).toEqual(['shown', 'withdrawn', 'shown', 'kept'])
+  })
+
+  it('a switch whose next turn is the same as on the route left says the directions did not change', () => {
+    const { s } = logged()
+    cruise(s, 90, faster)
+    const before = s.state
+    take(s)
+    const after = s.state
+    const memory = { shownAtMs: T0 + 60_000 }
+    const same = { ...after, route: { ...after.route!, guidance: before.route!.guidance }, tracking: before.tracking }
+    expect(offerLife(memory, before, same, s.nowMs()).events).toEqual([expect.objectContaining({ how: 'taken', directions: 'unchanged' })])
+    // The same next turn, then one more: the directions did change, further on (as with a turn-off kilometers ahead).
+    const steps = before.route!.guidance!
+    const last = steps.at(-1)!
+    const later = [...steps, { ...last, type: 'turn', modifier: 'right', atDistanceM: last.atDistanceM + 300 }]
+    const further = { ...after, route: { ...after.route!, guidance: later }, tracking: before.tracking }
+    expect(offerLife(memory, before, further, s.nowMs()).events).toEqual([expect.objectContaining({ how: 'taken', directions: 'changed' })])
+    const none = { ...after, route: { ...after.route!, guidance: [] } }
+    expect(offerLife(memory, before, none, s.nowMs()).events).toEqual([expect.objectContaining({ how: 'taken', directions: 'none' })])
+  })
 })

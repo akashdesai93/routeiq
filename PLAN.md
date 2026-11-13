@@ -155,6 +155,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    the owner's evening drive was an offer that won one check and was too late by the next.
    Open for later: whether the pending stage should also be spoken (today only the switch
    is); the Swift port of `take-offer` and `withdrawn` (docs/contracts/changes).
+   Offer life in the diagnostics, done (Nov 13, 2026, #202 part 2): each offer shown is
+   logged with its saving and why, then exactly one ending (taken by the driver, kept,
+   confirmed by the app, withdrawn, expired) with the seconds since it was shown and, after a
+   switch, whether the directions ahead changed (`src/core/offerLife.ts`). Read by
+   `scripts/drive-report.mjs` (#202 part 1). Open for later: the Swift port of `offerLife`
+   when the shell's drive loop moves to Swift.
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,

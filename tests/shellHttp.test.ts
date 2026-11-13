@@ -456,3 +456,57 @@ describe('what each drive check concluded, in the diagnostics (so "was there a f
     expect(log.text()).toContain('best saving another route offered: unknown')
   })
 })
+
+describe('the life of each switch offer, in the diagnostics (#202)', () => {
+  /** The events, without their time of day and app state. */
+  const events = (text: string) =>
+    text
+      .split('\n')
+      .filter((l) => / offer /.test(l))
+      .map((l) => l.replace(/^\d\d:\d\d:\d\d /, '').replace(/ \[\w+\]$/, ''))
+
+  it('logs each offer shown, then how it ended, when, and whether the directions changed', () => {
+    let now = Date.UTC(2026, 10, 13, 12, 0, 0)
+    const log = createDriveDiagnostics(() => now)
+    log.offerShown('confirming', 240.4)
+    now += 39_000
+    log.offerEnded('taken', null, 39, 'unchanged')
+    log.offerShown('cooldown', 150)
+    log.offerEnded('kept', null, 19, null)
+    log.offerShown('confirming', null)
+    log.offerEnded('withdrawn', 'unconfirmed', 60, null)
+    log.offerShown('confirming', 200)
+    log.offerEnded('confirmed', null, 60, 'changed')
+    log.offerShown('confirming', 130)
+    log.offerEnded('expired', 'too-late', 7, null)
+    const text = log.text()
+    expect(text).toContain('offers: 5 shown: taken 1, kept 1, confirmed 1, withdrawn 1, expired 1, directions unchanged 1')
+    expect(events(text)).toEqual([
+      'offer shown: a faster one, waiting for the next check to confirm it (saves 240 s)',
+      'offer taken by the driver after 39 s, directions unchanged',
+      'offer shown: a faster one, held back by the cooldown after a switch (saves 150 s)',
+      'offer kept by the driver after 19 s',
+      'offer shown: a faster one, waiting for the next check to confirm it (saving unknown)',
+      'offer withdrawn after 60 s: could not be confirmed',
+      'offer shown: a faster one, waiting for the next check to confirm it (saves 200 s)',
+      'offer confirmed by the app after 60 s, directions changed',
+      'offer shown: a faster one, waiting for the next check to confirm it (saves 130 s)',
+      'offer expired after 7 s: its turn came too close',
+    ])
+  })
+
+  it('says nothing about offers on a drive that had none', () => {
+    const log = createDriveDiagnostics(() => 0)
+    log.checked('current-best', 2, 0)
+    expect(log.text()).not.toMatch(/^offers:| offer (shown|taken|kept|confirmed|withdrawn|expired)/m)
+  })
+
+  it('keeps only words from its lists: anything else is left out, never written', () => {
+    const log = createDriveDiagnostics(() => 0)
+    log.offerShown('Elm Street', 61.7)
+    log.offerEnded('vanished', '35.2271,-80.8431', 12.4, 'left onto Elm')
+    const text = log.text()
+    expect(events(text)).toEqual(['offer shown: other (saves 62 s)', 'offer withdrawn after 12 s'])
+    expect(text).not.toMatch(/\d\.\d|Elm|vanished/)
+  })
+})
