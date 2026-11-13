@@ -102,6 +102,8 @@ export interface LiveRunner {
   start(destination: LngLat, route?: RouteCandidate | null, routeFetchedAtMs?: number | null): void
   end(): void
   keepPrevious(): void
+  /** "Take it": the faster route on offer, at once (#197). */
+  takeOffer(): void
   setMuted(muted: boolean): void
   /** For the screen lock's own "released" event. */
   wakeLockReleased(): void
@@ -262,6 +264,7 @@ export function createLiveRunner(deps: LiveRunnerDeps): LiveRunner {
     },
     end: () => dispatch({ type: 'end' }),
     keepPrevious: () => dispatch({ type: 'keep-previous', nowMs: deps.now() }),
+    takeOffer: () => dispatch({ type: 'take-offer', nowMs: deps.now() }),
     setMuted: (muted) => dispatch({ type: 'mute', muted }),
     wakeLockReleased: () => dispatch({ type: 'wake-lock', result: 'released' }),
     state: () => state,

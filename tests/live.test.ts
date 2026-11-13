@@ -10,6 +10,8 @@ import {
   POSITION_ERROR_MESSAGES,
   REQUEST_TIMED_OUT,
   SPOKEN,
+  WITHDRAWN_TITLE,
+  canTakeOffer,
   synthesizeAnnouncements,
   WAKE_LOCK_WARNING,
   type GuidanceStep,
@@ -1458,8 +1460,26 @@ describe('the switch moment on screen (#84)', () => {
     const s = driving({}, { ...candidate('A', at(0, 0), 1300)!, signalCount: 12, signalCoverage: 'full' })
     cruise(s, 60, withLights('full'))
     expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
-    expect(s.state.offer).toEqual({ savingSec: 300, lightsDelta: -2, turnInM: expect.any(Number), again: false })
-    expect(s.view().moment).toEqual({ stage: 'pending', title: 'Checking a faster route', detail: 'Would save 5 min · 2 fewer lights', canKeep: true })
+    // B turns off 5 km along the main road; the car is 900 m along at the first check.
+    expect(s.state.offer).toEqual({
+      savingSec: 300,
+      lightsDelta: -2,
+      turnInM: expect.closeTo(4100, 0),
+      again: false,
+      route: expect.objectContaining({ id: expect.stringMatching(/^B-/) }),
+      turnAlongM: expect.closeTo(5000, 0),
+      // These candidates carry no turn guidance.
+      step: null,
+      onFreeway: false,
+    })
+    expect(s.view().moment).toEqual({
+      stage: 'pending',
+      title: 'Checking a faster route',
+      detail: 'Would save 5 min · 2 fewer lights',
+      turn: { arrow: null, distanceM: expect.closeTo(4100, 0), primaryText: null },
+      canTake: true,
+      canKeep: true,
+    })
     expect(nameOf(s.state.route!)).toBe('A')
     expect(s.state.switchBanner).toBeNull()
   })
@@ -1471,12 +1491,16 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.view().moment).toMatchObject({ detail: "Would save 5 min · lights: can't compare" })
   })
 
-  it('pending ends when a check finds nothing faster', () => {
+  it('pending ends when a check finds nothing faster, and says so calmly for a few seconds (#197)', () => {
     const s = driving()
     cruise(s, 60, faster)
     expect(s.view().moment).toMatchObject({ stage: 'pending' })
     cruise(s, 120)
     expect(s.state.offer).toBeNull()
+    expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE['not-faster'], canKeep: false })
+    // On screen only: nothing is said for an offer that ends.
+    expect(s.spoken()).not.toContain(WITHDRAWN_TITLE['not-faster'])
+    cruise(s, 120 + DEFAULT_LIVE_OPTIONS.switchBannerSec)
     expect(s.view().moment).toBeNull()
   })
 
@@ -1683,4 +1707,190 @@ describe('the switch moment on screen (#84)', () => {
     expect(s.state.lastDecision).toMatchObject({ code: 'confirming' })
     expect(s.view().moment).toMatchObject({ stage: 'pending', title: 'Still faster. Checking again.', detail: "Would save 5 min · lights: can't compare" })
   })
+})
+
+describe('taking or losing a faster route on offer (#197)', () => {
+  /** B saves five minutes, with a turn at each corner: its turn-off is "B road 1", a left 5 km along the main road. */
+  const guided = (c: RouteCandidate): RouteCandidate => ({
+    ...c,
+    guidance: c.maneuvers.map((m, i) => ({
+      atDistanceM: m.atDistanceM,
+      location: m.location,
+      type: m.kind,
+      modifier: m.kind === 'turn' ? 'left' : null,
+      primaryText: `${nameOf(c)} road ${i}`,
+      secondaryText: null,
+      announcements: [],
+      synthesized: true,
+    })),
+  })
+  const faster = (xM: number) => routesAt(xM, { A: 1300, B: 1000 }).map(guided)
+  /** Nothing faster until the car is 4 km along: then B, whose turn-off is only 500 m ahead at the next check. */
+  const lateFaster = (xM: number) => (xM < 4000 ? routesAt(xM, { A: 1300 }) : faster(xM))
+
+  it('pending carries how to take it: the offered route\'s maneuver at its turn-off, counting down as the car nears it', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    expect(s.view().moment).toMatchObject({ stage: 'pending', turn: { arrow: 'left', primaryText: 'B road 1', distanceM: expect.closeTo(4100, 0) } })
+    // The turn card still shows the route being driven: nothing is switched yet.
+    expect(nameOf(s.state.route!)).toBe('A')
+    cruise(s, 70, faster)
+    expect(s.view().moment).toMatchObject({ stage: 'pending', turn: { distanceM: expect.closeTo(3950, 0) } })
+  })
+
+  it('Take it switches at once: the offered route, its turns, the spoken line, and the rules after a switch', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    s.setTime(61)
+    s.fix(915)
+    const effects = s.send({ type: 'take-offer', nowMs: s.nowMs() })
+    expect(nameOf(s.state.route!)).toBe('B')
+    expect(s.state.offer).toBeNull()
+    // 4085 m to the turn-off: said, and shown, as 2.5 miles.
+    expect(s.spoken().at(-1)).toBe('Switching to a faster route. Saves 5 minutes. Turn in 2.5 miles.')
+    expect(s.view().moment).toMatchObject({ stage: 'confirmed', title: s.spoken().at(-1), canKeep: true })
+    expect(s.view().nextTurn).toMatchObject({ primaryText: 'B road 1' })
+    expect(s.view().heldTurnText).toBe('2.5 mi')
+    expect(effects.map((e) => e.type)).toEqual(['follow-route', 'speak'])
+    expect(s.state.switches).toHaveLength(1)
+    expect(s.state.lastDecision).toMatchObject({ action: 'switch', code: 'taken-offer', savingSec: 300 })
+    // As after any switch: the cooldown runs from the tap, and the main road ahead counts as left.
+    expect(s.state.engine.lastSwitchAtSec).toBe(61)
+    expect(s.state.engine.abandoned).toHaveLength(1)
+    expect(s.state.engine.pending).toBeNull()
+    // Keep my route still goes back.
+    s.send({ type: 'keep-previous', nowMs: s.nowMs() })
+    expect(nameOf(s.state.route!)).toBe('A')
+    expect(s.state.switches).toEqual([])
+  })
+
+  it('Take it while a check is out cancels it: its answer was about the route left behind', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    // The next check goes out at 120 s and is not answered.
+    for (let t = 61; t <= 120; t++) {
+      s.setTime(t)
+      s.fix(15 * t)
+      s.tick()
+    }
+    expect(s.state.request).not.toBeNull()
+    const effects = s.send({ type: 'take-offer', nowMs: s.nowMs() })
+    expect(effects[0]).toEqual({ type: 'cancel-request' })
+    expect(s.state.request).toBeNull()
+    expect(nameOf(s.state.route!)).toBe('B')
+  })
+
+  it('Take it does nothing without an offer, or once the car is off the route', () => {
+    const s = driving()
+    cruise(s, 30)
+    const before = s.state
+    expect(s.send({ type: 'take-offer', nowMs: s.nowMs() })).toEqual([])
+    expect(s.state).toBe(before)
+
+    const off = driving()
+    cruise(off, 60, faster)
+    for (let t = 61; t <= 70; t++) {
+      off.setTime(t)
+      off.fix(15 * t, 200)
+    }
+    expect(off.state.tracking!.offRoute).toBe(true)
+    expect(off.send({ type: 'take-offer', nowMs: off.nowMs() })).toEqual([])
+    expect(nameOf(off.state.route!)).toBe('A')
+  })
+
+  it('the offer ends on the fix that brings its turn-off nearer than the lead, before the next check', () => {
+    const s = driving()
+    // First seen at the check at 300 s: 4.5 km along, the turn-off 500 m ahead (the lead is 400 m).
+    cruise(s, 300, lateFaster)
+    expect(s.state.offer).toMatchObject({ turnAlongM: expect.closeTo(5000, 0) })
+    expect(s.state.engine.pending).not.toBeNull()
+    // 4590 m: 410 m to go, still on offer.
+    cruise(s, 306, lateFaster)
+    expect(s.view().moment).toMatchObject({ stage: 'pending' })
+    // 4605 m: 395 m to go. Too late to take, and no check has come since.
+    cruise(s, 307, lateFaster)
+    expect(s.state.lastCheckedAtMs).toBe(T0 + 300_000)
+    expect(s.state.offer).toBeNull()
+    expect(s.state.turn).toBeNull()
+    expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE['too-late'], canKeep: false })
+    // The confirmation starts over: the engine never switches to a route the screen has let go of.
+    expect(s.state.engine.pending).toBeNull()
+    expect(s.spoken().filter((l) => l.startsWith('Switching'))).toEqual([])
+  })
+
+  /** B as before, with the main road a freeway up to and past B's turn-off: an exit, which needs 1200 m. */
+  const onFreeway = (c: RouteCandidate): RouteCandidate => ({ ...c, limitedAccessSpansM: [[0, 100_000]] })
+
+  it('at speed, the lead grows with it: at 30 m/s an offer ends 600 m before its turn-off, not 400 m', () => {
+    // Checks every 70 s: at 140 s the car is 4.2 km along, B turns off 800 m ahead.
+    const s = driving({ pollIntervalSec: 70 })
+    cruise(s, 140, (xM) => (xM < 4000 ? routesAt(xM, { A: 1300 }) : faster(xM)), 30)
+    expect(s.view().moment).toMatchObject({ stage: 'pending' })
+    // 4410 m: 590 m to go. Twenty seconds at 30 m/s is 600 m: too late already.
+    cruise(s, 147, (xM) => (xM < 4000 ? routesAt(xM, { A: 1300 }) : faster(xM)), 30)
+    expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE['too-late'], canKeep: false })
+  })
+
+  it('on a freeway, an offer ends 1200 m before its exit', () => {
+    const answer = (xM: number) => (xM < 3000 ? routesAt(xM, { A: 1300 }) : faster(xM).map(onFreeway))
+    const s = driving({}, onFreeway(candidate('A', at(0, 0), 1300)!))
+    // First seen at 240 s, 3.6 km along: the exit is 1400 m ahead.
+    cruise(s, 240, answer)
+    expect(s.state.offer).toMatchObject({ onFreeway: true })
+    cruise(s, 253, answer)
+    expect(s.view().moment).toMatchObject({ stage: 'pending' })
+    // 3810 m: 1190 m to the exit.
+    cruise(s, 254, answer)
+    expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE['too-late'], canKeep: false })
+  })
+
+  it('Take it waits out the cooldown after a switch: no Take it on screen, and a tap does nothing', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    // As if a switch had been made a minute ago: within the 300 s cooldown.
+    const cooling = { ...s.state, engine: { ...s.state.engine, lastSwitchAtSec: s.nowSec - 60 } }
+    expect(canTakeOffer(cooling, s.nowMs())).toBe(false)
+    expect(liveView(cooling, s.nowMs()).moment).toMatchObject({ stage: 'pending', canTake: false, canKeep: true })
+    expect(liveStep(cooling, { type: 'take-offer', nowMs: s.nowMs() }).state).toBe(cooling)
+    // Once it has run out, the tap is taken.
+    const cooled = { ...s.state, engine: { ...s.state.engine, lastSwitchAtSec: s.nowSec - 300 } }
+    expect(canTakeOffer(cooled, s.nowMs())).toBe(true)
+  })
+
+  it('Take it needs a fresh position: with no fix for longer than maxFixAgeSec it is not offered', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    expect(s.view().moment).toMatchObject({ canTake: true })
+    // Eleven seconds without a fix (a tunnel): where the car is, and so the distance to the turn, is not known.
+    s.setTime(71)
+    expect(s.view().moment).toMatchObject({ stage: 'pending', canTake: false })
+    expect(s.send({ type: 'take-offer', nowMs: s.nowMs() })).toEqual([])
+    expect(nameOf(s.state.route!)).toBe('A')
+  })
+
+  it('Take it does nothing while a switch banner is up', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    const banner = { untilMs: s.nowMs() + 8000, text: 'Switching', canKeep: true, atMs: s.nowMs(), beforeSec: null, afterSec: 1000, turnInM: null }
+    const showing = { ...s.state, switchBanner: banner }
+    expect(liveStep(showing, { type: 'take-offer', nowMs: s.nowMs() }).state).toBe(showing)
+  })
+
+  it('Take it and a withdrawal both drop the side-street probe being confirmed', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    const keep = { via: at(5000, 500), on: at(5000, 0) } as unknown as NonNullable<LiveState['probes']['keep']>
+    const confirming = { ...s.state, probes: { ...s.state.probes, keep } }
+    expect(liveStep(confirming, { type: 'take-offer', nowMs: s.nowMs() }).state.probes.keep).toBeNull()
+  })
+
+  it('an offer a check could not compare ends as "can\'t confirm", never as "no longer faster"', () => {
+    const s = driving()
+    cruise(s, 60, faster)
+    // The next answer has no main road and nothing asked for it: no comparison is possible.
+    cruise(s, 120, (xM) => routesAt(xM, { B: 1000 }))
+    expect(s.state.lastDecision).toMatchObject({ code: 'route-unconfirmed' })
+    expect(s.view().moment).toEqual({ stage: 'withdrawn', title: WITHDRAWN_TITLE.unconfirmed, canKeep: false })
+  })
+
 })

@@ -108,7 +108,13 @@
 .live-news-detail { color: var(--dim); font-size: 15.5px; font-weight: 500; line-height: 1.3; }
 .live-news-icon { flex: none; width: 28px; height: 28px; }
 .live-news-ring { flex: none; box-sizing: border-box; width: 26px; height: 26px; border: 4px solid var(--amber); border-radius: 50%; }
-.app.live .live-keep { flex: none; width: 100%; margin-top: 12px; border: 2px solid var(--fg); background: transparent; }
+.live-moment-actions { display: flex; gap: 12px; margin-top: 12px; }
+.app.live .live-keep { flex: 1; border: 2px solid var(--fg); background: transparent; }
+/* The faster route's turn-off inside the pending block (#197): the turn card's arrow, figure and road, smaller. */
+.live-offer-turn { display: flex; gap: 12px; align-items: center; margin: -4px 0 12px; padding: 0 16px; contain: layout paint; }
+.live-offer-turn .turn-arrow { flex: none; width: 40px; height: 40px; }
+.live-offer-distance { flex: none; font-family: var(--figure); font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.live-offer-road { min-width: 0; overflow: hidden; font-family: var(--figure); font-size: 24px; font-weight: 600; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
 .app.live .live-keep:hover { background: #ffffff14; }
 /* The figures of the switch: old ones small, dim and struck through; the new time on amber. */
 .live-eta-change { display: flex; gap: 8px; align-items: center; min-width: 0; }
@@ -207,7 +213,14 @@
   .live-moment { display: contents; }
   .live-bottom > .live-warning, .live-more { order: 1; }
   .live-controls { order: 2; }
-  .app.live .live-keep { position: sticky; z-index: 1; bottom: 78px; background: var(--glass); box-shadow: 0 12px 0 var(--glass); }
+  .live-moment-actions { position: sticky; z-index: 1; bottom: 78px; background: var(--glass); box-shadow: 0 12px 0 var(--glass); }
+  /* While a faster route is offered the column cannot hold the banner, its turn, the time line and
+     two rows of buttons (#197): the time line steps aside, as the banner says what it saves. */
+  .live-moment:has(.live-news[data-stage='pending']) .live-eta { display: none; }
+  /* ...and the banner keeps one line, "Would save 9 min · 1 fewer light", which says it all. */
+  .live-news[data-stage='pending'] { margin-bottom: 8px; padding: 8px 12px; }
+  .live-news[data-stage='pending'] .live-news-text strong { display: none; }
+  .live-offer-turn { margin-bottom: 8px; }
   .live-controls {
     position: sticky;
     bottom: 0;
