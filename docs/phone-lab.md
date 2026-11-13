@@ -99,6 +99,9 @@ Things learned on the phone that the design rests on:
   simulated start (`drive-at-<lng>-<lat>`); the hook asks the phone where it is and presses
   Start drive only within 250 m of that point. On the phone's real position it does not start,
   and it writes "not at the simulated start" without saying where the phone is.
+- **The lab never ends RouteIQ while it is in front.** It sends the app to the background first
+  (#136; see "How the lab starts the app" below). The same thing happens to a person right after
+  an install: swipe the app away and reopen it.
 - **Nothing can tap the screen.** The accessibility service reads every element of the screen
   (that is how a build without the lab is checked for routes), but its "press" does nothing in a
   web view. Hence the hook inside the app.

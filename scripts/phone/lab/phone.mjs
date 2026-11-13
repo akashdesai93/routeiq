@@ -31,7 +31,6 @@ export const WEB_PROCESS = 'com.apple.WebKit.WebContent'
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-
 export function findPmd3() {
   const candidates = [process.env.ROUTEIQ_PMD3, path.join(homedir(), 'dev', 'tools', 'pmd3', 'Scripts', 'pymobiledevice3.exe'), path.join(homedir(), 'dev', 'tools', 'pmd3', 'bin', 'pymobiledevice3')]
   const found = candidates.find((c) => c && existsSync(c))
@@ -145,8 +144,12 @@ export async function connectPhone({ log = () => {} } = {}) {
 
     /** Starts an app, or brings it to the front when `keep` is true and it is running. Returns the pid, or null. */
     async launch(bundleId, { args = [], keep = false } = {}) {
+      // #136: ending RouteIQ while it is in front and starting it again at once leaves the whole
+      // app unshown (black). So before a launch that ends the app, RouteIQ is sent to the
+      // background and left there for a moment. ROUTEIQ_LAB_HOT=1 turns this off, to reproduce
+      // the black screen on purpose.
       if (startsFromBackground(bundleId, { keep })) {
-        const away = await agent.send({ cmd: 'launch', bundle: BACKGROUND_APP, args: [], keep: false })
+        const away = await agent.send({ cmd: 'launch', bundle: BACKGROUND_APP, args: [], keep: true })
         if (!away.ok) log(`could not send the app to the background first: ${away.error}`)
         await sleep(DEFAULT_LAB_LAUNCH.backgroundFirstMs)
       } else if (!keep && bundleId !== BACKGROUND_APP) log('ROUTEIQ_LAB_HOT=1: ending the app in front and starting it at once (this start makes the screen black, #136)')
