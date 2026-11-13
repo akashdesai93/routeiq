@@ -155,7 +155,12 @@ export class App {
   readonly cancelledHanging: number[] = []
   private readonly hangingN = new Map<Request, number>()
   readonly unexpected: string[] = []
-  /** Every request the router below saw. A response to any other one came from the network past it. */
+  /**
+   * Requests to the outside that this harness never saw: they went round its routing (in
+   * WebKit, everything a page asks for once a service worker controls it, #184) and so
+   * could reach the real network. Any one fails the scenario.
+   */
+  readonly unrouted: string[] = []
   private readonly routed = new WeakSet<Request>()
   /**
    * Pages a tapped link opened in a new tab or window (Google Maps, Waze, the OpenStreetMap
@@ -192,17 +197,18 @@ export class App {
   async open(options: { fakeClock?: boolean; storage?: Record<string, string>; path?: string; shell?: boolean } = {}) {
     const { page } = this
     await page.context().route('**/*', (route) => this.answer(route))
+    const checkRouted = (request: Request) => {
+      const url = new URL(request.url())
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || this.routed.has(request)) return
+      this.unrouted.push(`${request.method()} ${url.origin}${url.pathname}`)
+    }
+    page.on('requestfinished', checkRouted)
+    page.on('requestfailed', checkRouted)
     page.on('requestfailed', (request) => {
       const index = this.heldRequests.get(request)
       if (index !== undefined) this.abortedProbes.push(index)
       if (this.hanging.delete(request)) this.cancelledHanging.push(this.hangingN.get(request)!)
-    })
-    // A request that never reached the router went out for real (#203: in WebKit, what a service
-    // worker fetches is not routed). Nothing may leave this PC, so that fails the scenario too.
-    page.context().on('response', (response) => {
-      const url = new URL(response.url())
-      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.protocol === 'data:' || url.protocol === 'blob:') return
-      if (!this.routed.has(response.request())) this.unexpected.push(`${response.request().method()} ${url.origin}${url.pathname} (past the router: HTTP ${response.status()})`)
     })
     await page.exposeBinding('__controlsRecord', (_source, event: ControlEvent) => {
       if (event.kind === 'tapped') this.controls.activatedLog.push(event.key)
@@ -620,5 +626,6 @@ export const test = base.extend<{ app: App }>({
     const controls = { title: info.titlePath.join(' › '), project: info.project.name, seen: [...app.controls.seen].sort(), activated: [...app.controls.activated].sort() }
     writeFileSync(info.outputPath('controls.json'), JSON.stringify(controls, null, 1))
     expect(app.unexpected, 'requests that would have left this PC').toEqual([])
+    expect(app.unrouted, 'requests that went round the harness, to the real network').toEqual([])
   },
 })

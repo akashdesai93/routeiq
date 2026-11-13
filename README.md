@@ -89,11 +89,10 @@ drive, a side street found mid-drive takes me round it", "after a drive, it show
 it really took against what it predicted".
 
 ```powershell
-npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
+npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone sets
 npm run e2e                                    # builds, runs every scenario and the controls guard
 start e2e-report\index.html                    # the one-page report
-npx playwright install webkit                  # once, for the next line: WebKit, the iPhone's engine
-npm run e2e:webkit                             # the tap scenarios in WebKit at iPhone size
+npm run e2e:webkit                             # only the WebKit project: the smoke set and the tap scenarios
 npm run review:taps                            # before/after screenshots of every tap, as one page
 ```
 
@@ -103,7 +102,9 @@ npm run review:taps                            # before/after screenshots of eve
   don't collide, in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
   and `.env.local` is never used.
 - **Fully offline.** Every request that leaves localhost is answered by the test
-  (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a
+  (`e2e/harness.ts`); one that nothing answers fails the scenario, and so does one that
+  went round the harness's routing (`unrouted`: in WebKit a page a service worker controls
+  fetches round it, so the WebKit project blocks service workers). Directions come from a
   made-up road network between the trip's two points (`e2e/world/roads.ts`): three routes
   that share their start and end, answered from wherever the car is, as Mapbox does.
   Some scenarios add a side street Mapbox never offers, reachable only by a request with
@@ -119,6 +120,14 @@ npm run review:taps                            # before/after screenshots of eve
   onto a new route when the app announces one, and can take a wrong turn or wander with
   GPS noise. The voice records every line in order instead of speaking. A 17-minute drive
   takes about 40 seconds.
+- **WebKit smoke set:** `e2e/webkit.smoke.spec.ts` runs in WebKit, the engine of the
+  iPhone app's web view, at an iPhone's size with touch (Playwright project `webkit-iphone`;
+  every other scenario runs in Chromium only). It reads the screenshot's pixels, not the
+  DOM: within 1 s of each moment the driving screen must not be one flat colour, must show
+  a light map with the route and the car in ink, and must show words on the turn card and
+  the sheet. It checks this after Start drive, after lock and unlock, and after the map's
+  WebGL context was taken and never given back (#136). Keep it small, because every
+  scenario in it runs in a second browser in CI.
 - **Evidence:** `e2e-report/index.html` shows each scenario with its screenshots, the
   spoken lines with their drive time, what the made-up traffic server answered to each
   route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
@@ -134,15 +143,12 @@ npm run review:taps                            # before/after screenshots of eve
   Disabled and read-only controls are left out (they cannot be tapped); a control whose
   words are data (a route row, a suggestion, a saved place) is one control for all of them.
   The tap scenarios are `e2e/controls.spec.ts`, tagged `@tap`, at 390 × 844 with touch.
-- **WebKit at an iPhone's size.** `npm run e2e:webkit` runs the `@tap` scenarios in WebKit
-  with Playwright's iPhone 15 profile (`playwright.webkit.config.ts`), the engine of the
-  iPhone's web view; CI runs it on two runners. Service workers are blocked there: in WebKit
-  Playwright's router does not see what a service worker fetches, so those requests went out
-  for real. The harness now fails any scenario where a response reached the page without
-  passing its router, in either browser.
+- **The tap scenarios in WebKit too.** `e2e/controls.spec.ts` also runs in the
+  `webkit-iphone` project (beside the smoke set of #136), the engine of the iPhone's web view.
+  `npm run e2e:webkit` runs that project alone.
 - **Tap review set.** `npm run review:taps` runs the `@tap` scenarios with a screenshot before
   and 0.4 s after every tap, click and typing, and writes the contact sheet
-  `e2e-report/taps/index.html` (`-- --webkit` for WebKit). It asserts nothing: it is the input
+  `e2e-report/taps/index.html` (`-- --webkit` for the WebKit project). It asserts nothing: it is the input
   of a design and function review (`docs/tap-review.md`).
 
 ## Planning a trip
@@ -1189,8 +1195,10 @@ stays at the right.
   with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
   sits below the notch and the content clear of the home indicator and the rounded corners.
   The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
-  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
-  gaps apply; the shell's layout is the same as before this change.
+  `native/shell/capacitor.config.json`), so there the insets read 0 and the gaps apply.
+  The page is 860 points tall in a 922-point window there, which shows as a black band
+  under the driving screen's sheet (#136). `contentInset: "never"` alone did not change
+  that on the phone (#197, phone lab 2026-11-13): the cause is still open.
 
 ## Live drive
 
@@ -1336,6 +1344,21 @@ the phone's safe areas, and the one animation is off under `prefers-reduced-moti
 On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
 the sheet stack in a column on the left and the map fills the right, so the car stays in
 view; the sheet scrolls in its column with More and End pinned at its foot (#131).
+**More map, more air** (#197, the owner: "a bit congested"): the map is the main thing on
+both screens, and `e2e/design.spec.ts` holds it there with a minimum share of the screen
+where the map can be seen (`MIN_MAP_SHARE`, measured on a grid of points: cards, sheets
+and bars count against it) and a minimum gap of 8 px between any two things a finger taps
+(`MIN_TAP_GAP_PX`). Each run plants a regression (a taller turn card, More and End 4 px
+apart) and checks that the guard catches it. On the trip screen the map takes half the
+screen (50 %, was 42 %) and the trip and the routes scroll up under it; on a phone on its
+side the panel is 340 px (was 380). On the driving screen the turn card is 112 px (was
+124), the sheet's top padding 24 px, and under the controls the home indicator's inset
+alone (not 14 px more); in landscape the column is 340 px. Spacing between controls is at least 8 px,
+from the token gaps (8, 12, 14 px). The map's share, before and after, at 390 x 844,
+430 x 932 and 844 x 390: trip screen 40 / 39 / 48 % → 48 / 48 / 53 %, driving screen
+56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). On the
+iPhone (phone lab, 2026-11-13) the drive map grew from 676 to 695 points of an 860-point
+page, and the plan map from about 40 % to 55 % of the screen.
 **The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
 the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
 casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and
@@ -1373,6 +1396,18 @@ banner over the time line. Amber appears only here, and only for news.
   `heldTurnMatchM` (50 m) of where a route the driver turned down did; any other route is
   "Checking a faster route".
 - After leaving the route there is nothing to keep: the "New route" banner has no button.
+
+*Drawing on the iPhone (#136).* In the iPhone app's web view (WebKit), the first version
+of this screen came up black: the page held the turn card and the drive ran, but nothing
+composited over the map was drawn, and only the black of the view's container showed.
+So during a drive nothing around the map clips its contents or paints the screen dark
+(the ground under the map is the map's own light colour), the map is drawn at its
+container's size when the drive view opens and closes and whenever the page comes back
+to the front (only when the size changed: resizing a canvas blanks it), and when iOS
+takes the map's WebGL context and has not given it back 2 s
+(`CONTEXT_RESTORE_WAIT_MS`, `src/map/MapView.tsx`) after the page came to the front, the
+map is built again, at most 3 times (`MAX_REBUILDS`: each build is a map load Mapbox counts). None of this runs per GPS fix. The WebKit smoke set (End-to-end
+scenarios) checks it from the screen's pixels.
 
 **Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):
 

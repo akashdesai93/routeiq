@@ -8,7 +8,7 @@ seen the code. Run it on `main` or on any PR branch.
 
 ```bash
 npm run review:taps                   # Chromium, 390 x 844, touch: e2e-report/taps/index.html
-npm run review:taps -- --webkit       # WebKit, iPhone 15 profile: e2e-report/webkit/taps/index.html
+npm run review:taps -- --webkit       # WebKit (webkit-iphone project): e2e-report/taps-webkit/index.html
 npm run e2e                           # (optional) the inventory: e2e-report/controls.md
 ```
 

@@ -1,8 +1,8 @@
 // Types for preflight.mjs, so the tests can import it. The script itself is plain JavaScript.
-export const DEFAULT_LAB_RULES: Readonly<{ quietFromHour: number; quietToHour: number }>
+export const DEFAULT_LAB_RULES: Readonly<{ quietFromHour: number; quietToHour: number; maxCommentPages: number }>
 export const SILENT_SCENARIOS: readonly string[]
 export const MIN_SHA_LENGTH: number
-export function readLabWindow(gh: (apiPath: string) => any, repo: string, now: string): { window: { opened_at: string; until: string; voice_ok: boolean } | null } | { error: string }
+export function readLabWindow(gh: (apiPath: string) => any, repo: string, now: string, rules?: typeof DEFAULT_LAB_RULES): { window: { opened_at: string; until: string; voice_ok: boolean } | null } | { error: string }
 export function ghJson(apiPath: string): any
 export function isQuietHour(hour: number, rules?: { quietFromHour: number; quietToHour: number }): boolean
 export function quietHoursProblem(hour: number, scenario: string, voiceOk: boolean, rules?: { quietFromHour: number; quietToHour: number }): string | null

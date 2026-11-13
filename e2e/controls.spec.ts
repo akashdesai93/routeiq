@@ -10,7 +10,8 @@ import { World, type LngLat } from './world/roads.ts'
 // The controls guard (e2e/controls-guard.mjs) fails when a control is on screen in some
 // scenario and no scenario taps it; this file is where most of them are tapped.
 //
-// Tagged @tap: these also run in WebKit at an iPhone's size (playwright.webkit.config.ts).
+// Tagged @tap. The file also runs in WebKit, in the webkit-iphone project (playwright.config.ts),
+// at 390 x 844 with touch (the size set below overrides the iPhone 14 window there).
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
 

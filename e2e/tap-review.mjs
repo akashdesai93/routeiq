@@ -2,7 +2,7 @@
 // before and after it, at phone size, as one browsable page.
 //
 //   npm run review:taps                  Chromium at 390 x 844 (the @tap scenarios)
-//   npm run review:taps -- --webkit      WebKit with the iPhone 15 profile
+//   npm run review:taps -- --webkit      the webkit-iphone project (iPhone 14 profile)
 //   npm run review:taps -- --sheet-only  only rebuild the page from the last run
 //   (any other arguments go to Playwright, e.g. -g "saved places")
 //
@@ -27,8 +27,8 @@ const take = (flag) => {
 const webkit = take('--webkit')
 const sheetOnly = take('--sheet-only')
 const noBuild = take('--no-build')
-const results = webkit ? 'e2e-report/webkit/results' : 'e2e-report/results'
-const out = webkit ? 'e2e-report/webkit/taps' : 'e2e-report/taps'
+const results = 'e2e-report/results'
+const out = webkit ? 'e2e-report/taps-webkit' : 'e2e-report/taps'
 
 if (!sheetOnly) {
   if (!noBuild) {
@@ -36,7 +36,7 @@ if (!sheetOnly) {
     if (build.status !== 0) process.exit(build.status ?? 1)
   }
   const grep = args.some((a) => a === '-g' || a === '--grep' || a.startsWith('--grep=')) ? [] : ['-g', '@tap']
-  const config = webkit ? ['-c', 'playwright.webkit.config.ts'] : []
+  const config = ['--project', webkit ? 'webkit-iphone' : 'chromium']
   const run = spawnSync(`npx playwright test ${[...config, ...grep, ...args].map((a) => JSON.stringify(a)).join(' ')}`, {
     shell: true,
     stdio: 'inherit',
@@ -104,7 +104,7 @@ writeFileSync(
   .pair img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px }
 </style>
 <h1>Tap review</h1>
-<p>${data.length} actions in ${scenarios.length} scenarios${webkit ? ', WebKit (iPhone 15 profile)' : ', Chromium at 390 × 844'}. Each row: the screen before the action, and 0.4 s after it.</p>
+<p>${data.length} actions in ${scenarios.length} scenarios${webkit ? ', WebKit (iPhone 14 profile, 390 × 844)' : ', Chromium at 390 × 844'}. Each row: the screen before the action, and 0.4 s after it.</p>
 ${sections.join('\n')}
 `,
 )
