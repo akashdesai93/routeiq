@@ -84,6 +84,8 @@ export const JAM_ONLY_THE_EAST_LOOP_MISSES: Traffic = (route, at, n) => {
 export function everyRoadSlow(factor = 1.6, fromRequest = 2): Traffic {
   return (route, at, n) => FREE_FLOW(route, at, n) * (n >= fromRequest ? factor : 1)
 }
+
+/**
  * The jam of JAM_ONLY_THE_EAST_LOOP_MISSES (only the East Loop goes round it), but only from
  * request 7 on, the drive's sixth check (about six minutes in). At 24 m/s that check is the
  * first to see the East Loop win, with its turn-off about a mile ahead; by the next check, a
