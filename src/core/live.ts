@@ -3,6 +3,7 @@ import { distanceM, isValidLngLat, lineFrom } from './geo.ts'
 import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import {
   checkProbeAllowance,
+  plainCheckReserve,
   INITIAL_CHECK_PROBES,
   rememberCheckProbes,
   resolveDriveProbeBudget,
@@ -221,7 +222,21 @@ export interface LiveState {
   /** A check is wanted as soon as one may be sent (back from the background). */
   readonly recheck: boolean
   /** The engine's latest word. */
-  readonly lastDecision: { readonly action: 'stay' | 'switch'; readonly code: RerouteCode | 'kept-previous'; readonly reason: string; readonly atMs: number } | null
+  /**
+   * The last decision. `routes`: how many routes that check's answer had; null when no answer
+   * came back (or the driver kept the previous route). `savingSec`: what the alternative the
+   * engine considered saves against the route driven, like for like (RerouteAlternative.savingSec);
+   * 0 when the engine compared and none was faster ('current-best'); null when it could not
+   * compare or weighed no faster route (unknown, never 0).
+   */
+  readonly lastDecision: {
+    readonly action: 'stay' | 'switch'
+    readonly code: RerouteCode | 'kept-previous'
+    readonly reason: string
+    readonly atMs: number
+    readonly routes: number | null
+    readonly savingSec: number | null
+  } | null
   /** What the last answered check returned. */
   readonly candidates: readonly RouteCandidate[] | null
   /** The travel time last heard for the route being driven, and how much of the route it was for. */
@@ -583,7 +598,12 @@ function request(state: LiveState, purpose: RequestPurpose, nowMs: number, opts:
         probes: {
           allowed:
             purpose === 'poll'
-              ? checkProbeAllowance({ requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used }, opts.maxRequests, opts.probes)
+              ? checkProbeAllowance(
+                  { requestsUsed: state.requestsUsed + 1, probesUsed: state.probes.used },
+                  opts.maxRequests,
+                  opts.probes,
+                  plainCheckReserve(remainingDriveSec(state), opts.pollIntervalSec, opts.probes),
+                )
               : 0,
           memory: state.probes,
           budget: resolveDriveProbeBudget(opts.probes),
@@ -801,7 +821,7 @@ function checked(
     request: null,
     engine: decision.nextState,
     probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted),
-    lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs },
+    lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs, routes: routes === null ? null : routes.length, savingSec: decision.considered?.savingSec ?? (decision.code === 'current-best' ? 0 : null) },
   }
   if (routes === null) return { state: next, effects: [] }
 
@@ -1007,7 +1027,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
             kept,
             declinedTurns: state.turn === null ? state.declinedTurns : [...state.declinedTurns, state.turn.at],
             declinedSwitches: state.declinedSwitches + 1,
-            lastDecision: { action: 'stay', code: 'kept-previous', reason: 'Staying: you chose to keep your route', atMs: event.nowMs },
+            lastDecision: { action: 'stay', code: 'kept-previous', reason: 'Staying: you chose to keep your route', atMs: event.nowMs, routes: null, savingSec: null },
           },
           effects: [{ type: 'speak', line: { text: SPOKEN.keptPrevious, priority: 'urgent' } }],
         }
@@ -1034,7 +1054,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           undo: null,
           switches: state.switches.slice(0, -1),
           declinedSwitches: state.declinedSwitches + 1,
-          lastDecision: { action: 'stay', code: 'kept-previous', reason: 'Staying: you chose to keep the previous route', atMs: event.nowMs },
+          lastDecision: { action: 'stay', code: 'kept-previous', reason: 'Staying: you chose to keep the previous route', atMs: event.nowMs, routes: null, savingSec: null },
         },
         effects: [
           // A check that is out was asked about the route just left behind.
@@ -1181,12 +1201,23 @@ function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null 
 
 export const WAKE_LOCK_WARNING = 'This browser cannot keep the screen awake. Keep the screen on yourself.'
 
+/**
+ * The expected time to the destination from where the car is now, in seconds:
+ * the travel time last heard for the route being driven, for the share of it
+ * still ahead. Null when it is not known (no route or position yet).
+ */
+export function remainingDriveSec(state: Pick<LiveState, 'tracking' | 'eta'>): number | null {
+  const remainingM = state.tracking?.remainingM ?? null
+  const eta = state.eta
+  if (remainingM === null || eta === null) return null
+  return eta.remainingM > 0 ? eta.durationSec * Math.min(1, remainingM / eta.remainingM) : 0
+}
+
 export function liveView(state: LiveState, nowMs: number, options: Partial<LiveOptions> = {}): LiveView {
   const opts = resolve(options)
-  const { tracking, route, eta } = state
+  const { tracking, route } = state
   const remainingM = tracking?.remainingM ?? null
-  const remainingSec =
-    remainingM === null || eta === null ? null : eta.remainingM > 0 ? eta.durationSec * Math.min(1, remainingM / eta.remainingM) : 0
+  const remainingSec = remainingDriveSec(state)
   const gate = livePollGate(state, nowMs, opts)
   const offRoute = tracking?.offRoute ?? false
 

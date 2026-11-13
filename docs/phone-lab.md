@@ -99,6 +99,14 @@ Things learned on the phone that the design rests on:
   simulated start (`drive-at-<lng>-<lat>`); the hook asks the phone where it is and presses
   Start drive only within 250 m of that point. On the phone's real position it does not start,
   and it writes "not at the simulated start" without saying where the phone is.
+- **The lab never ends RouteIQ while it is in front.** Ending the app in front and starting it
+  again at once (which is what the developer service's launch does) leaves the whole app
+  unpresented: a black screen under a normal status bar, on the plan screen and the drive screen
+  alike, until the app has been to the background and back (#136; 4 of 4 such starts black, 5
+  of 5 starts from the background drawn, 2026-11-13). So before every restart `phone.mjs` sends
+  RouteIQ to the background and waits 6 s. `ROUTEIQ_LAB_HOT=1` restores the old start, to
+  reproduce the black screen on purpose. The same thing happens to a person right after an
+  install: swipe the app away and reopen it.
 - **Nothing can tap the screen.** The accessibility service reads every element of the screen
   (that is how a build without the lab is checked for routes), but its "press" does nothing in a
   web view. Hence the hook inside the app.

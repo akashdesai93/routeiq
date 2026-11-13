@@ -262,6 +262,10 @@ public struct LiveState: Hashable, Sendable {
         public var code: LiveDecisionCode
         public var reason: String
         public var atMs: Double
+        /// How many routes that check's answer had; nil when none came back (or the previous route was kept).
+        public var routes: Int?
+        /// What the alternative the engine considered saves against the route driven, like for like; 0 when none was faster (current-best); nil when it could not compare.
+        public var savingSec: Double?
     }
 
     /// The travel time last heard for the route being driven, and how much of the route it was for.
@@ -811,7 +815,8 @@ public enum Live {
                 requestsUsed: Double(state.requestsUsed) + 1,
                 probesUsed: Double(state.probes.used),
                 maxRequests: opts.maxRequests,
-                budget: opts.probes
+                budget: opts.probes,
+                reserve: Probe.plainCheckReserve(remainingSec: remainingDriveSec(state), pollIntervalSec: opts.pollIntervalSec, budget: opts.probes)
             )
             : 0
         let effect = LiveRouteRequest(
@@ -1014,7 +1019,7 @@ public enum Live {
         next.request = nil
         next.engine = decision.nextState
         next.probes = Probe.rememberCheckProbes(state.probes, probes, decision, routes, alreadyCounted: probesCounted)
-        next.lastDecision = LiveState.Decision(action: decision.action, code: .reroute(decision.code), reason: reason, atMs: nowMs)
+        next.lastDecision = LiveState.Decision(action: decision.action, code: .reroute(decision.code), reason: reason, atMs: nowMs, routes: routes?.count, savingSec: decision.considered?.savingSec ?? (decision.code == .currentBest ? 0 : nil))
         guard let routes else { return LiveStep(state: next, effects: []) }
 
         next.candidates = routes
@@ -1208,7 +1213,7 @@ public enum Live {
                 next.kept = kept
                 next.declinedTurns = declinedTurns
                 next.declinedSwitches = JS.increment(state.declinedSwitches)
-                next.lastDecision = LiveState.Decision(action: .stay, code: .keptPrevious, reason: "Staying: you chose to keep your route", atMs: nowMs)
+                next.lastDecision = LiveState.Decision(action: .stay, code: .keptPrevious, reason: "Staying: you chose to keep your route", atMs: nowMs, routes: nil, savingSec: nil)
                 return LiveStep(state: next, effects: [.speak(line: SpokenLine(text: Spoken.keptPrevious, priority: .urgent))])
             }
             guard state.status == .driving, let undo = state.undo, let route = state.route, let tracking = state.tracking, state.switchBanner != nil else {
@@ -1233,7 +1238,7 @@ public enum Live {
             next.undo = nil
             next.switches = Array(state.switches.dropLast())
             next.declinedSwitches = JS.increment(state.declinedSwitches)
-            next.lastDecision = LiveState.Decision(action: .stay, code: .keptPrevious, reason: "Staying: you chose to keep the previous route", atMs: nowMs)
+            next.lastDecision = LiveState.Decision(action: .stay, code: .keptPrevious, reason: "Staying: you chose to keep the previous route", atMs: nowMs, routes: nil, savingSec: nil)
             // A check that is out was asked about the route just left behind.
             let cancel: [LiveEffect] = state.request == nil ? [] : [.cancelRequest]
             return LiveStep(state: next, effects: cancel + [
@@ -1273,15 +1278,18 @@ public enum Live {
         }
     }
 
+    /// The expected time to the destination from where the car is now, in seconds; nil when not known.
+    public static func remainingDriveSec(_ state: LiveState) -> Double? {
+        guard let remainingM = state.tracking?.remainingM, let eta = state.eta else { return nil }
+        return eta.remainingM > 0 ? eta.durationSec * JS.min(1, remainingM / eta.remainingM) : 0
+    }
+
     public static func liveView(_ state: LiveState, _ nowMs: Double, options: LiveOptions = .default) -> LiveView {
         let opts = options.resolved()
         let tracking = state.tracking
         let route = state.route
         let remainingM = tracking?.remainingM
-        var remainingSec: Double?
-        if let remainingM, let eta = state.eta {
-            remainingSec = eta.remainingM > 0 ? eta.durationSec * JS.min(1, remainingM / eta.remainingM) : 0
-        }
+        let remainingSec = remainingDriveSec(state)
         let gate = livePollGate(state, nowMs, options: opts)
         let offRoute = tracking?.offRoute ?? false
 

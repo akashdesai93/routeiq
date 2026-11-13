@@ -68,9 +68,16 @@ and the two macOS builds when their paths change. Its last job, `required`, is t
 status check `main` requires: `main` is protected and every change arrives through a pull
 request. See [docs/branch-protection.md](docs/branch-protection.md).
 
-`npm run size` (after a build) checks the bundle-size budget in
-`scripts/bundle-budget.json`: the app's own JavaScript, without Mapbox GL JS, and the CSS
-may each grow 10 % before CI fails.
+`npm run size` (after a build) checks the bundle against the owner's ceiling in
+`scripts/bundle-budget.json` (#170): the app's own JavaScript, without Mapbox GL JS, and the CSS.
+On a pull request CI also builds the `main` it was tested on, and the Gate fails a PR that adds
+more than 4 kB of JavaScript or 2 kB of CSS unless the reviewer adds the label `size-ok` with a
+reason. The fleet board flags `main` above 90 % of the ceiling, so the ceiling is raised (or code
+cut) by decision. Feature PRs never change the ceiling. What the page loads before its first paint (the files
+`dist/index.html` names) is measured too: the map (Mapbox GL JS and its CSS) is loaded after
+the first screen (`src/map/LazyMapView.tsx`), so a static import that pulls Mapbox back into
+the first load fails the up-front ceiling. See
+[docs/branch-protection.md](docs/branch-protection.md#bundle-size).
 
 ## End-to-end scenarios
 
@@ -85,7 +92,7 @@ drive, a side street found mid-drive takes me round it", "after a drive, it show
 it really took against what it predicted".
 
 ```powershell
-npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
+npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone smoke set
 npm run e2e                                    # builds, runs every scenario, about 1 minute
 start e2e-report\index.html                    # the one-page report
 ```
@@ -96,7 +103,9 @@ start e2e-report\index.html                    # the one-page report
   don't collide, in headless Chromium driven by Playwright (`e2e/`). The dev server on 5173 is not touched
   and `.env.local` is never used.
 - **Fully offline.** Every request that leaves localhost is answered by the test
-  (`e2e/harness.ts`); one that nothing answers fails the scenario. Directions come from a
+  (`e2e/harness.ts`); one that nothing answers fails the scenario, and so does one that
+  went round the harness's routing (`unrouted`: in WebKit a page a service worker controls
+  fetches round it, so the WebKit project blocks service workers). Directions come from a
   made-up road network between the trip's two points (`e2e/world/roads.ts`): three routes
   that share their start and end, answered from wherever the car is, as Mapbox does.
   Some scenarios add a side street Mapbox never offers, reachable only by a request with
@@ -112,6 +121,14 @@ start e2e-report\index.html                    # the one-page report
   onto a new route when the app announces one, and can take a wrong turn or wander with
   GPS noise. The voice records every line in order instead of speaking. A 17-minute drive
   takes about 40 seconds.
+- **WebKit smoke set:** `e2e/webkit.smoke.spec.ts` runs in WebKit, the engine of the
+  iPhone app's web view, at an iPhone's size with touch (Playwright project `webkit-iphone`;
+  every other scenario runs in Chromium only). It reads the screenshot's pixels, not the
+  DOM: within 1 s of each moment the driving screen must not be one flat colour, must show
+  a light map with the route and the car in ink, and must show words on the turn card and
+  the sheet. It checks this after Start drive, after lock and unlock, and after the map's
+  WebGL context was taken and never given back (#136). Keep it small, because every
+  scenario in it runs in a second browser in CI.
 - **Evidence:** `e2e-report/index.html` shows each scenario with its screenshots, the
   spoken lines with their drive time, what the made-up traffic server answered to each
   route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
@@ -203,9 +220,11 @@ result on the device. Mapbox's product for stored results is the Geocoding API w
 
 The shapes the Swift port and the iPhone shell depend on (routes, signal tiles and index, the
 place book, the reroute options and state, the live events and effects, the native plugin) are
-versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 1. What is in it,
+versioned as one: `CORE_CONTRACT_VERSION` in `src/core/contract.ts`, currently 6. What is in it,
 the JSON Schemas, and how to change a contract are in [docs/contracts.md](docs/contracts.md).
-`tests/contracts.test.ts` fails on a change of shape without a version bump.
+`tests/contracts.test.ts` fails on a change of shape until the snapshot is regenerated and a file in
+`docs/contracts/changes/` describes it for the Swift port. The version is bumped once per Swift
+port, not in every pull request (#169).
 
 ## Layout
 
@@ -330,6 +349,9 @@ scripts/        Plain Node 24, no dependencies. The script imports the app's own
                 build-signal-tiles.mjs: builds the OpenStreetMap signal tiles from
                 regional extracts on disk (no network), with lib/osm-pbf.mjs, a minimal
                 streaming reader for .osm.pbf files.
+                refresh-signal-bundle.mjs: the monthly refresh (#12): builds a new
+                bundle into a scratch folder, compares it with the shipped one
+                (src/providers/osm/refresh.ts) and writes it only if it passes.
 public/seed/    The signal data shipped with the app, served as static files and copied
                 into the build: osm-signals/ (one JSON file per tile with signals,
                 index.json, LICENSE.md: ODbL).
@@ -446,7 +468,8 @@ to look at are in `design/exports/merged/`.
      and shipped with the app in `public/seed/osm-signals/`: one file per tile that has a
      signal, in the same shape as the device cache, an `index.json` and a `LICENSE.md`.
      Built Nov 11, 2026 from the extracts of Nov 10, 2026: 22,613 signal nodes in 902
-     tile files, 1.2 MB. The index lists the 2,500 tiles that lie ENTIRELY inside the
+     tile files, 1.2 MB (a monthly refresh pull request updates the files; its body
+     gives the counts of the day, see "Monthly refresh" below). The index lists the 2,500 tiles that lie ENTIRELY inside the
      two states' extract boundaries (as 51 runs along 44 rows, 5 KB). Inside that set
      the bundle is the whole answer: a tile with a file is read from the app's own
      server, a tile without one is known to have no signals (no file, no request), and
@@ -524,6 +547,50 @@ to look at are in `design/exports/merged/`.
   demand. A server that answers something else for a missing file, such as the Vite dev
   server's page with status 200, leaves coverage unknown instead: counts stay partial
   and Overpass is not asked.
+
+  **Monthly refresh** (#12). `.github/workflows/signals-refresh.yml` runs at 06:23 UTC on
+  the 3rd of each month (and by hand: Actions, "Signals refresh", Run workflow). It
+  downloads the two extracts with their `.md5` and `.poly` (about 600 MB, one after the
+  other, once a month), and runs `node scripts/refresh-signal-bundle.mjs`, which builds a
+  new bundle into a scratch folder with the script above and compares it with the one in
+  `public/seed/osm-signals`. Then:
+
+  - the extracts are no newer than the shipped data: nothing happens (exit 3, run green);
+  - any check below fails: **it fails closed.** Nothing is written, nothing is committed,
+    no pull request; the run goes red and its summary lists every check (exit 4; exit 2
+    when an extract is missing or fails its checksum);
+  - otherwise the new files replace the old ones (the index last, stale tiles removed),
+    are committed on `bot/signals-refresh-<data date>` and go to `main` as a pull request
+    whose body is the before/after report: data date, signals, tile files, covered tiles
+    and bytes before and after, every check, the tiles whose count changed (largest
+    first) and the OpenStreetMap node ids added and removed (40 of each at most). It never
+    pushes to `main` or merges: the PR goes through `required` and review like any other.
+    While a refresh PR is open, the next run opens no second one.
+
+  | `DEFAULT_BUNDLE_REFRESH_CHECKS` | Default | Fails closed when |
+  | --- | --- | --- |
+  | `maxSignalDrop` | 3 % | the signal count falls by more (a truncated extract, a mass deletion) |
+  | `maxRemovedShare` | 5 % | more of the old signals are gone, even if as many new ones hide it |
+  | `maxSignalGrowth` | 15 % | the count grows by more (a wrong region, a bulk import to look at first) |
+  | `maxBytesGrowth` | 15 % | the bundle's bytes grow by more |
+  | `localTileMinSignals`, `maxLocalTileDrop` | 20, 25 % | a tile with 20 or more signals loses more than a quarter (a city-sized hole) |
+  | `maxMovedShare` | 5 % | more of the signals that stay have a new position (a reader or extract defect) |
+  | `maxCoveredTilesGained` | 0 | a tile joins the covered set (a boundary larger than its extract: the app would show 0 signals where the data was clipped) |
+  | `maxCoveredTilesLost` | 0 | a tile leaves the covered set (safe for the app, which then asks Overpass, but a sign of a damaged boundary) |
+  | `maxFutureMs` | 1 day | the data date is ahead of the clock |
+
+  Always checked as well: the same extracts as before, a data date that does not go
+  backwards, and both bundles sound (the index lists exactly the tile files present, each
+  file is a valid tile with the index's date, and the index's signal count matches).
+  The seed tiles are not in the bundle-size budget (that covers the app's JavaScript and
+  CSS), so the bytes check is what keeps them from growing unseen. The run takes a few
+  minutes on one ubuntu runner and needs no `npm ci`.
+
+  The PR is opened with the `SIGNALS_REFRESH_TOKEN` secret when it is set (a fine-grained
+  token for this repository with contents and pull requests read/write), so that the PR
+  starts the gate. Without it the workflow's own token is used: that needs "Allow GitHub
+  Actions to create and approve pull requests" in the repository settings, and a PR it
+  opens starts no workflow, so `required` first runs when the branch is next updated.
 - **Traffic signals, fallback:** the `traffic_signal` flags Mapbox puts on the
   intersections of a route, used only on stretches whose OpenStreetMap tile could not be
   loaded (outside the bundle, with Overpass failing).
@@ -1005,8 +1072,26 @@ lead distance, the cooldown, no return. No threshold changed.
   check now offers.
 - **Budget.** Probes share the drive's request budget (`maxRequests`, 60) and never take
   the request a check's path check may need: a probe goes out only while, after the check
-  itself, one request would still be left for that path check (`checkProbeAllowance`). At
-  most `requestsPerDrive` (20) probes a drive, so most of the budget stays for the checks.
+  itself, one request would still be left for that path check (`checkProbeAllowance`).
+- **Never blind.** Nor do probes take what the plain checks until the arrival need (#183):
+  before a probe, one request per poll interval of the expected time left (the arrival
+  the drive view shows, `remainingDriveSec`), times `arrivalReserve` (1), plus
+  `reserveMargin` (3) for the odd plain check that needs its path check, is kept back
+  (`plainCheckReserve`), and probes spend only what is left after that. With 30 minutes
+  left and a check a minute, 33 requests are kept back. It is worked out again at every
+  check from the latest travel time: it shrinks a request a minute as the drive goes on,
+  and grows when the traffic gets worse. When the time left is not known,
+  no probe goes out (an unknown reserve is never zero). A desk drive on a real corridor
+  had spent 54 of its 60 requests on probing checks and drove the last 5.5 minutes with
+  no checks at all. The price: with 60 requests, a drive with more than about 55 minutes
+  left has no room for a probe yet. A first version kept back 1.5 requests a minute, and
+  on a 40-minute rush-hour desk drive it sent 1 probe in 40 minutes, with the route 200 s
+  over its typical time and a jam on a probe-able stretch early on; keeping back one a
+  minute leaves a 40-minute drive about 15 requests for probes from the start. The
+  simulated drive keeps back the same, for its own time left (the line ahead at the speed
+  it now drives, `simulatedTimeLeftSec`).
+- **Per drive.** At most `requestsPerDrive` (20) probes a drive, so most of the budget stays
+  for the checks.
   A search for a new route (off the route) and the first route never probe. Nothing to
   probe (under 3 km left, freeway only, a route not held up) costs nothing. Every request
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
@@ -1025,6 +1110,8 @@ lead distance, the cooldown, no return. No threshold changed.
 | `requestsPerDrive` | 20 | Most probe requests per drive, out of `maxRequests` (60) |
 | `minDelaySec` | 120 s | A route with no jam reported ahead is probed only when it is this far over its typical time |
 | `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
+| `arrivalReserve` | 1 | Before a probe, this many requests per poll interval until the expected arrival are kept back for the plain checks |
+| `reserveMargin` | 3 | Requests kept back on top of those, for the odd plain check that needs its path check |
 
 What a check costs: 1 request, plus 1 for the path check when the route being driven is
 not among the fresh routes, plus 0 or 1 probe, plus 1 path check after a probe that found
@@ -1091,8 +1178,10 @@ stays at the right.
   with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
   sits below the notch and the content clear of the home indicator and the rounded corners.
   The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
-  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
-  gaps apply; the shell's layout is the same as before this change.
+  `native/shell/capacitor.config.json`), so there the insets read 0 and the gaps apply.
+  The page is 860 points tall in a 922-point window there, which shows as a black band
+  under the driving screen's sheet (#136). `contentInset: "never"` alone did not change
+  that on the phone (#197, phone lab 2026-11-13): the cause is still open.
 
 ## Live drive
 
@@ -1193,8 +1282,13 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **Drive diagnostics** (top bar, and behind More in the drive view; shell only): a log
   with Share (the iOS share sheet) and Copy buttons of what iOS let the app do: fixes and
   ticks received and the longest wait between them, route requests with their times,
-  spoken lines started and finished, and when the app went to the background. Counts and
-  timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
+  spoken lines started and finished, when the app went to the background, and what each
+  drive check concluded: a tally of the outcomes in words ("yours was the fastest",
+  "another was faster, by less than the minimum saving", "waiting for the next check to
+  confirm it" ...) and the best saving another route offered, in whole seconds, from the
+  reroute engine's own like-for-like comparison of the alternative it weighed (0 when yours
+  was the fastest, unknown when it could not compare). Counts
+  and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
@@ -1233,6 +1327,21 @@ the phone's safe areas, and the one animation is off under `prefers-reduced-moti
 On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
 the sheet stack in a column on the left and the map fills the right, so the car stays in
 view; the sheet scrolls in its column with More and End pinned at its foot (#131).
+**More map, more air** (#197, the owner: "a bit congested"): the map is the main thing on
+both screens, and `e2e/design.spec.ts` holds it there with a minimum share of the screen
+where the map can be seen (`MIN_MAP_SHARE`, measured on a grid of points: cards, sheets
+and bars count against it) and a minimum gap of 8 px between any two things a finger taps
+(`MIN_TAP_GAP_PX`). Each run plants a regression (a taller turn card, More and End 4 px
+apart) and checks that the guard catches it. On the trip screen the map takes half the
+screen (50 %, was 42 %) and the trip and the routes scroll up under it; on a phone on its
+side the panel is 340 px (was 380). On the driving screen the turn card is 112 px (was
+124), the sheet's top padding 24 px, and under the controls the home indicator's inset
+alone (not 14 px more); in landscape the column is 340 px. Spacing between controls is at least 8 px,
+from the token gaps (8, 12, 14 px). The map's share, before and after, at 390 x 844,
+430 x 932 and 844 x 390: trip screen 40 / 39 / 48 % → 48 / 48 / 53 %, driving screen
+56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). On the
+iPhone (phone lab, 2026-11-13) the drive map grew from 676 to 695 points of an 860-point
+page, and the plan map from about 40 % to 55 % of the screen.
 **The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
 the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
 casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and
@@ -1270,6 +1379,18 @@ banner over the time line. Amber appears only here, and only for news.
   `heldTurnMatchM` (50 m) of where a route the driver turned down did; any other route is
   "Checking a faster route".
 - After leaving the route there is nothing to keep: the "New route" banner has no button.
+
+*Drawing on the iPhone (#136).* In the iPhone app's web view (WebKit), the first version
+of this screen came up black: the page held the turn card and the drive ran, but nothing
+composited over the map was drawn, and only the black of the view's container showed.
+So during a drive nothing around the map clips its contents or paints the screen dark
+(the ground under the map is the map's own light colour), the map is drawn at its
+container's size when the drive view opens and closes and whenever the page comes back
+to the front (only when the size changed: resizing a canvas blanks it), and when iOS
+takes the map's WebGL context and has not given it back 2 s
+(`CONTEXT_RESTORE_WAIT_MS`, `src/map/MapView.tsx`) after the page came to the front, the
+map is built again, at most 3 times (`MAX_REBUILDS`: each build is a map load Mapbox counts). None of this runs per GPS fix. The WebKit smoke set (End-to-end
+scenarios) checks it from the screen's pixels.
 
 **Position tracking** (`src/core/tracking.ts`, thresholds in `DEFAULT_TRACKING_OPTIONS`):
 
@@ -1497,8 +1618,9 @@ which accepts `https://api.mapbox.com/` addresses and nothing else, follows no r
 and never logs or stores an address or an answer. Search and map tiles are the web
 app's requests to Mapbox, as in a browser. Spoken text is made on the phone by iOS. The
 Mapbox token you paste is stored on the phone only. "Drive diagnostics" keeps counts
-and timings (fixes, ticks, route requests, spoken lines, app in front or not): no
-position, no address, no token. The last drive's text is also kept in the app's storage
+and timings (fixes, ticks, route requests, spoken lines, app in front or not, what each
+check concluded from a fixed list of words, and seconds saved): no position, no address,
+no road name, no token. The last drive's text is also kept in the app's storage
 on the phone, and a text that looked as if it held a position, a token or an address is
 not written. It leaves the phone only if you share or copy it and send it yourself. In
 a test drive the positions are made up from the selected route; the phone's own
@@ -1591,7 +1713,10 @@ the city's server.
 
 The data script is run by hand by a developer, not by the app.
 `npm run build:signals` makes no network request at all (the extracts are downloaded
-separately, as whole states).
+separately, as whole states). The monthly refresh workflow (`signals-refresh.yml`)
+downloads the same two whole-state extracts from Geofabrik on a GitHub Actions runner;
+it sends nothing about any user or trip (it has none), only the request for the files,
+with a user agent naming the repository.
 
 Signal data is kept on the device, in the browser's IndexedDB, so it does not have to be
 downloaded again: the OpenStreetMap signal tiles of the areas outside the bundle that

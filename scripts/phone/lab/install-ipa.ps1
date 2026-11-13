@@ -69,11 +69,13 @@ function Press-Later([scriptblock]$find) {
   } | Out-Null
 }
 
-$open = Get-Dialogs
-if ($open.Count -gt 0) { throw "Sideloadly has a window open that needs a person: '$($open -join "', '")'. Nothing was changed." }
+$open = @(Get-Dialogs)
+$needsPerson = @($open | Where-Object { $_ -ne 'Choose IPA File' })
+if ($needsPerson.Count -gt 0) { throw "Sideloadly has a window open that needs a person: '$($needsPerson -join "', '")'. Nothing was changed." }
 
-# 1. The file: the first button of the window opens "Choose IPA File".
-Press-Later { param($main) $main.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'QPushButton')))[0] }
+# 1. The file: the first button of the window opens "Choose IPA File". A chooser left open by
+#    an earlier run that failed is used as it is.
+if ($open.Count -eq 0) { Press-Later { param($main) $main.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'QPushButton')))[0] } }
 $dialog = [IntPtr]::Zero
 for ($i = 0; $i -lt 40 -and $dialog -eq [IntPtr]::Zero; $i++) {
   Start-Sleep -Milliseconds 500
@@ -88,11 +90,20 @@ if ($dialog -eq [IntPtr]::Zero) { throw "Sideloadly's file chooser did not open.
 $combo = [RouteIQLabWin]::GetDlgItem($dialog, 0x47C)
 $edit = [RouteIQLabWin]::FindWindowEx([RouteIQLabWin]::FindWindowEx($combo, [IntPtr]::Zero, 'ComboBox', $null), [IntPtr]::Zero, 'Edit', $null)
 if ($edit -eq [IntPtr]::Zero) { throw "The file chooser has no file name box." }
-[void][RouteIQLabWin]::SendMessage($edit, 0x000C, [IntPtr]::Zero, $Ipa)          # WM_SETTEXT
-Start-Sleep -Milliseconds 400
-[void][RouteIQLabWin]::PostMessage([RouteIQLabWin]::GetDlgItem($dialog, 1), 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)  # BM_CLICK on Open
-for ($i = 0; $i -lt 20 -and [RouteIQLabWin]::IsWindow($dialog); $i++) { Start-Sleep -Milliseconds 500 }
-if ([RouteIQLabWin]::IsWindow($dialog)) { throw "The file chooser did not take the file." }
+# A chooser that has only just opened drops the text or the click (seen on 2026-11-12 with a
+# freshly started Sideloadly): give it a moment, and try up to three times.
+for ($try = 1; $try -le 3 -and [RouteIQLabWin]::IsWindow($dialog); $try++) {
+  Start-Sleep -Milliseconds 800
+  [void][RouteIQLabWin]::SendMessage($edit, 0x000C, [IntPtr]::Zero, $Ipa)          # WM_SETTEXT
+  Start-Sleep -Milliseconds 800
+  [void][RouteIQLabWin]::PostMessage([RouteIQLabWin]::GetDlgItem($dialog, 1), 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)  # BM_CLICK on Open
+  for ($i = 0; $i -lt 10 -and [RouteIQLabWin]::IsWindow($dialog); $i++) { Start-Sleep -Milliseconds 500 }
+}
+if ([RouteIQLabWin]::IsWindow($dialog)) {
+  # Do not leave it open: the next run would find a window it cannot explain.
+  [void][RouteIQLabWin]::PostMessage([RouteIQLabWin]::GetDlgItem($dialog, 2), 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)  # BM_CLICK on Cancel
+  throw "The file chooser did not take the file (tried three times; it was closed again)."
+}
 Write-Host "File chosen: $(Split-Path $Ipa -Leaf) from $(Split-Path (Split-Path $Ipa -Parent) -Leaf)"
 
 # 2. Start, then the status line until "Done.".

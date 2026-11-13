@@ -57,20 +57,40 @@ other jobs had to run.
 Not part of the gate: `codeql.yml` (code scanning, on pull requests, on `main` and weekly)
 and `pages.yml` (deploys the site after each push to `main`, which now means after each merge).
 
-## Bundle-size budget
+## Bundle size
 
-`npm run build && npm run size` (`scripts/check-bundle-size.mjs`) fails when the app's own
-JavaScript or the CSS is larger than the budget in `scripts/bundle-budget.json`, and prints
-the sizes in the job summary. Mapbox GL JS is built into its own `mapbox-gl-*.js` chunk
-(`vite.config.ts`) and is not budgeted. Sizes are bytes, minified, not compressed.
+Since #170 the bundle has a **ceiling the owner sets** and a **growth limit per pull request**,
+instead of "measured + 10 %" re-based in whichever feature PR hit the wall (by 05:33 on
+2026-11-12 main was at 99.6 % of it, and every code PR after that failed on size).
 
-| | measured (2026-11-11) | budget (+10 %) |
-| --- | ---: | ---: |
-| App JavaScript, without Mapbox GL JS | 368,176 | 404,994 |
-| CSS | 58,661 | 64,528 |
+`scripts/bundle-budget.json`, in bytes, minified, not compressed:
 
-When a growth is wanted: `npm run build && npm run size -- --update`, commit the new
-`bundle-budget.json`, and say why in the pull request.
+| key | what | set by |
+| --- | --- | --- |
+| `ceiling.appJs`, `ceiling.css` | the most the app's own JavaScript (without Mapbox GL JS) and the CSS may be: a product number, what the first screen may cost on a phone: 480,000 and 85,000 (owner, #170, 2026-11-12) | the owner, by decision on an issue (`needs-human`) |
+| `ceiling.entryJs`, `ceiling.entryCss` | what the page loads before its first paint (the files `dist/index.html` names; Mapbox GL JS is loaded after it, #97): 480,000 and 30,000 (owner decision on #97, 2026-11-13) | the owner, by decision on an issue (`needs-human`) |
+| `growthPerPr.appJs`, `growthPerPr.css` | the most one PR may add: 4,000 and 2,000 | the owner (#170) |
+| `growthPerPr.entryJs`, `growthPerPr.entryCss` | the same 4,000 and 2,000 for what loads before first paint (#127, waiting for the owner's decision with its ceiling) | the owner |
+| `alertAt` | the board flags `main` above this share of the ceiling: 0.9 | the owner (#170) |
+
+What checks it (the rules: `scripts/bundle-size.mjs`):
+- **Ceiling.** `npm run build && npm run size` (`scripts/check-bundle-size.mjs`) fails when a
+  measure is above its ceiling. In CI that fails the `web` job. No label passes it. There is no
+  `--update` any more.
+- **Growth.** On a pull request the `web` job also builds the `main` the run tested (the merge
+  commit's first parent) and measures it with the PR's script (`--against`). It only reports;
+  the Gate's `required` job (`scripts/orch/gates.mjs`, `sizeFailures`) fails the PR when it adds
+  more than the limit, or when the growth was not measured. The label **`size-ok`** passes it:
+  the reviewer adds it, with the reason in the verdict, and `gates.yml` re-runs just `required`.
+- **Ceiling file.** A PR that changes `scripts/bundle-budget.json` fails `required` until it has
+  `size-ok`, which the reviewer adds only for an owner decision.
+- **Headroom.** On `main` the size step writes a `bundle-size` notice with the sizes and the
+  ceiling; `state.mjs` reads it from main's newest Gate run, shows it in `health.bundle`, and
+  raises an alert (the `orch-alert` issue) above `alertAt`. A run without the notice is
+  "unknown", never 0 %.
+
+Mapbox GL JS is built into its own `mapbox-gl-*.js` chunk (`vite.config.ts`) and is not
+budgeted. The job summary shows every file.
 
 ## Protection on `main`
 

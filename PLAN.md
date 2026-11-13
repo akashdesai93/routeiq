@@ -65,10 +65,11 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    "Checked against real data". The city list added nothing on eight ordinary
    trips (18 of its 909 points have no OpenStreetMap match within 60 m), so it was
    removed (#13).
-   Open for later: the bundle is a snapshot and ages (rebuild it; nothing refreshes
-   it tile by tile); 60 m single-linkage grouping merges two pairs of Charlotte
+   Open for later: 60 m single-linkage grouping merges two pairs of Charlotte
    intersections 54 and 56 m apart; a slip-lane turn beside a signal and a ramp fork
-   on a `trunk` expressway can each add a signal. (Done: the city list was removed
+   on a `trunk` expressway can each add a signal. (Done: the bundle no longer only
+   ages: `signals-refresh.yml` rebuilds it monthly and opens a PR with a before/after
+   report, failing closed when the new data looks wrong (#12). Done: the city list was removed
    (#13). Done: Overpass tiles are now filtered by
    signal subtype with the same rule and list as bundled tiles, #11.)
 5. **Done: ranking** (`src/core/rank.ts`). Best traffic-aware ETA first; signal count
@@ -146,6 +147,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    line is now kept until spoken, with the new route said straight after it. Which
    carriageway the car is on is not known. The first route is the best-ranked one
    from the device's position, not the one picked in the list.
+   More map, more air (Nov 13, 2026, #197 part 2): the trip screen's map is half the
+   screen, the drive view's turn card and sheet are shorter, every gap between controls is
+   8 px or more. Guarded by a minimum map share and tap gap in `e2e/design.spec.ts`.
+   Open for later: a real pull-up sheet on the trip screen (today the page scrolls); the
+   black band under the drive sheet in the iPhone shell (the page is 860 of 922 points;
+   `contentInset: "never"` alone did not change it on the phone, #136).
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,
@@ -217,7 +224,9 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     `docs/contracts/core-contract.json`; JSON Schemas for the signal tile, the bundle index, the
     stored place book and the native plugin payloads in `docs/contracts/schemas`.
     `tests/contracts.test.ts` fails on a change of shape without a bump, and checks the shipped
-    tiles, index and place book against the schemas and the schemas against the types. Open for
+    tiles, index and place book against the schemas and the schemas against the types. Since
+    #169 a shape change is described in `docs/contracts/changes/<branch>.md` instead of bumping
+    the version in every pull request; the version is bumped once per Swift port. Open for
     later: the Swift port matches no version yet (#33); a schema for `RouteCandidate` itself if a
     service ever reads it as JSON.
 11. **Proposed: side-street alternatives.** Mapbox returns at most three routes, so a
@@ -284,6 +293,17 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       turns out to miss
       side streets on real trips; probes from inside the side street's own stretch see
       only what Mapbox offers from there.
+      11d (#183, desk-drive findings): the drive never goes blind. A probe goes out only
+      from what is left after one request per poll interval until the expected arrival
+      (times `arrivalReserve`, 1, plus `reserveMargin`, 3) is kept back for the plain checks
+      (`plainCheckReserve`, `checkProbeAllowance`); the time left is the view's own
+      (`remainingDriveSec`). e2e: "when the side streets keep losing, they never use up
+      the checks before I arrive" and "on a 40-minute drive that is slow from the start,
+      the side streets are tried early and the checks still last to the end". Open for later: the total budget (`maxRequests`, 60)
+      does not grow with a longer planned drive, so a drive of over an hour still runs
+      out of checks without any probe (a cost decision for the owner); back-off after
+      probes that keep losing, and the reason a probe was skipped in the diagnostics,
+      follow in their own PR.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.

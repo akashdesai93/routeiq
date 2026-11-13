@@ -382,6 +382,9 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.spoken(), [])
         XCTAssertEqual(s.state.lastDecision?.action, .stay)
         XCTAssertEqual(s.state.lastDecision?.code, .reroute(.routeUnconfirmed))
+        // Routes came back, but not the side street's own time: the saving is unknown, never guessed (#175).
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         XCTAssertEqual(s.state.engine.lostPolls, 0)
         XCTAssertFalse(s.view().offRoute)
     }
@@ -771,6 +774,9 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.engine, engine)
         XCTAssertEqual(s.state.lastDecision?.code, .reroute(.pollFailed))
         XCTAssertEqual(s.state.lastDecision?.reason, "Staying: could not check for faster routes (Could not reach Mapbox.)")
+        // No answer: no route count and no saving (#175).
+        XCTAssertNil(s.state.lastDecision?.routes)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         // The last good check is still the last one answered.
         XCTAssertEqual(s.state.lastCheckedAtMs, before.lastCheckedAtMs)
         XCTAssertEqual(s.state.candidates, before.candidates)
@@ -780,6 +786,15 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.engine.failedPolls, 3)
         XCTAssertEqual(s.requests().map(\.atSec), [0, 60, 120, 180])
         XCTAssertEqual(s.spoken(), [])
+    }
+
+    // it('a check where the route driven is the fastest says so with a known saving of 0, for the diagnostics (#175)')
+    func testChecksThatChangeNothing_currentBestHasAKnownSavingOfZero() throws {
+        let s = driving()
+        cruise(s, 130) { xM in routesAt(xM, [.A: 1300, .B: 1420]) }
+        XCTAssertEqual(s.state.lastDecision?.code, .reroute(.currentBest))
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertEqual(s.state.lastDecision?.savingSec, 0)
     }
 
     // it('staying is never spoken')
@@ -792,6 +807,8 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertEqual(s.spoken(), [])
         XCTAssertEqual(s.view().statusLine, "Staying: faster route saves only 40 seconds")
+        XCTAssertEqual(s.state.lastDecision?.routes, 2)
+        XCTAssertEqual(s.state.lastDecision?.savingSec, 40)
     }
 
     // MARK: - describe('the route being driven is not among the fresh routes')
@@ -925,6 +942,8 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(s.state.switches, [])
         XCTAssertEqual(s.state.declinedSwitches, 1)
         XCTAssertEqual(s.state.lastDecision?.code, .keptPrevious)
+        XCTAssertNil(s.state.lastDecision?.routes)
+        XCTAssertNil(s.state.lastDecision?.savingSec)
         // As if the switch had not been made: no cooldown, but B is declined for noReturnSec (600 s).
         XCTAssertNil(s.state.engine.lastSwitchAtSec)
         XCTAssertEqual(s.state.engine.declined.count, 1)
@@ -1435,7 +1454,8 @@ final class LiveTests: XCTestCase {
     func testSideStreetProbes_probesShareTheRequestBudgetNeverTheRequestThePathCheckNeeds() throws {
         // 4 requests: the first route, then checks. The 2nd request may probe (room for it and a path check);
         // the 3rd may not (the 4th is the path check's); the 4th has no room for either.
-        let s = driving(LiveOptions(maxRequests: 4))
+        // (Nothing kept back for the checks until the arrival here: the next test is about that.)
+        let s = driving(LiveOptions(maxRequests: 4, probes: DriveProbeBudget(arrivalReserve: 0, reserveMargin: 0)))
         cruise(s, 60)
         cruise(s, 120)
         cruise(s, 180)
@@ -1443,6 +1463,26 @@ final class LiveTests: XCTestCase {
         XCTAssertEqual(requests.map(\.purpose), [.plan, .poll, .poll, .poll])
         XCTAssertEqual(requests.map(\.baseline), [false, true, true, false])
         XCTAssertEqual(requests.map(\.probes.allowed), [0, 1, 0, 0])
+    }
+
+    // it('probes never take the requests the plain checks until the arrival need (#183)')
+    func testSideStreetProbes_probesNeverTakeTheRequestsThePlainChecksUntilTheArrivalNeed() throws {
+        let first = candidate(.A, at(0, 0), 1300)!
+        let reserve = (1300 * ((first.distanceM - 900) / first.distanceM) / 60).rounded(.up) + 3
+        XCTAssertGreaterThan(reserve, 20)
+        let tight = driving(LiveOptions(maxRequests: 3 + reserve), first)
+        cruise(tight, 60)
+        XCTAssertEqual(tight.requests().map(\.effect.probes.allowed), [0, 0])
+        let room = driving(LiveOptions(maxRequests: 4 + reserve), first)
+        cruise(room, 60)
+        XCTAssertEqual(room.requests().map(\.effect.probes.allowed), [0, 1])
+        // A slower answer (more time left) keeps more back: the check after it may not probe.
+        cruise(room, 120) { xM in routesAt(xM, [.A: 1900]) }
+        cruise(room, 180) { xM in routesAt(xM, [.A: 1900]) }
+        XCTAssertEqual(room.requests().map(\.effect.probes.allowed).last, 0)
+        XCTAssertEqual(room.requests().count, 4)
+        // The time left is what the view shows too.
+        XCTAssertEqual(Live.remainingDriveSec(room.state), Live.liveView(room.state, room.nowMs()).remainingSec)
     }
 
     // it('a side street found by the probes is confirmed through the same via, switched to by the usual rules, and announced as such')

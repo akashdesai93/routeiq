@@ -30,6 +30,9 @@ export const BACKGROUND_APP = 'com.apple.calculator'
 export const APP_PROCESS = 'App'
 export const WEB_PROCESS = 'com.apple.WebKit.WebContent'
 
+/** How long RouteIQ is left in the background before it is ended and started again (#136), in milliseconds. */
+export const RELAUNCH_SETTLE_MS = Number(process.env.ROUTEIQ_LAB_SETTLE_MS ?? 6000)
+
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function findPmd3() {
@@ -145,6 +148,15 @@ export async function connectPhone({ log = () => {} } = {}) {
 
     /** Starts an app, or brings it to the front when `keep` is true and it is running. Returns the pid, or null. */
     async launch(bundleId, { args = [], keep = false } = {}) {
+      // #136: ending RouteIQ while it is IN FRONT and starting it again at once leaves its web
+      // view black (plan screen and drive screen, 2026-11-12: 4 of 4 such starts black, 3 of 3
+      // starts from the background drawn). So before RouteIQ is ended and started again, it is
+      // sent to the background and left there for a moment. ROUTEIQ_LAB_HOT=1 turns this off,
+      // to reproduce the black screen on purpose.
+      if (!keep && bundleId === bundle && process.env.ROUTEIQ_LAB_HOT !== '1') {
+        await agent.send({ cmd: 'launch', bundle: BACKGROUND_APP, args: [], keep: true })
+        await sleep(RELAUNCH_SETTLE_MS)
+      }
       const answer = await agent.send({ cmd: 'launch', bundle: bundleId, args, keep })
       if (!answer.ok) log(`launch failed: ${answer.error}`)
       return answer.ok ? answer.pid : null
