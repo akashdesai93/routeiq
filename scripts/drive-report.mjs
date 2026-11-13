@@ -28,6 +28,8 @@ export const DEFAULT_REPORT_OPTIONS = Object.freeze({
   requestBudget: 60,
   /** DEFAULT_REROUTE_OPTIONS.minSavingSec: the smallest saving the app switches for, in seconds. */
   minSavingSec: 120,
+  /** The checks stop with this many requests of the budget unused or fewer: "about the whole budget". */
+  budgetSlack: 2,
   /** No plain check for this long while the GPS is on is a blind stretch, in seconds (two checks missed in a row). */
   blindAfterSec: 180,
   /** A plain request this soon after the one before it is off the minute-by-minute cycle (a re-plan), in seconds. */
@@ -382,9 +384,9 @@ export function analyse(text, options = {}) {
     const endLine = log.events.find((e) => e.kind === 'gps' && !e.on && e.atSec === w.endSec)?.line ?? null
     gaps.push({ fromSec: prev, toSec: w.endSec, fromLine: prevLine, toLine: endLine, trailing: true })
     const last = plain.at(-1) ?? null
-    // Counted by the requests' numbers, which run on without a gap: a log that dropped its oldest
-    // events still knows how many went out after the first one it kept. With the drive's start
-    // dropped, that is a lower bound (unknown is never a plain number).
+    // Counted from the request numbers, which run on without a gap. That equals the "sent" lines kept,
+    // since the log drops its oldest events first. With the drive's start dropped the count is only a
+    // lower bound, and the report says so (unknown is never a plain number).
     const first = sent.find((e) => inside(w, e.atSec))
     const usedBy = last === null || first === undefined ? 0 : last.n - first.n + 1
     const usedPartial = !w.startInLog
@@ -398,10 +400,10 @@ export function analyse(text, options = {}) {
       const away = notActiveSec(log, g.fromSec, g.toSec)
       const lines = [g.fromLine, ...log.events.filter((e) => e.kind === 'app' && e.atSec > g.fromSec && e.atSec < g.toSec).map((e) => e.line), g.toLine].filter(Boolean)
       if (g.trailing && last !== null) {
-        // The budget is spent this close to it: the last check may leave a request or two unused.
-        const nearBudget = (n) => n >= o.requestBudget - 2
+        // The budget counts as spent this close to it: the last check may leave a request or two unused.
+        const nearBudget = (n) => n >= o.requestBudget - o.budgetSlack
         const used = usedPartial
-          ? `The log dropped the drive's start, so how many requests this drive made is not known: at least ${usedBy}, and request ${last.n} was the last to go out${
+          ? `The log dropped the drive's start, so how many requests this drive made is not known: at least ${usedBy}, and request ${last.n} was the last to go out (numbered since the app started, so it may count requests before the drive)${
               nearBudget(last.n) ? `, which may be the whole budget of ${o.requestBudget}` : ` (the budget is ${o.requestBudget})`
             }.`
           : `${count(usedBy, 'request')} had gone out on this drive by then${nearBudget(usedBy) ? `, about the whole budget of ${o.requestBudget}` : ` (the budget is ${o.requestBudget})`}.`
@@ -579,7 +581,7 @@ export function reportText(r) {
   else {
     const d = r.drive
     out.push(
-      `Drive: ${d.startInLog ? '' : 'before '}${d.start} to ${d.end}${d.endInLog ? '' : ' (still on)'}, ${lengthOf(d.lengthSec)}${d.spells > 1 ? ` (the longest of ${d.spells} spells with the GPS on)` : ''}.`,
+      `Drive: ${d.startInLog ? '' : 'before '}${d.start} to ${d.end}${d.endInLog ? '' : ' (still on)'}, ${d.startInLog ? '' : 'at least '}${lengthOf(d.lengthSec)}${d.spells > 1 ? ` (the longest of ${d.spells} spells with the GPS on)` : ''}.`,
       `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${or(d.notActiveSec, lengthOf)}.`,
     )
   }

@@ -3,6 +3,7 @@ export const DEFAULT_REPORT_OPTIONS: Readonly<{
   pollIntervalSec: number
   requestBudget: number
   minSavingSec: number
+  budgetSlack: number
   blindAfterSec: number
   offCycleBelowSec: number
   slowRequestMs: number

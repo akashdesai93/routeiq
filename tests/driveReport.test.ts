@@ -183,10 +183,30 @@ describe('drive report: the request budget and the blind stretch (#202)', () => 
     expect(r.log.eventsDropped).toBeGreaterThan(0)
     expect(r.drive?.startInLog).toBe(false)
     const says = finding(r, 'checks-stopped')?.says ?? ''
-    expect(says).toContain('request 60 was the last to go out, which may be the whole budget of 60')
+    expect(says).toContain('request 60 was the last to go out (numbered since the app started, so it may count requests before the drive), which may be the whole budget of 60')
     expect(says).toContain("The log dropped the drive's start")
     expect(r.requests.plainChecksPartial).toBe(true)
+    expect(reportText(r)).toMatch(/^Drive: before \d\d:\d\d:\d\d to \d\d:\d\d:\d\d, at least /m)
     expect(reportText(r)).toMatch(/checks during the drive: ≥ \d+ \(partial\)/)
+  })
+
+  it('the slack is a setting: with none, 59 requests is not the whole budget', () => {
+    const r = analyse(text([], ['09:00:00 gps on [active]', ...checks(1, 59), '10:30:00 gps off [active]']), { budgetSlack: 0 })
+    expect(finding(r, 'checks-stopped')?.says).toContain('59 requests had gone out on this drive by then (the budget is 60)')
+  })
+
+  it('a drive still going when the log was copied says so, and counts to the time of copying', () => {
+    const head = ['RouteIQ drive diagnostics', 'log started 09:00:00, now 09:30:00, app active, gps on', 'events (oldest first):']
+    const r = analyse([...head, '09:00:00 gps on [active]', ...checks(1, 5)].join('\n'))
+    expect(r.drive).toMatchObject({ endInLog: false, lengthSec: 1800 })
+    expect(finding(r, 'checks-stopped')?.says).toContain('(and was still going when the log was copied)')
+  })
+
+  it('fixes and ticks per second are over every spell with the GPS on, not only the longest', () => {
+    const head = ['fixes: 900 (0 while not active), longest gap 1 s']
+    const events = ['09:00:00 gps on [active]', '09:10:00 gps off [active]', '09:20:00 gps on [active]', '09:25:00 gps off [active]']
+    const r = analyse(text(head, events))
+    expect(r.drive).toMatchObject({ spells: 2, lengthSec: 600, fixesPerSec: 1 })
   })
 
   it('a stretch with no check in the middle of a drive is a gap, and says the app was away', () => {

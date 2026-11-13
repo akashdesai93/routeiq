@@ -1304,6 +1304,7 @@ plugin `RouteIQNative` is present, `src/device/native`):
   | `pollIntervalSec` | 60 | the app's check interval (`DEFAULT_LIVE_OPTIONS`) |
   | `requestBudget` | 60 | the app's request budget (`maxRequests`) |
   | `minSavingSec` | 120 | the app's minimum saving (`DEFAULT_REROUTE_OPTIONS`) |
+  | `budgetSlack` | 2 | checks that stop this close to the budget read as "about the whole budget" |
   | `blindAfterSec` | 180 | no plain check this long with the GPS on is a blind stretch or a gap |
   | `offCycleBelowSec` | 45 | a plain request this soon after the last is off the cycle |
   | `slowRequestMs` | 8000 | an answer this slow is listed |
