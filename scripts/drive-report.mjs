@@ -363,7 +363,9 @@ export function analyse(text, options = {}) {
   const lengthSec = drive === null ? null : drive.endSec - drive.startSec
   // The header counts cover the whole log: per second of all the spells with the GPS on.
   const gpsSec = windows.reduce((sum, w) => sum + (w.endSec - w.startSec), 0)
-  const perSec = (count) => (count === undefined || !gpsSec ? null : Math.round((count / gpsSec) * 100) / 100)
+  // With a spell's start dropped, the GPS-on time in the log is short of the real one: no rate (unknown, not a guess).
+  const partialSpells = windows.some((w) => !w.startInLog)
+  const perSec = (count) => (count === undefined || !gpsSec || partialSpells ? null : Math.round((count / gpsSec) * 100) / 100)
 
   const sent = log.events.filter((e) => e.kind === 'sent')
   const ended = log.events.filter((e) => e.kind === 'answered' || e.kind === 'failed')
@@ -415,7 +417,13 @@ export function analyse(text, options = {}) {
           lines,
         )
       } else if (g.trailing && plain.length === 0) {
-        find('no-checks', `The GPS was on for ${lengthOf(len)} from ${clockOf(w.startSec)} and no check for faster routes went out.`, lines)
+        find(
+          'no-checks',
+          w.startInLog
+            ? `The GPS was on for ${lengthOf(len)} from ${clockOf(w.startSec)} and no check for faster routes went out.`
+            : `No check for faster routes in the ${lengthOf(len)} of the drive still in the log, from ${clockOf(w.startSec)} (its start was dropped, so earlier checks are not known).`,
+          lines,
+        )
       } else {
         find(
           'check-gap',
@@ -467,7 +475,7 @@ export function analyse(text, options = {}) {
 
   const awaySec = drive === null ? null : notActiveSec(log, drive.startSec, drive.endSec)
   if (awaySec !== null && awaySec > 0) {
-    find('not-active', `The app was not active for ${lengthOf(awaySec)} of the drive.`, log.events.filter((e) => e.kind === 'app' && inside(drive, e.atSec)).map((e) => e.line))
+    find('not-active', `The app was not active for ${drive.startInLog ? '' : 'at least '}${lengthOf(awaySec)} of the drive.`, log.events.filter((e) => e.kind === 'app' && inside(drive, e.atSec)).map((e) => e.line))
   }
 
   // Route changes: off-cycle plain requests (re-plans), switches, offers.
@@ -582,14 +590,14 @@ export function reportText(r) {
     const d = r.drive
     out.push(
       `Drive: ${d.startInLog ? '' : 'before '}${d.start} to ${d.end}${d.endInLog ? '' : ' (still on)'}, ${d.startInLog ? '' : 'at least '}${lengthOf(d.lengthSec)}${d.spells > 1 ? ` (the longest of ${d.spells} spells with the GPS on)` : ''}.`,
-      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${or(d.notActiveSec, lengthOf)}.`,
+      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${d.startInLog ? '' : 'at least '}${or(d.notActiveSec, lengthOf)}.`,
     )
   }
   const q = r.requests
   out.push(
     `Requests: ${or(q.sent, String)} sent, ${or(q.answered, String)} answered, ${or(q.failed, String)} failed, slowest ${or(q.slowestMs, (v) => `${v} ms`)}.`,
     `  checks during the drive: ${q.plainChecksPartial ? `≥ ${q.plainChecksInDrive} (partial)` : q.plainChecksInDrive}${
-      q.blindStretchSec > 0 ? `; they stopped at ${q.checksStoppedAt ?? 'the start'} and the drive went on ${lengthOf(q.blindStretchSec)} without one` : ''
+      q.blindStretchSec > 0 ? `; they stopped at ${q.checksStoppedAt ?? (q.plainChecksPartial ? 'the start of what the log kept' : 'the start')} and the drive went on ${lengthOf(q.blindStretchSec)} without one` : ''
     }.`,
   )
   const p = r.probes

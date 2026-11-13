@@ -115,6 +115,19 @@ describe('drive report: the format it reads (#202)', () => {
     expect(r.drive).toMatchObject({ startInLog: false, notActiveSec: 240 })
   })
 
+  it('a drive whose start was dropped has no rates, a lower bound for time away, and says what "no checks" covers', () => {
+    const head = ['fixes: 3600 (0 while not active), longest gap 1 s', 'ticks: 3600 (0 while not active), longest gap 1 s']
+    const events = ['09:50:00 app background [background]', '09:55:00 app active [active]', '10:00:00 gps off [active]']
+    const r = analyse(text(head, events).replace('events (oldest first):', 'events (oldest first, 190 earlier ones dropped):'))
+    expect(r.drive).toMatchObject({ startInLog: false, fixesPerSec: null, ticksPerSec: null, notActiveSec: 300 })
+    const out = reportText(r)
+    expect(out).toContain('fixes 3600 (unknown/s)')
+    expect(out).toContain('not active at least 5 min')
+    expect(finding(r, 'not-active')?.says).toContain('at least 5 min')
+    expect(finding(r, 'no-checks')?.says).toContain('still in the log')
+    expect(out).toContain('they stopped at the start of what the log kept')
+  })
+
   it('a drive past midnight keeps its length', () => {
     const r = analyse(
       [
@@ -236,6 +249,19 @@ describe('drive report: the request budget and the blind stretch (#202)', () => 
 })
 
 describe('drive report: probes, checks and faults (#202)', () => {
+  it('each threshold at its boundary: 180 s is a gap, 45 s is on the cycle, 8 s is slow, 30 s is a fix gap, 120 s is enough to switch', () => {
+    const gap = analyse(text([], ['09:00:00 gps on [active]', ...checks(1, 2), '09:05:00 request 3 sent [active]', '09:05:30 gps off [active]']))
+    expect(ids(gap)).toContain('check-gap')
+    const cycle = analyse(text([], ['09:00:00 gps on [active]', '09:01:00 request 1 sent [active]', '09:01:45 request 2 sent [active]', '09:01:59 gps off [active]']))
+    expect(cycle.routeChanges.offCycleRequests).toBe(0)
+    const slow = analyse(text([], ['09:00:00 gps on [active]', '09:01:00 request 1 sent [active]', '09:01:08 request 1 answered, HTTP 200, 8000 ms [active]', '09:01:30 gps off [active]']))
+    expect(ids(slow)).toContain('slow-answers')
+    const fixGap = analyse(text([], ['09:00:00 gps on [active]', '09:00:40 no fix for 30 s [active]', '09:01:00 gps off [active]']))
+    expect(ids(fixGap)).toContain('position-gaps')
+    const saving = analyse(text(['checks: 1: a faster one, but its turn was too close 1', 'best saving another route offered: 120 s'], ['09:00:00 gps on [active]', ...checks(1, 1), '09:01:30 gps off [active]']))
+    expect(ids(saving)).toContain('faster-not-taken')
+  })
+
   it('says when the side-street probes went out only while planning, with why the checks sent none', () => {
     const r = analyse(fixture('probes-at-plan.txt'))
     expect(r.probes).toMatchObject({ total: 2, duringDrive: 0, atPlanTime: 2, skipped: { count: 11, tally: { 'not-held-up': 9, budget: 2 } } })
@@ -354,6 +380,28 @@ describe('drive report: the life of each offer (#202 part 2)', () => {
 })
 
 describe('drive report: privacy (#202)', () => {
+  it('free text in a known line shape is not passed on: unknown labels, reasons and outcomes are skipped', () => {
+    const events = [
+      '09:00:00 gps on [active]',
+      '09:01:00 offer shown: turn onto elm street (saves 120 s) [active]',
+      '09:01:30 offer withdrawn after 60 s: turn onto elm street [active]',
+      '09:02:00 check: turn onto elm street (2 routes) [active]',
+      '09:02:10 check: constructor (1 routes) [active]',
+      '09:02:20 probe skipped: near elm street [active]',
+      '09:03:00 gps off [active]',
+    ]
+    const r = analyse(text(['checks: 2: turn onto elm street 2'], events))
+    expect(r.log.unknownLines).toBe(6)
+    const out = reportText(r) + JSON.stringify(r)
+    expect(out).not.toMatch(/elm|constructor/i)
+  })
+
+  it('a line with a token is left out, like a position', () => {
+    const r = analyse(text([], ['09:00:00 gps on [active]', '09:00:10 token pk.abcdef [active]', '09:01:00 gps off [active]']))
+    expect(r.log.privateLines).toBe(1)
+    expect(reportText(r) + JSON.stringify(r)).not.toContain('pk.')
+  })
+
   it('never passes on a line that looks like a position, a token or a link, and says it saw one', () => {
     const r = analyse(text([], ['09:00:00 gps on [active]', '09:00:10 fix at 35.2271, -80.8431 [active]', '09:00:20 sent to https://example.test/x [active]', '09:01:00 gps off [active]']))
     expect(r.log.privateLines).toBe(2)
