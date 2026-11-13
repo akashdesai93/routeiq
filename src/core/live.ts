@@ -1,6 +1,6 @@
 import { formatDuration } from './format.ts'
 import { distanceM, isValidLngLat, lineFrom } from './geo.ts'
-import { armGuidance, arrowKind, dueAnnouncement, nextTurn, type ArrowKind, type GuidanceCursor, type NextTurn } from './guidance.ts'
+import { armGuidance, arrowKind, dueAnnouncement, nextManeuverLine, nextTurn, type ArrowKind, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import {
   checkProbeAllowance,
   plainCheckReserve,
@@ -965,8 +965,13 @@ function switchTo(
   const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
   const record: LiveSwitch = { atMs: nowMs, code: made.code, reason: made.reason, savingSec: offRoute ? null : saving }
+  // The new-route line after leaving the route names no turn ("New route. 28 minutes to your
+  // destination."): it goes on to the next maneuver, so a long stretch after it is not silent
+  // until half a mile before that (#183). A switch from the route names its turn-off already.
+  // One line, not two: a second one would wait behind it in the voice's queue and be dropped.
+  const ahead = offRoute ? nextManeuverLine(chosen.guidance, onNew.alongRouteM) : null
   // The banner shows what is said, word for word (#22).
-  const spokenSwitch = switchLine(made.code, saving, turnInM, chosen.durationSec, sideStreet)
+  const spokenSwitch = `${switchLine(made.code, saving, turnInM, chosen.durationSec, sideStreet)}${ahead === null ? '' : ` ${ahead.text}`}`
   const after: LiveState = {
     ...next,
     engine: made.engine,
