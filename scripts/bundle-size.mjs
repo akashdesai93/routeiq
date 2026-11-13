@@ -22,6 +22,11 @@ import { gzipSync } from 'node:zlib'
 export const MEASURES = Object.freeze({
   appJs: 'App JavaScript (without Mapbox GL JS)',
   css: 'CSS',
+  // What the page loads before its first paint: the files dist/index.html names (its module
+  // script, modulepreloads and stylesheets). Mapbox GL JS is loaded after the first screen
+  // (src/map/LazyMapView.tsx, #97), so a static import that pulls it back in shows up here.
+  entryJs: 'JavaScript loaded before first paint',
+  entryCss: 'CSS loaded before first paint',
 })
 
 /** "hd.main-DaqRWeDh.js" -> "hd.main" (Vite adds "-<hash>" to every file). */
@@ -41,14 +46,25 @@ export function mapboxNamesIn(mapboxEsmDir) {
   )
 }
 
-/** Every file of a build's assets folder, with its kind, size and gzip size. Throws when it cannot be measured. */
+/** The asset file names an index.html loads up front (src and href under /assets/). */
+export const upFrontNames = (html) => new Set([...html.matchAll(/(?:src|href)="[^"]*\/assets\/([^"/]+\.(?:js|css))"/g)].map((m) => m[1]))
+
+/**
+ * Every file of a build's assets folder, with its kind, size, gzip size and whether the
+ * build's index.html (next to the assets folder) loads it before the first paint. Throws
+ * when it cannot be measured.
+ */
 export function measureAssets(assetsDir, mapboxNames) {
   if (!existsSync(assetsDir)) throw new Error(`${assetsDir} is missing. Run \`npm run build\` first.`)
+  const indexHtml = join(assetsDir, '..', 'index.html')
+  if (!existsSync(indexHtml)) throw new Error(`${indexHtml} is missing: is this the built app?`)
+  const upFront = upFrontNames(readFileSync(indexHtml, 'utf8'))
   const files = readdirSync(assetsDir).map((name) => {
     const bytes = readFileSync(join(assetsDir, name))
     const kind = name.endsWith('.css') ? 'css' : !name.endsWith('.js') ? 'other' : mapboxNames.has(baseName(name)) ? 'mapbox' : 'appJs'
-    return { name, kind, size: bytes.length, gzip: gzipSync(bytes).length }
+    return { name, kind, upFront: upFront.has(name), size: bytes.length, gzip: gzipSync(bytes).length }
   })
+  if (!files.some((f) => f.upFront && f.name.endsWith('.js'))) throw new Error(`${indexHtml} names no script in ${assetsDir}: is this the built app?`)
   // Without the split there is no way to tell the app's code from Mapbox's.
   if (!files.some((f) => f.kind === 'mapbox' && baseName(f.name) === 'mapbox-gl')) {
     throw new Error(`No mapbox-gl-*.js chunk in ${assetsDir}: the split in vite.config.ts is gone, so the app's own size cannot be measured.`)
@@ -56,9 +72,13 @@ export function measureAssets(assetsDir, mapboxNames) {
   return files
 }
 
-export const total = (files, kind, field = 'size') => files.filter((f) => f.kind === kind).reduce((sum, f) => sum + f[field], 0)
+/** Which files a measure (or a file kind such as 'mapbox') counts. */
+const counts = (key) =>
+  key === 'entryJs' ? (f) => f.upFront && f.name.endsWith('.js') : key === 'entryCss' ? (f) => f.upFront && f.name.endsWith('.css') : (f) => f.kind === key
 
-/** { appJs, css } in bytes. */
+export const total = (files, key, field = 'size') => files.filter(counts(key)).reduce((sum, f) => sum + f[field], 0)
+
+/** { appJs, css, entryJs, entryCss } in bytes. */
 export const measuredSizes = (files) => Object.fromEntries(Object.keys(MEASURES).map((k) => [k, total(files, k)]))
 
 /** Checks scripts/bundle-budget.json's shape: a positive whole number for every measure in each section. Returns problems. */
