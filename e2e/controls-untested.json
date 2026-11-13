@@ -1,0 +1,6 @@
+{
+  "about": "Controls on screen that no e2e scenario taps yet, each with the reason. e2e/controls-guard.mjs fails on any other untapped control, and on a line here whose control is now tapped or gone, so this list only shrinks (#203).",
+  "untested": {
+    "page › link \"© OpenStreetMap contributors\"": "The map's signal-data credit: tapping it replaces the app's own page with openstreetmap.org (Mapbox drops its target=_blank), #215. The fix taps it and removes this line."
+  }
+}

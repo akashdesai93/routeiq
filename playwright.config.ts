@@ -37,7 +37,9 @@ export default defineConfig({
     // size with touch (#136). Kept small on purpose: CI runs a second browser for it.
     {
       name: 'webkit-iphone',
-      testMatch: '**/webkit.smoke.spec.ts',
+      // Also every tap scenario (#203): what WebKit can get wrong is a tap that lands on the
+      // wrong element, a control under another, or a field that behaves otherwise (#217).
+      testMatch: ['**/webkit.smoke.spec.ts', '**/controls.spec.ts'],
       // Service workers blocked: in WebKit a page a service worker controls (the offline app
       // shell, #184) fetches round Playwright's routing, so requests would reach the real
       // network. The harness fails any request it never saw (App.unrouted). The offline
