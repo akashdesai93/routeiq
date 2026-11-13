@@ -499,6 +499,17 @@ export interface DriveProbeBudget {
    * the check answers without them.
    */
   readonly timeoutSec: number
+  /**
+   * So that the drive never goes blind (#183): before a probe, the budget keeps back one
+   * request for every plain check still due until the expected arrival (one per poll
+   * interval), times this factor, plus reserveMargin. Probes spend only what is left after
+   * that. The reserve is worked out again at every check from the latest travel time, so it
+   * shrinks as the drive goes on and grows when traffic gets worse: a factor of 1 is enough.
+   * (1.5 left a 40-minute drive almost no probes when the road was slow early on.)
+   */
+  readonly arrivalReserve: number
+  /** Requests kept back on top of the plain checks: for the odd plain check that needs its path check. */
+  readonly reserveMargin: number
 }
 
 export const DEFAULT_DRIVE_PROBE_BUDGET: DriveProbeBudget = {
@@ -506,6 +517,8 @@ export const DEFAULT_DRIVE_PROBE_BUDGET: DriveProbeBudget = {
   requestsPerDrive: 20,
   minDelaySec: 120,
   timeoutSec: 8,
+  arrivalReserve: 1,
+  reserveMargin: 3,
 }
 
 /** The budget with every field filled in: a value that is not a number of 0 or more falls back to its default. */
@@ -517,7 +530,22 @@ export function resolveDriveProbeBudget(budget: Partial<DriveProbeBudget> = {}):
     requestsPerDrive: budget.requestsPerDrive ?? d.requestsPerDrive,
     minDelaySec: n(budget.minDelaySec, d.minDelaySec),
     timeoutSec: n(budget.timeoutSec, d.timeoutSec),
+    arrivalReserve: n(budget.arrivalReserve, d.arrivalReserve),
+    reserveMargin: n(budget.reserveMargin, d.reserveMargin),
   }
+}
+
+/**
+ * The requests to keep back for the plain checks still due on this drive:
+ * one per poll interval of the time left to the expected arrival, times
+ * arrivalReserve, rounded up, plus reserveMargin. Null when the time left is not known (or the
+ * poll interval is not a positive number): an unknown reserve is never taken
+ * as zero, so no probe goes out then.
+ */
+export function plainCheckReserve(remainingSec: number | null, pollIntervalSec: number, budget: Partial<DriveProbeBudget> = {}): number | null {
+  if (remainingSec === null || !Number.isFinite(remainingSec) || !Number.isFinite(pollIntervalSec) || pollIntervalSec <= 0) return null
+  const { arrivalReserve, reserveMargin } = resolveDriveProbeBudget(budget)
+  return Math.ceil((Math.max(0, remainingSec) * arrivalReserve) / pollIntervalSec) + Math.ceil(reserveMargin)
 }
 
 const whole = (v: number | undefined, fallback: number) =>
@@ -529,17 +557,21 @@ const whole = (v: number | undefined, fallback: number) =>
  * probes among them. One request is always left over for the check's own
  * path check (baselineProbe), whether it turns out to be needed or not, so a
  * probe never takes the request the engine needs to judge the route being
- * driven. Zero once the per-drive cap or the budget is reached.
+ * driven. `reserve` (plainCheckReserve) is kept back too, for the plain checks
+ * still due until the arrival, so probes never leave the end of a drive
+ * without checks (#183); null (not known) allows no probe. Zero once the
+ * per-drive cap or the budget is reached.
  */
 export function checkProbeAllowance(
   used: { readonly requestsUsed: number; readonly probesUsed: number },
   maxRequests: number,
-  budget: Partial<DriveProbeBudget> = {},
+  budget: Partial<DriveProbeBudget>,
+  reserve: number | null,
 ): number {
   const perCheck = whole(budget.requestsPerCheck, DEFAULT_DRIVE_PROBE_BUDGET.requestsPerCheck)
   const perDrive = whole(budget.requestsPerDrive, DEFAULT_DRIVE_PROBE_BUDGET.requestsPerDrive)
-  if (![used.requestsUsed, used.probesUsed, maxRequests].every(Number.isFinite)) return 0
-  const room = Math.floor(maxRequests) - used.requestsUsed - 1
+  if (reserve === null || ![used.requestsUsed, used.probesUsed, maxRequests, reserve].every(Number.isFinite)) return 0
+  const room = Math.floor(maxRequests) - used.requestsUsed - 1 - Math.max(0, Math.ceil(reserve))
   return Math.max(0, Math.min(perCheck, perDrive - used.probesUsed, room))
 }
 
