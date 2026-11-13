@@ -25,7 +25,7 @@ import { DEFAULT_TEST_DRIVE_SETUP, type TestDriveSetup } from './drive/testDrive
 import { TestDrivePanel } from './TestDrivePanel.tsx'
 import { useLiveDrive } from './useLiveDrive.ts'
 import type { DriveOverlay } from './map/driveFeatures.ts'
-import { MapView } from './map/MapView.tsx'
+import { MapView } from './map/LazyMapView.tsx'
 import type { PinRole } from './map/pins.ts'
 import { PlanPanel, type PlaceOrigin } from './PlanPanel.tsx'
 import { RoutePanel } from './RoutePanel.tsx'
