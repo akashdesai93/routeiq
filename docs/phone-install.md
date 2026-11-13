@@ -98,6 +98,15 @@ and payment methods. The signing Apple ID does not need to be the one signed in 
 6. You should hear "RouteIQ started". If not: volume up, and check Voice behind More in the app's
    drive view. The ring/silent switch should not matter (the app uses the playback audio category).
 
+**A black screen right after an install** (#136). The first launch after an install, or after
+the app was ended while in front and opened again at once, can stay black: nothing of the app is
+shown, the map, the buttons and the token screen included. It is iOS not presenting the app's
+window, not the page or the map, and it does not happen to a drive started normally. To get past it,
+swipe RouteIQ away in the app switcher (swipe up from the bottom edge and hold, then flick
+RouteIQ up), wait a few seconds and open it again from its icon. Going to the Home Screen and
+back works too. After that it draws, and later launches and drives are not affected. If a drive
+itself ever goes black, that is a different problem: send the diagnostics (step 6).
+
 ## 4. The 10-minute check, at home, before the drive
 
 Do this on foot or parked. It is the only real test of the thing this app exists for.
