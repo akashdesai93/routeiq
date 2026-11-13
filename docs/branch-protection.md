@@ -68,7 +68,9 @@ instead of "measured + 10 %" re-based in whichever feature PR hit the wall (by 0
 | key | what | set by |
 | --- | --- | --- |
 | `ceiling.appJs`, `ceiling.css` | the most the app's own JavaScript (without Mapbox GL JS) and the CSS may be: a product number, what the first screen may cost on a phone: 480,000 and 85,000 (owner, #170, 2026-11-12) | the owner, by decision on an issue (`needs-human`) |
+| `ceiling.entryJs`, `ceiling.entryCss` | what the page loads before its first paint (the files `dist/index.html` names; Mapbox GL JS is loaded after it, #97): 480,000 and 30,000 (owner decision on #97, 2026-11-13) | the owner, by decision on an issue (`needs-human`) |
 | `growthPerPr.appJs`, `growthPerPr.css` | the most one PR may add: 4,000 and 2,000 | the owner (#170) |
+| `growthPerPr.entryJs`, `growthPerPr.entryCss` | the same 4,000 and 2,000 for what loads before first paint (#127, waiting for the owner's decision with its ceiling) | the owner |
 | `alertAt` | the board flags `main` above this share of the ceiling: 0.9 | the owner (#170) |
 
 What checks it (the rules: `scripts/bundle-size.mjs`):
