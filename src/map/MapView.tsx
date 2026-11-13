@@ -44,6 +44,26 @@ const SIGNAL_SOURCE = 'route-signals'
 const FIT_PADDING = 80
 /** How close the map is when it follows the car. */
 const FOLLOW_ZOOM = 15.5
+/**
+ * How long the map waits, while the page is in front, for the browser to give back a lost
+ * WebGL context before it builds itself again. iOS takes the GPU from a page in the
+ * background and does not always give it back; without this the map stays blank (#136).
+ */
+const CONTEXT_RESTORE_WAIT_MS = 2000
+/** Builds after a lost context, at most, while this map is on screen: each one is a map load Mapbox counts. */
+const MAX_REBUILDS = 3
+
+/**
+ * Draws the map at its container's size when the two differ, and asks for a frame.
+ * Setting a canvas's size clears it even when the size is the same, so an unchanged map is
+ * not resized: it would show blank until its next frame.
+ */
+function fitToContainer(map: mapboxgl.Map) {
+  const container = map.getContainer()
+  const canvas = map.getCanvas()
+  if (Math.abs(container.clientWidth - canvas.clientWidth) >= 1 || Math.abs(container.clientHeight - canvas.clientHeight) >= 1) map.resize()
+  map.triggerRepaint()
+}
 
 function pinLabel(role: PinRole, place: Place): string {
   return `${PIN_NAME[role]}: ${place.label}`
@@ -77,6 +97,9 @@ export const MapView = memo(function MapView({
   const [error, setError] = useState<string | null>(null)
   // Set once the style has loaded and the route layers exist.
   const [readyMap, setReadyMap] = useState<mapboxgl.Map | null>(null)
+  // Bumped to build the map again, when its WebGL context was lost and never given back.
+  const [generation, setGeneration] = useState(0)
+  const rebuilds = useRef(0)
 
   useEffect(() => {
     latest.current = { pins, selectedRouteId, onPinMove, onSelectRoute, onCenterChange }
@@ -263,14 +286,62 @@ export const MapView = memo(function MapView({
     const resizer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => map.resize())
     resizer?.observe(container)
 
+    // The GPU can be taken from the page (iOS does it to an app in the background). Mapbox
+    // draws again when the browser gives the context back; when it does not within
+    // CONTEXT_RESTORE_WAIT_MS of the page being in front, the map is built again (at most
+    // MAX_REBUILDS times). The wait counts from the later of the loss and the page coming
+    // to the front, since iOS gives the context back only to a page in front.
+    let lostAtMs: number | null = null
+    let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+    const pageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    const checkLost = () => {
+      if (rebuildTimer !== null) clearTimeout(rebuildTimer)
+      rebuildTimer = null
+      if (lostAtMs === null || pageHidden()) return
+      const waitMs = CONTEXT_RESTORE_WAIT_MS - (Date.now() - lostAtMs)
+      if (waitMs > 0) {
+        rebuildTimer = setTimeout(checkLost, waitMs)
+        return
+      }
+      if (rebuilds.current >= MAX_REBUILDS) {
+        console.warn('The map lost its WebGL context and did not get it back; it has been built again too often already.')
+        return
+      }
+      rebuilds.current++
+      console.warn('The map lost its WebGL context and did not get it back: building the map again.')
+      setGeneration((g) => g + 1)
+    }
+    map.on('webglcontextlost', () => {
+      console.warn('The map lost its WebGL context.')
+      lostAtMs = Date.now()
+      checkLost()
+    })
+    map.on('webglcontextrestored', () => {
+      lostAtMs = null
+      checkLost()
+    })
+    // Back in front (unlocked, or switched back to): draw at the container's size now, and
+    // see whether the context came back.
+    const onShown = () => {
+      if (pageHidden()) return
+      fitToContainer(map)
+      if (lostAtMs !== null) lostAtMs = Date.now()
+      checkLost()
+    }
+    document.addEventListener('visibilitychange', onShown)
+    window.addEventListener('pageshow', onShown)
+
     return () => {
+      document.removeEventListener('visibilitychange', onShown)
+      window.removeEventListener('pageshow', onShown)
+      if (rebuildTimer !== null) clearTimeout(rebuildTimer)
       resizer?.disconnect()
       setReadyMap(null)
       markersRef.current = null
       Object.values(markers).forEach((m) => m.remove())
       map.remove()
     }
-  }, [token])
+  }, [token, generation])
 
   // Pins moved from outside (drag result, swap, reset): move the markers to match.
   useEffect(() => {
@@ -334,6 +405,9 @@ export const MapView = memo(function MapView({
     const markers = markersRef.current
     markers?.origin.getElement().style.setProperty('display', 'none')
     PIN_ROLES.forEach((role) => markers?.[role].setDraggable(false))
+    // The drive view has just taken the whole screen: draw at the new size now, not on a
+    // later resize callback (#136).
+    fitToContainer(readyMap)
     readyMap.easeTo({ zoom: FOLLOW_ZOOM, pitch: 40, duration: 0 })
     const { pins: shown } = latest.current
     return () => {
@@ -341,6 +415,7 @@ export const MapView = memo(function MapView({
       PIN_ROLES.forEach((role) => markers?.[role].setDraggable(true))
       const [west, south, east, north] = boundsOf(PIN_ROLES.map((role) => shown[role].position))
       try {
+        fitToContainer(readyMap)
         readyMap.fitBounds(
           [
             [west, south],
