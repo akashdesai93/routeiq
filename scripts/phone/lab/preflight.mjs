@@ -14,6 +14,8 @@ export const DEFAULT_LAB_RULES = Object.freeze({
   /** Quiet hours on the PC's clock (the owner's time): no scenario that speaks. */
   quietFromHour: 22,
   quietToHour: 7,
+  /** #17's comments are read 100 to a page, at most this many pages (#204): more than that refuses. */
+  maxCommentPages: 20,
 })
 
 /**
@@ -84,15 +86,24 @@ export function labWindowFrom(comments) {
 
 /**
  * The lab window from #17, read with `gh` (a function from an API path to parsed JSON), as
- * { window } or { error }. A failed read refuses: no answer is not a yes.
+ * { window } or { error }. Every page of the last day's comments is read: on a busy night the
+ * window is past the first 100 (#204). A failed read of any page refuses: no answer is not a yes.
  */
-export function readLabWindow(gh, repo, now) {
+export function readLabWindow(gh, repo, now, rules = DEFAULT_LAB_RULES) {
   const since = new Date(new Date(now).getTime() - 24 * 3600e3).toISOString()
+  const perPage = 100
+  const comments = []
   try {
-    return { window: labWindowFrom(gh(`repos/${repo}/issues/17/comments?since=${since}&per_page=100`)) }
+    for (let page = 1; ; page++) {
+      if (page > rules.maxCommentPages) return { error: `More than ${rules.maxCommentPages * perPage} comments on #17 in a day: could not read them all for the lab window, not starting.` }
+      const got = gh(`repos/${repo}/issues/17/comments?since=${since}&per_page=${perPage}&page=${page}`)
+      comments.push(...got)
+      if (got.length < perPage) break
+    }
   } catch (e) {
     return { error: `Could not read the lab window on #17 (${String(e.message || e).split('\n')[0]}): not starting.` }
   }
+  return { window: labWindowFrom(comments) }
 }
 
 export const ghJson = (apiPath) => JSON.parse(execFileSync('gh', ['api', apiPath], { encoding: 'utf8', windowsHide: true }))
