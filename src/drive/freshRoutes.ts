@@ -1,13 +1,16 @@
 import {
   baselineProbe,
-  checkProbes,
+  checkProbePlan,
   DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
   mergeCheckProbes,
   withSignalCounts,
   type CheckProbeMemory,
+  type DriveProbeBudget,
   type LngLat,
   type RerouteOptions,
+  type ProbeOptions,
+  type ProbeSkip,
   type RouteCandidate,
   type RouteSignal,
 } from '../core/index.ts'
@@ -85,6 +88,10 @@ export interface FreshRoutesRequest {
     readonly timeoutMs?: number
     /** For the delay gate (DriveProbeBudget.minDelaySec). */
     readonly minDelaySec?: number
+    /** The drive's probe budget, for the delay gate and the back-off; minDelaySec, when given, wins. */
+    readonly budget?: Partial<DriveProbeBudget>
+    /** Where the probes may aim (core ProbeOptions; freewayJams is the drive setting). Left out: DEFAULT_PROBE_OPTIONS. */
+    readonly options?: ProbeOptions
   } | null
   /** Called just before each request after the first; `probe` true for a side-street probe. */
   readonly onRequest?: (probe: boolean) => void
@@ -115,6 +122,8 @@ export type FreshRoutes =
       readonly probeRequests: number
       /** True when the probes ran out of time and were cancelled: the answer has none. */
       readonly probesTimedOut: boolean
+      /** Why the check sent no probe (core checkProbePlan); null when it probed, or no probes were asked for. */
+      readonly probeSkipped: ProbeSkip | null
     }
   | { readonly ok: false; readonly aborted: boolean; readonly message: string }
 
@@ -145,9 +154,10 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
   // Side streets Mapbox did not offer: one request per via point, from the car.
   let probed: RouteCandidate[] = []
   let probeRequests = 0
+  let probeSkipped: ProbeSkip | null = null
   let probesTimedOut = false
-  if (probes !== null && probes.allowed > 0) {
-    const vias = checkProbes({
+  if (probes !== null) {
+    const plan = checkProbePlan({
       route: probes.route,
       alongM: probes.alongM,
       fresh: result.routes,
@@ -155,8 +165,10 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
       memory: probes.memory,
       allowed: probes.allowed,
       rerouteOptions: probes.rerouteOptions,
-      budget: probes.minDelaySec === undefined ? {} : { minDelaySec: probes.minDelaySec },
-    })
+      budget: { ...probes.budget, ...(probes.minDelaySec === undefined ? {} : { minDelaySec: probes.minDelaySec }) },
+    }, probes.options)
+    const vias = plan.points
+    probeSkipped = plan.skipped
     if (vias.length > 0) {
       if (signal?.aborted) return aborted
       // The probes, and the path check they need, have a time limit of their own: past it they
@@ -181,7 +193,7 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
               via,
               destination,
               token,
-              viaRadiusM: DEFAULT_PROBE_OPTIONS.viaRadiusM,
+              viaRadiusM: (probes.options ?? DEFAULT_PROBE_OPTIONS).viaRadiusM,
               originHeadingDeg: headingDeg ?? undefined,
               signal: limit.signal,
               ...(fetchImpl === undefined ? {} : { fetchImpl }),
@@ -234,6 +246,7 @@ export async function fetchFreshRoutes(request: FreshRoutesRequest): Promise<Fre
     baseline: baselineRoutes,
     requests,
     probeRequests,
+    probeSkipped,
     probesTimedOut,
   }
 }

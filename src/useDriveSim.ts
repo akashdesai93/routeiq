@@ -27,6 +27,7 @@ import {
   cruiseSpeedMps,
   simulatedProbeAllowance,
   DEFAULT_DRIVE_SETTINGS,
+  driveProbeOptions,
   DRIVE_START,
   MIN_REQUEST_GAP_MS,
   pollGate,
@@ -189,7 +190,7 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       signal: controller.signal,
       whatIf: { route: run.route, alongM: run.clock.alongM, delaySec },
       baseline: roomForBaseline ? { route: run.route, alongM: run.clock.alongM, rerouteOptions } : null,
-      probes: probesAllowed > 0 ? { route: run.route, alongM: run.clock.alongM, allowed: probesAllowed, memory: run.probes, rerouteOptions } : null,
+      probes: probesAllowed > 0 ? { route: run.route, alongM: run.clock.alongM, allowed: probesAllowed, memory: run.probes, rerouteOptions, options: driveProbeOptions(settings) } : null,
       // Every request is counted as it goes out, so a check that is stopped still counts what it made.
       onRequest: (probe) => {
         run.clock = { ...run.clock, requestsUsed: run.clock.requestsUsed + 1 }
@@ -225,7 +226,12 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
       latest.current.rerouteOptions,
     )
     run.engine = decision.nextState
-    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates, probesSent)
+    run.probes = rememberCheckProbes(run.probes, result.ok ? result.probeRequests : 0, decision, candidates, probesSent, {
+      route: run.route,
+      alongM: run.clock.alongM,
+      baseline: result.ok ? result.baseline : null,
+      rerouteOptions: latest.current.rerouteOptions,
+    })
     const viaSideStreets = decision.action === 'switch' && fresh?.find((c) => c.id === decision.toRouteId)?.source === 'probe'
     const reason = viaSideStreets ? `${decision.reason} (via side streets)` : decision.reason
     const said = result.ok ? reason : `${reason} (${result.message})`

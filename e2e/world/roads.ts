@@ -19,6 +19,14 @@
 //      `{ sideStreet: true }`, and only a request with a via point (a side-street probe,
 //      see `through`) can reach it.
 //
+//   F  "Service Road": in a world made with `{ freeway: true }`, Main Corridor's middle (its
+//      stretch 300 m east, from a quarter to three quarters of the trip) is a freeway (its
+//      intersections carry Mapbox's `motorway` class, so the app reads it as limited-access), and
+//      Service Road runs beside it 800 m to the west: it leaves where Main Corridor jogs onto the
+//      freeway and rejoins the freeway at 42 % of the trip, after the stretch that East Loop,
+//      West Loop and Main Corridor all share. Slower than the freeway in free flow; Mapbox never
+//      offers it, so only a probe beside the freeway can find it.
+//
 // A request with a via point is answered the way Mapbox snaps a via onto the
 // nearest road: one route along whichever road passes closest to the via (so a
 // via beside A comes back as A itself), or NoSegment when no road is near.
@@ -35,8 +43,8 @@
 // come from the app (public landmarks in the scenarios).
 
 export type LngLat = [number, number]
-export type RouteName = 'A' | 'B' | 'C' | 'S' | 'off-route'
-export type RoadName = 'A' | 'B' | 'C' | 'S'
+export type RouteName = 'A' | 'B' | 'C' | 'S' | 'F' | 'off-route'
+export type RoadName = 'A' | 'B' | 'C' | 'S' | 'F'
 
 /** A point in the trip's own frame: `f` is the share of the way from O to D, `side` is meters to the left (+) or right (-). */
 export interface FramePoint {
@@ -57,7 +65,8 @@ export const NO_CLOSURES: Closure = () => false
 // the signal count breaks ties, so the recommended route is always A.
 // S's own stretch (the middle half, where it leaves A) is a slower street: in free
 // flow S is about 1.5 minutes behind A and last of all four.
-const BASE_PACE: Record<RouteName, number> = { A: 1 / 22, B: 1 / 23, C: 1 / 22.5, S: 1 / 18, 'off-route': 1 / 12 }
+// Service Road (F) is a frontage road with lights: well behind the freeway in free flow.
+const BASE_PACE: Record<RouteName, number> = { A: 1 / 22, B: 1 / 23, C: 1 / 22.5, S: 1 / 18, F: 1 / 15, 'off-route': 1 / 12 }
 
 /**
  * Mapbox's congestion word for a segment driven at `ratio` times its usual pace.
@@ -78,6 +87,7 @@ const ROAD_NAMES: Record<RouteName, string> = {
   B: 'East Loop',
   C: 'West Loop',
   S: 'Parallel Street',
+  F: 'Service Road',
   'off-route': 'Side Street',
 }
 
@@ -87,6 +97,7 @@ const CORNERS: Record<RoadName, readonly (readonly [number, number])[]> = {
   B: [[0, 0], [0.25, 0], [0.25, 300], [0.4, 300], [0.4, 1500], [0.85, 1500], [0.85, 0], [1, 0]],
   C: [[0, 0], [0.25, 0], [0.25, 300], [0.55, 300], [0.55, -1200], [0.9, -1200], [0.9, 0], [1, 0]],
   S: [[0, 0], [0.25, 0], [0.75, 0], [1, 0]],
+  F: [[0, 0], [0.25, 0], [0.25, -500], [0.42, -500], [0.42, 300], [0.75, 300], [0.75, 0], [1, 0]],
 }
 
 /** Mapbox's own answer: the three routes it offers. S is never among them. */
@@ -154,9 +165,11 @@ export class World {
   private readonly roads: readonly Road[]
 
   private readonly sideStreet: boolean
+  private readonly freeway: boolean
 
-  constructor(origin: LngLat, destination: LngLat, options: { sideStreet?: boolean } = {}) {
+  constructor(origin: LngLat, destination: LngLat, options: { sideStreet?: boolean; freeway?: boolean } = {}) {
     this.sideStreet = options.sideStreet === true
+    this.freeway = options.freeway === true
     this.origin = origin
     this.destination = destination
     this.frame = frameOf(origin, destination)
@@ -170,7 +183,7 @@ export class World {
       const s = side * scale
       return this.frame.toLngLat(along * ux - s * uy, along * uy + s * ux)
     }
-    this.roads = (['A', 'B', 'C', 'S'] as const).map((name) => {
+    this.roads = (['A', 'B', 'C', 'S', 'F'] as const).map((name) => {
       const corners = CORNERS[name].map(([f, side], i, all) =>
         i === 0 ? origin : i === all.length - 1 ? destination : at(f, side),
       )
@@ -252,6 +265,7 @@ export class World {
     let best: { road: Road; offM: number } | null = null
     for (const road of this.roads) {
       if (road.name === 'S' && !this.sideStreet) continue
+      if (road.name === 'F' && !this.freeway) continue
       const offM = project(this.frame, road.corners, via).offM
       if (best === null || offM < best.offM - 0.01) best = { road, offM }
     }
@@ -286,6 +300,7 @@ export class World {
   ): { answer: DirectionsJson | NoRouteJson; road: RouteName | null; durationSec: number | null } | null {
     for (const road of this.roads) {
       if (road.name === 'S' && !this.sideStreet) continue
+      if (road.name === 'F' && !this.freeway) continue
       if (!vias.every((via) => project(this.frame, road.corners, via).offM <= ON_ROAD_M)) continue
       const rest = restOf(road, project(this.frame, road.corners, from))
       if (this.isClosed(rest, closed, n)) return { answer: NO_ROUTE, road: null, durationSec: null }
@@ -306,6 +321,11 @@ export class World {
       }
     }
     return false
+  }
+
+  /** True on Main Corridor's middle stretch, which is a freeway in a world made with `freeway`. */
+  private onFreeway(at: FramePoint): boolean {
+    return Math.abs(at.side - 300) < 5 && at.f > 0.25 && at.f < 0.75
   }
 
   private road(name: RoadName): Road {
@@ -335,8 +355,8 @@ export class World {
         const mid = this.frame.toFrame([(piece[k - 1]![0] + piece[k]![0]) / 2, (piece[k - 1]![1] + piece[k]![1]) / 2])
         stepM += m
         // A way back after a wrong turn is a slow side street, then A again.
-        // S drives A's own road before and after its middle half.
-        const onSharedA = road.name === 'S' && (mid.f < 0.25 || mid.f > 0.75)
+        // S drives A's own road before and after its middle half; F drives it all but its own stretch.
+        const onSharedA = (road.name === 'S' && (mid.f < 0.25 || mid.f > 0.75)) || (road.name === 'F' && (onALine(mid) || this.onFreeway(mid)))
         const paceOf: RouteName = (road.name === 'off-route' && i > 0) || onSharedA ? 'A' : road.name
         const pace = traffic(paceOf, mid, n)
         stepSec += m * pace
@@ -360,7 +380,7 @@ export class World {
           location: a,
           instruction: i === 0 ? `Drive along ${name}` : turn === 'straight' ? `Continue onto ${name}` : `Turn ${turn} onto ${name}`,
         },
-        intersections: intersectionsOf(piece, startIndex),
+        intersections: intersectionsOf(piece, startIndex, (k) => this.freeway && this.onFreeway(this.frame.toFrame(midpoint(piece[k]!, piece[k + 1]!)))),
         bannerInstructions:
           next === null
             ? [{ distanceAlongGeometry: round1(stepM), primary: { text: 'Your destination', type: 'arrive', modifier: 'straight' } }]
@@ -479,12 +499,23 @@ function turnOf(frame: Frame, a: LngLat, b: LngLat, c: LngLat): 'left' | 'right'
   return cross > 0 ? 'left' : 'right'
 }
 
-function intersectionsOf(piece: readonly LngLat[], startIndex: number): IntersectionJson[] {
+/** One intersection per vertex; `freewayFrom(k)` true when the road leaving vertex k is a freeway (Mapbox's `motorway` class). */
+function intersectionsOf(piece: readonly LngLat[], startIndex: number, freewayFrom: (k: number) => boolean): IntersectionJson[] {
   return piece.slice(0, -1).map((location, k) => ({
     location,
     geometry_index: startIndex + k,
     ...((startIndex + k) % SIGNAL_EVERY === 3 ? { traffic_signal: true } : {}),
+    ...(freewayFrom(k) ? { classes: ['motorway'] } : {}),
   }))
+}
+
+/** On A's own line outside its jog: before a quarter and after three quarters of the trip. */
+function onALine(at: FramePoint): boolean {
+  return Math.abs(at.side) < 5 && (at.f < 0.25 || at.f > 0.75)
+}
+
+function midpoint(a: LngLat, b: LngLat): LngLat {
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
 }
 
 function voiceFor(stepM: number, next: 'left' | 'right' | 'straight' | null, nextName: string): VoiceJson[] {
@@ -507,6 +538,7 @@ interface IntersectionJson {
   location: LngLat
   geometry_index: number
   traffic_signal?: true
+  classes?: string[]
 }
 interface StepJson {
   distance: number

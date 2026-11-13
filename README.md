@@ -1097,11 +1097,54 @@ lead distance, the cooldown, no return. No threshold changed.
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
   check that is cancelled before it answers (End, off the route, "Keep my route")
   count too, and 60 and 20 are exact.
+- **Back-off (#183).** After `losingChecks` (3) losses in a row the checks stop probing. A
+  loss is a check whose probe came back with a side street that the reroute engine compared
+  like for like (with the path check; the engine says so, `RerouteDecision.probeCompared`)
+  and that did not hold up (it is not being confirmed). A probe that found no road, failed
+  or timed out, one with no like-for-like time, or one the engine never got to compare (no
+  ETA, no traffic data, the route not found) tells nothing and is not counted. Nor is a loss
+  whose slowdown ahead is not known (no typical time), since nothing could then end the
+  back-off: unknown is not a loss. They start again when the traffic ahead
+  changes: the route's slowdown (its fresh time over its typical one, as the check found it)
+  is `rearmSlowdownChange` (0.1, as from 1.6 to 1.7 times the usual time) higher or lower
+  than at the last loss. A share, not seconds: the same slow traffic is fewer seconds late
+  as less of the trip is left, and that is no change. A switch, or a probed
+  route that holds up, starts the count again. The via of a probed route being confirmed is
+  never held back, not even where nothing new is left to probe beside. An unknown delay
+  re-arms nothing. A desk drive on a real corridor had sent 18 probes that all lost by 4 to
+  6 minutes.
+- **Beside a freeway jam (#183, off by default).** With "Probe beside freeway jams" ticked in
+  the Reroute settings (`freewayJams`; the drive settings carry it to the live and the
+  simulated drive alike, it is not stored and a reload turns it off again), a jam on the
+  freeway is probed too. A freeway jam is a congested run (as above: `heavy` or `severe`,
+  runs `congestionGapM` apart joined) of at least `minFreewayJamM` (1000 m) inside one of the
+  route's freeway spans, starting at least `endpointClearanceM` (1 km) from the car and from
+  the destination. It opens the probe gate the way a jam on a surface stretch does
+  (`minDelaySec` still holds besides). The probe aims beside the middle of the jam, square
+  to the freeway, on each side, at `freewayOffsetsM` (800 m, then 1500 m: frontage roads and
+  parallel arterials sit further out than side streets); the via radius stays 250 m, so a
+  point with no road near it comes back NoSegment and costs only that request. Directions
+  then plans the way off before the jam, the road beside it and back on after; RouteIQ does
+  not pick the exit. Freeway jams come before surface stretches, the longest first, both of
+  a jam's sides (more room first) before the next; the checks take them in turn as above
+  (`round`, `keep` first). Judged exactly as every probe: `decideReroute` unchanged (2
+  minutes and 5 % saved, two checks in a row, the lead distance, the freeway lead, like for
+  like against the path check), no new request per check, the same caps and reserve. Item 6
+  of #183 (Mapbox answering a single route for the second half of a drive) needs no rule of
+  its own: these probes are then the only alternatives, under the same rules. The desk
+  drive that found it had about 2 km of heavy traffic ahead, all on freeway, and probes
+  aimed at surface points that were not the problem. Off (the default), nothing changes.
+  The plan screen's probes do not use it.
 - **Said as such.** A switch onto a probed route says "Switching to a faster route via side
   streets. Saves 4 minutes. Turn in 1.1 miles.", and the banner shows that line word for
   word; the simulated drive's log adds "(via side streets)".
 - **Diagnostics.** In the iPhone shell's drive diagnostics a probe is logged as
   "request N (probe)" and a path check as "request N (path check)", with a count of each.
+  A check that sent no probe says why, tallied as "probes skipped: N: …", most first, from a
+  fixed list (`ProbeSkip`, `PROBE_SKIPS`): no request to spare (the caps, the path check's
+  request, or the checks until arrival), your route was not among the answers, your route
+  was not held up, no side street to try (freeway only, or near the end), or backing off.
+  An event is noted only when the reason changes.
   A probe that finds no road (NoSegment) or no route is a normal answer, not a fault.
 
 | `DEFAULT_DRIVE_PROBE_BUDGET` | Default | Meaning |
@@ -1110,6 +1153,8 @@ lead distance, the cooldown, no return. No threshold changed.
 | `requestsPerDrive` | 20 | Most probe requests per drive, out of `maxRequests` (60) |
 | `minDelaySec` | 120 s | A route with no jam reported ahead is probed only when it is this far over its typical time |
 | `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
+| `losingChecks` | 3 | Losses in a row (a side street found, compared like for like, not holding up) after which the checks stop probing |
+| `rearmSlowdownChange` | 0.1 | How much the slowdown ahead (fresh time over typical) must change, either way, to end the back-off |
 | `arrivalReserve` | 1 | Before a probe, this many requests per poll interval until the expected arrival are kept back for the plain checks |
 | `reserveMargin` | 3 | Requests kept back on top of those, for the odd plain check that needs its path check |
 
@@ -1152,6 +1197,9 @@ durations are carried but not used for the choice yet.
 | `congestedLevels` | heavy, severe | Mapbox congestion levels that count as a jam to aim at |
 | `congestionGapM` | 200 m | Congested runs this close together or closer are one jam |
 | `minCongestedM` | 300 m | A stretch needs this much congested road to be aimed at by the data; below it, it is ordered by length |
+| `freewayJams` | false | Probe beside a jam on a freeway too (#183); off until a phone drive shows it helps. The drive's "Probe beside freeway jams" setting |
+| `minFreewayJamM` | 1000 m | A congested run inside a freeway span counts as a freeway jam from this long (`freewayJams` only) |
+| `freewayOffsetsM` | 800, 1500 m | Distances beside a freeway jam tried per side, nearest first (`freewayJams` only) |
 
 ### The plan and route screens (#85)
 

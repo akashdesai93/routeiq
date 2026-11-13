@@ -85,6 +85,22 @@ export interface ProbeOptions {
    * length like a route with no traffic data.
    */
   readonly minCongestedM: number
+  /**
+   * Probe beside a jam on a freeway too (#183, items 3 and 6). Off by default: the owner turns it
+   * on after a phone drive. When false nothing changes; when true, a freeway jam (a congested
+   * run, joined across congestionGapM, of at least minFreewayJamM inside one freeway span of the
+   * route, starting at least endpointClearanceM from the start and from the end) is probed at
+   * its middle on both sides, at freewayOffsetsM, before any surface stretch. Directions then
+   * plans "leave before the jam, the road beside it, rejoin after"; the exit is not picked here.
+   */
+  readonly freewayJams: boolean
+  /** A congested run inside a freeway span counts as a freeway jam from this long, in meters (freewayJams only). */
+  readonly minFreewayJamM: number
+  /**
+   * Perpendicular distances beside a freeway jam, in meters, nearest first (freewayJams only).
+   * Further out than offsetsM: frontage roads and parallel arterials sit further from a freeway.
+   */
+  readonly freewayOffsetsM: readonly number[]
 }
 
 export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
@@ -100,6 +116,9 @@ export const DEFAULT_PROBE_OPTIONS: ProbeOptions = {
   congestedLevels: ['heavy', 'severe'],
   congestionGapM: 200,
   minCongestedM: 300,
+  freewayJams: false,
+  minFreewayJamM: 1000,
+  freewayOffsetsM: [800, 1500],
 }
 
 /** Which side of the base route, facing the direction of travel. */
@@ -125,6 +144,11 @@ export interface ViaPoint {
    * point was placed without traffic data (the middle of the stretch).
    */
   readonly congestedSpanM: DistanceSpanM | null
+  /**
+   * True when the point is beside a jam on a freeway (ProbeOptions.freewayJams): targetSpanM is
+   * then the freeway span and congestedSpanM the jam. Left out for a surface-street stretch.
+   */
+  readonly freeway?: true
 }
 
 const usable = (c: RouteCandidate) =>
@@ -224,7 +248,7 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`
  * Up to `options.maxPoints` via points off the fastest candidate's slowest
  * surface-street stretches, best first. Empty for no usable candidate, a trip
  * under `minTripM`, or a route with no surface stretch of `minStretchM` away
- * from its ends (freeway-only trips).
+ * from its ends (freeway-only trips, unless `freewayJams` finds a freeway jam).
  *
  * Stretches with at least `minCongestedM` of congestion (segments at one of
  * `congestedLevels`, runs within `congestionGapM` joined) come first, the most
@@ -234,6 +258,11 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`
  * slowest. Every stretch is probed on both sides. Within a stretch the side
  * farther from the other candidates comes first, then left; the first side of
  * every stretch comes before any second side, so a small budget spreads out.
+ *
+ * With `freewayJams` on, freeway jams come first (see ProbeOptions.freewayJams):
+ * the longest first, each probed at its middle at `freewayOffsetsM`, both of
+ * its sides (more room first) before the next jam and before any surface
+ * stretch. With it off the output is exactly as without it.
  *
  * `base`, when given and usable, is the route to probe beside instead of the
  * fastest (a drive probes beside the route being driven: see checkProbes).
@@ -273,10 +302,10 @@ export function selectViaPoints(
   // Only usable lines measure room: one NaN coordinate would make every room NaN and hide the side order.
   const others = candidates.filter((c) => c !== base && usable(c))
   const known = candidates.includes(base) ? candidates : [...candidates, base]
-  const offsets = [...options.offsetsM].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
+  const offsets = positive(options.offsetsM)
 
-  const rounds: ViaPoint[][] = [[], []]
-  for (const { span, jam } of stretches) {
+  /** The points beside the middle of `aim`, one per side (the nearest offset clear of every route), more room first. */
+  const beside = (span: DistanceSpanM, jam: DistanceSpanM | null, offsetsM: readonly number[], freeway: boolean): ViaPoint[] => {
     const aim = jam ?? span
     const midM = (aim[0] + aim[1]) / 2
     const here = pointAtDistance(base.geometry, midM)!
@@ -291,14 +320,16 @@ export function selectViaPoints(
           (180 / Math.PI)
     const found: { point: ViaPoint; roomM: number }[] = []
     for (const side of ['left', 'right'] as const) {
-      for (const offsetM of offsets) {
+      for (const offsetM of offsetsM) {
         const position = offsetPoint(mid, heading, side, offsetM)
         if (!isValidLngLat(position)) continue
         if (distanceM(position, origin) < clear || distanceM(position, destination) < clear) continue
         if (known.some((c) => distanceToLineM(position, c.geometry) < options.clearOfRoutesM)) continue
         const roomM = Math.min(...others.map((c) => distanceToLineM(position, c.geometry)))
-        const reason =
-          jam === null
+        const reason = freeway
+          ? `${offsetM} m ${side} of the route's ${km(aim[1] - aim[0])} jam on the freeway ` +
+            `(${km(aim[0])} to ${km(aim[1])} from the start)`
+          : jam === null
             ? `${offsetM} m ${side} of the fastest route's ${km(span[1] - span[0])} surface-street stretch ` +
               `(${km(span[0])} to ${km(span[1])} from the start)`
             : `${offsetM} m ${side} of the fastest route's ${km(jam[1] - jam[0])} jam on surface street ` +
@@ -313,6 +344,7 @@ export function selectViaPoints(
             side,
             offsetM,
             congestedSpanM: jam,
+            ...(freeway ? { freeway: true as const } : {}),
           },
           roomM,
         })
@@ -320,9 +352,47 @@ export function selectViaPoints(
       }
     }
     // More room first; equal (or unknown) room keeps left before right.
-    found.sort((a, b) => (b.roomM > a.roomM ? 1 : b.roomM < a.roomM ? -1 : 0)).forEach(({ point }, i) => rounds[i]!.push(point))
+    return found.sort((a, b) => (b.roomM > a.roomM ? 1 : b.roomM < a.roomM ? -1 : 0)).map(({ point }) => point)
   }
-  return rounds.flat().slice(0, options.maxPoints)
+
+  // Freeway jams first (only with freewayJams on): both sides of the longest, then the next.
+  const freewayPoints = options.freewayJams === true ? freewayJams(base, along, runs, options).flatMap(({ span, jam }) => beside(span, jam, positive(options.freewayOffsetsM), true)) : []
+  const rounds: ViaPoint[][] = [[], []]
+  for (const { span, jam } of stretches) beside(span, jam, offsets, false).forEach((point, i) => rounds[i]!.push(point))
+  return [...freewayPoints, ...rounds.flat()].slice(0, options.maxPoints)
+}
+
+/** Finite positive distances, nearest first. */
+const positive = (values: readonly number[]) => [...values].filter((o) => Number.isFinite(o) && o > 0).sort((a, b) => a - b)
+
+/**
+ * The route's freeway jams (ProbeOptions.freewayJams): each congested run (`runs`, joined across
+ * congestionGapM) clipped to a freeway span, at least minFreewayJamM long, starting at least
+ * endpointClearanceM from the route's start (the car, during a drive) and from its end. The
+ * longest first; equal ones go to the earlier. None when the route's road kinds are unknown.
+ */
+function freewayJams(
+  base: RouteCandidate,
+  along: readonly number[],
+  runs: readonly DistanceSpanM[],
+  options: ProbeOptions,
+): { span: DistanceSpanM; jam: DistanceSpanM }[] {
+  const lengthM = along.at(-1)!
+  const clear = options.endpointClearanceM
+  const out: { span: DistanceSpanM; jam: DistanceSpanM }[] = []
+  // Overlapping or touching spans are one freeway, so a jam across them is one jam; empty, reversed or NaN ones are ignored.
+  const spans: DistanceSpanM[] = []
+  for (const [a, b] of (base.limitedAccessSpansM ?? []).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+    const last = spans.at(-1)
+    if (last !== undefined && a <= last[1]) spans[spans.length - 1] = [last[0], Math.max(last[1], b)]
+    else spans.push([a, b])
+  }
+  for (const span of spans) {
+    for (const jam of within(runs, span)) {
+      if (spanLength(jam) >= options.minFreewayJamM && jam[0] >= clear && jam[0] <= lengthM - clear) out.push({ span, jam })
+    }
+  }
+  return out.sort((x, y) => spanLength(y.jam) - spanLength(x.jam) || x.jam[0] - y.jam[0])
 }
 
 /**
@@ -354,7 +424,7 @@ export const DEFAULT_PROBE_BUDGET: ProbeBudget = {
 /**
  * The via points to probe for one plan: selectViaPoints, cut to the budget.
  * Empty when the budget is off, there is no usable route, or the trip has
- * nothing to probe (shorter than minTripM, or freeway-only: no surface-street
+ * nothing to probe (shorter than minTripM, or freeway-only with no freeway jam probed: no surface-street
  * stretch of minStretchM away from its ends). Pure: the same routes give the
  * same points in the same order.
  */
@@ -500,6 +570,20 @@ export interface DriveProbeBudget {
    */
   readonly timeoutSec: number
   /**
+   * Back-off (#183): after this many probing checks in a row in which no probed route held up
+   * (none is being confirmed), the checks stop probing. A desk drive sent 18 probes that all lost
+   * by 4 to 6 minutes, and the first few said what the rest would.
+   */
+  readonly losingChecks: number
+  /**
+   * The back-off ends when the traffic ahead changes this much: the route's slowdown (its fresh
+   * travel time over its typical one, as the check found it) at least this much higher or lower
+   * than at the last loss (0.1: from 1.6 to 1.7 times the usual time). A share, not seconds: the
+   * same slow traffic shrinks in seconds as less of the trip is left, and that is no change. A
+   * switch, or a probed route that holds up, ends it too.
+   */
+  readonly rearmSlowdownChange: number
+  /**
    * So that the drive never goes blind (#183): before a probe, the budget keeps back one
    * request for every plain check still due until the expected arrival (one per poll
    * interval), times this factor, plus reserveMargin. Probes spend only what is left after
@@ -517,6 +601,8 @@ export const DEFAULT_DRIVE_PROBE_BUDGET: DriveProbeBudget = {
   requestsPerDrive: 20,
   minDelaySec: 120,
   timeoutSec: 8,
+  losingChecks: 3,
+  rearmSlowdownChange: 0.1,
   arrivalReserve: 1,
   reserveMargin: 3,
 }
@@ -530,6 +616,8 @@ export function resolveDriveProbeBudget(budget: Partial<DriveProbeBudget> = {}):
     requestsPerDrive: budget.requestsPerDrive ?? d.requestsPerDrive,
     minDelaySec: n(budget.minDelaySec, d.minDelaySec),
     timeoutSec: n(budget.timeoutSec, d.timeoutSec),
+    losingChecks: n(budget.losingChecks, d.losingChecks),
+    rearmSlowdownChange: n(budget.rearmSlowdownChange, d.rearmSlowdownChange),
     arrivalReserve: n(budget.arrivalReserve, d.arrivalReserve),
     reserveMargin: n(budget.reserveMargin, d.reserveMargin),
   }
@@ -587,9 +675,56 @@ export interface CheckProbeMemory {
    * the route it found can come back and be confirmed. Null when there is none.
    */
   readonly keep: LngLat | null
+  /**
+   * Probing checks in a row whose probes came back with a side street that was compared like
+   * for like and did not hold up (none is being confirmed): the back-off counts these. A probe
+   * that found no road, failed or timed out tells nothing and is not counted.
+   */
+  readonly losing: number
+  /** The route's slowdown (fresh time over typical) at the last loss; null when not known. */
+  readonly losingSlowdown: number | null
 }
 
-export const INITIAL_CHECK_PROBES: CheckProbeMemory = { used: 0, round: 0, keep: null }
+export const INITIAL_CHECK_PROBES: CheckProbeMemory = { used: 0, round: 0, keep: null, losing: 0, losingSlowdown: null }
+
+/**
+ * Why a check sent no probe (#183), for the drive diagnostics. Null in a plan: it did probe.
+ * - 'budget': no request may go to a probe (checkProbeAllowance: the per-check or per-drive cap,
+ *   the path check's request, or what the plain checks until the arrival need).
+ * - 'route-not-found': the route being driven was not among the answers, so nothing is compared.
+ * - 'not-held-up': no jam reported ahead, and under minDelaySec over its typical time.
+ * - 'nothing-to-probe': no surface-street stretch left to probe beside (freeway only with no freeway jam to probe beside, or under minTripM left).
+ * - 'backing-off': the last losingChecks probes all lost and the traffic ahead has not changed since.
+ */
+export type ProbeSkip = 'budget' | 'route-not-found' | 'not-held-up' | 'nothing-to-probe' | 'backing-off'
+
+/** What one check probes, or why it probes nothing. */
+export interface CheckProbePlan {
+  readonly points: LngLat[]
+  readonly skipped: ProbeSkip | null
+}
+
+/** A route's fresh travel time divided by its typical one; null when either is not known. */
+function slowdownOf(route: Pick<RouteCandidate, 'durationSec' | 'typicalDurationSec'> | null | undefined): number | null {
+  if (route == null || route.typicalDurationSec === null || !(route.typicalDurationSec > 0)) return null
+  const slowdown = route.durationSec / route.typicalDurationSec
+  return Number.isFinite(slowdown) && slowdown > 0 ? slowdown : null
+}
+
+/**
+ * True while the back-off holds: `losingChecks` losses in a row, and the slowdown ahead now
+ * within rearmSlowdownChange of what it was at the last of them. A slowdown not known now
+ * re-arms nothing: the back-off holds (a probe costs a request; unknown is not "changed"). A
+ * hold with no slowdown of its own (a memory from elsewhere: rememberCheckProbes never stores
+ * one) does not hold: nothing could ever end it.
+ */
+export function probeBackoffHolds(memory: CheckProbeMemory, slowdownNow: number | null, budget: Partial<DriveProbeBudget> = {}): boolean {
+  const { losingChecks, rearmSlowdownChange } = resolveDriveProbeBudget(budget)
+  if (!(whole(memory.losing, 0) >= losingChecks)) return false
+  if (memory.losingSlowdown === null || !Number.isFinite(memory.losingSlowdown)) return false
+  if (slowdownNow === null) return true
+  return Math.abs(slowdownNow - memory.losingSlowdown) < rearmSlowdownChange
+}
 
 export interface CheckProbeInput {
   /** The route being driven, and how far along it the check was asked from. */
@@ -630,25 +765,36 @@ export interface CheckProbeInput {
  * Empty when the route being driven is not held up (no jam reported on it
  * ahead, and under minDelaySec over its typical time), when nothing may be
  * asked, the current route was not found, or there is
- * nothing to probe (under minTripM left, or freeway only). Pure: the same
+ * nothing to probe (under minTripM left, or freeway only with no freeway jam to probe beside). Pure: the same
  * input gives the same points in the same order.
  */
 export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFAULT_PROBE_OPTIONS): LngLat[] {
+  return checkProbePlan(input, options).points
+}
+
+/** checkProbes, with the reason when it is empty (ProbeSkip). The same rules, in this order. */
+export function checkProbePlan(input: CheckProbeInput, options: ProbeOptions = DEFAULT_PROBE_OPTIONS): CheckProbePlan {
+  const skip = (skipped: ProbeSkip): CheckProbePlan => ({ points: [], skipped })
   const allowed = whole(input.allowed, 0)
-  if (allowed <= 0) return []
+  if (allowed <= 0) return skip('budget')
   const known = [...input.fresh, ...(input.baseline ?? [])].filter(usable)
-  if (known.length === 0) return []
+  if (known.length === 0) return skip('route-not-found')
   // Without the current route's own fresh line (among the fresh routes, or the path check's
   // answer) the engine compares nothing this check (route-unconfirmed), and a probe could snap
   // back onto the current path and stand in for it. So no probe then.
   const base = findCurrentRoute(input.route, input.alongM, known, input.rerouteOptions)
-  if (base === null) return []
+  if (base === null) return skip('route-not-found')
   const selected = selectViaPoints(known, options, base)
   // Only a route that is held up is worth a probe: a jam ahead on it, or a real delay over its typical time.
   const { minDelaySec } = resolveDriveProbeBudget(input.budget)
   const delaySec = base.typicalDurationSec === null ? null : base.durationSec - base.typicalDurationSec
   const heldUp = selected.some((p) => p.congestedSpanM !== null) || (delaySec !== null && Number.isFinite(delaySec) && delaySec >= minDelaySec)
-  if (!heldUp) return []
+  if (!heldUp) return skip('not-held-up')
+  // The kept via of a probed route being confirmed is never held back: the confirmation needs
+  // it, even where nothing new is left to probe beside (it is checked below like any via).
+  const confirming = input.memory.keep !== null
+  if (selected.length === 0 && !confirming) return skip('nothing-to-probe')
+  if (!confirming && probeBackoffHolds(input.memory, slowdownOf(base), input.budget)) return skip('backing-off')
   const points = selected.map((p) => p.position)
 
   const out: LngLat[] = []
@@ -670,7 +816,7 @@ export function checkProbes(input: CheckProbeInput, options: ProbeOptions = DEFA
   const others = points.filter((p) => kept === undefined || distanceM(p, kept) >= options.clearOfRoutesM)
   const start = others.length === 0 ? 0 : whole(input.memory.round, 0) % others.length
   const turn = [...others.slice(start), ...others.slice(0, start)]
-  return [...out, ...turn].slice(0, allowed)
+  return { points: [...out, ...turn].slice(0, allowed), skipped: null }
 }
 
 /**
@@ -705,10 +851,21 @@ export function mergeCheckProbes(
 export function rememberCheckProbes(
   memory: CheckProbeMemory,
   asked: number,
-  decision: Pick<RerouteDecision, 'action' | 'considered' | 'nextState'>,
+  decision: Pick<RerouteDecision, 'action' | 'code' | 'considered' | 'nextState' | 'probeCompared'>,
   routes: readonly RouteCandidate[] | null,
   /** How many of `asked` are counted in memory.used already (counted as they were sent). */
   alreadyCounted = 0,
+  /**
+   * The route being driven, where along it the check was asked, and the check's answer for the
+   * current path itself: where the back-off reads the slowdown ahead (as checkProbePlan reads it).
+   * Left out: it is not known.
+   */
+  driven: {
+    readonly route: Pick<RouteCandidate, 'geometry'>
+    readonly alongM: number
+    readonly baseline?: readonly RouteCandidate[] | null
+    readonly rerouteOptions?: Partial<RerouteOptions>
+  } | null = null,
 ): CheckProbeMemory {
   const made = whole(asked, 0)
   const uncounted = Math.max(0, made - whole(alreadyCounted, 0))
@@ -717,5 +874,17 @@ export function rememberCheckProbes(
   const pending = decision.action === 'stay' && decision.nextState.pending !== null ? decision.considered : null
   const route = pending === null ? undefined : routes.find((r) => r.id === pending.routeId)
   const keep = route?.source === 'probe' && route.via !== undefined && isValidLngLat(route.via) ? route.via : null
-  return { ...counted, keep }
+  // The back-off (#183): a switch, or a probed route that holds up, starts the count again.
+  if (decision.action === 'switch' || keep !== null) return { ...counted, keep, losing: 0, losingSlowdown: null }
+  // A loss is a side street that came back, was compared like for like (the engine says so:
+  // probeCompared) and did not hold up. A probe that found no road, failed or timed out, or one
+  // the engine could not compare (no like-for-like time, no ETA, no traffic data, the route not
+  // found), tells nothing: it is not counted. Nor is a loss whose slowdown ahead is not known,
+  // since nothing could then tell when the traffic has changed (unknown is not a loss).
+  if (!(made > 0 && decision.probeCompared === true)) return { ...counted, keep }
+  const known = [...routes.filter((r) => r.source !== 'probe'), ...(driven?.baseline ?? [])].filter(usable)
+  const base = driven === null ? null : findCurrentRoute(driven.route, driven.alongM, known, driven.rerouteOptions)
+  const slowdown = slowdownOf(base)
+  if (slowdown === null) return { ...counted, keep }
+  return { ...counted, keep, losing: whole(memory.losing, 0) + 1, losingSlowdown: slowdown }
 }
