@@ -133,3 +133,57 @@ export async function amberOutside(scope: Locator, news: string): Promise<string
     [news, MAP_INTERNALS] as const,
   )
 }
+
+/**
+ * The share of the screen where the map can be seen (#197), from 0 to 1: the screen is
+ * sampled on a grid, and a point counts when the topmost thing there is the map (its canvas
+ * or anything Mapbox draws on it). Cards and sheets over the map, the bars around it, and
+ * any black band under the page all count against it.
+ */
+export async function mapShare(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const w = window.innerWidth
+    const h = window.innerHeight
+    const cols = 40
+    const rows = 80
+    let seen = 0
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        const el = document.elementFromPoint(((i + 0.5) * w) / cols, ((j + 0.5) * h) / rows)
+        if (el !== null && el.closest('.map') !== null) seen++
+      }
+    }
+    return seen / (cols * rows)
+  })
+}
+
+/**
+ * Pairs of tappable things inside `scope` closer together than `minPx` (edge to edge), as
+ * "a | b: N px" (#197): two controls that nearly touch get the wrong one tapped. A control
+ * inside another (a button in a list item that is itself tappable) is not a pair.
+ */
+export async function crampedTargets(scope: Locator, minPx: number): Promise<string[]> {
+  return scope.evaluate(
+    (root, [min, internals]) => {
+      const name = (el: Element) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 24) || el.getAttribute('aria-label')}"`
+      const targets = [...root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, summary, [role="button"], [role="switch"], [role="option"]')]
+        .filter((el) => el.closest(internals) === null)
+        .map((el) => ({ el, r: el.getBoundingClientRect(), style: getComputedStyle(el) }))
+        // Not drawn: inside a closed <details>, which Chromium still lays out (content-visibility: hidden).
+        .filter(({ el, r, style }) => r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && el.checkVisibility({ contentVisibilityAuto: true }))
+      const out: string[] = []
+      for (let a = 0; a < targets.length; a++) {
+        for (let b = a + 1; b < targets.length; b++) {
+          const [x, y] = [targets[a]!, targets[b]!]
+          if (x.el.contains(y.el) || y.el.contains(x.el)) continue
+          const dx = Math.max(0, Math.max(x.r.left, y.r.left) - Math.min(x.r.right, y.r.right))
+          const dy = Math.max(0, Math.max(x.r.top, y.r.top) - Math.min(x.r.bottom, y.r.bottom))
+          const gap = Math.hypot(dx, dy)
+          if (gap < min - 0.5) out.push(`${name(x.el)} | ${name(y.el)}: ${Math.round(gap)} px`)
+        }
+      }
+      return out
+    },
+    [minPx, MAP_INTERNALS] as const,
+  )
+}
