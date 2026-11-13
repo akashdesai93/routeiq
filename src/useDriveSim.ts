@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   alongRouteM,
-  checkProbeAllowance,
   decideReroute,
   DEFAULT_REROUTE_OPTIONS,
   findCurrentRoute,
@@ -26,6 +25,7 @@ import {
   afterRequest,
   afterSwitch,
   cruiseSpeedMps,
+  simulatedProbeAllowance,
   DEFAULT_DRIVE_SETTINGS,
   DRIVE_START,
   MIN_REQUEST_GAP_MS,
@@ -175,7 +175,12 @@ export function useDriveSim(token: string | null, destination: LngLat, startRout
     const roomForBaseline = run.clock.requestsUsed < settings.maxRequests
     // Side-street probes share the same budget, and never take the baseline's room.
     let probesSent = 0
-    const probesAllowed = checkProbeAllowance({ requestsUsed: run.clock.requestsUsed, probesUsed: run.probes.used }, settings.maxRequests)
+    // And never take what the plain checks until the arrival need (#183).
+    const probesAllowed = simulatedProbeAllowance(
+      { requestsUsed: run.clock.requestsUsed, probesUsed: run.probes.used },
+      settings,
+      { routeLengthM: run.routeLengthM, alongM: run.clock.alongM, speedMps: run.speedMps },
+    )
     const result = await fetchFreshRoutes({
       token,
       origin: here.point,

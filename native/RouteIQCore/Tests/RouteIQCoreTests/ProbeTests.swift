@@ -485,7 +485,7 @@ final class ProbeTestsDuringADrive: XCTestCase {
 
     // it('has one documented budget')
     func testSideStreetProbesDuringADrive_hasOneDocumentedBudget() {
-        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, losingChecks: 3, rearmSlowdownChange: 0.1))
+        XCTAssertEqual(DriveProbeBudget.default, DriveProbeBudget(requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1, reserveMargin: 3, losingChecks: 3, rearmSlowdownChange: 0.1))
     }
 
     // it('holds after 3 losing checks in a row, until the pace ahead changes by 0.1 of the slowdown') (#183)
@@ -531,8 +531,8 @@ final class ProbeTestsDuringADrive: XCTestCase {
 
     // MARK: describe('checkProbeAllowance: probes share the drive request budget')
 
-    private func allowance(_ requestsUsed: Double, _ probesUsed: Double, _ maxRequests: Double, _ budget: DriveProbeBudget = .default) -> Int {
-        Probe.checkProbeAllowance(requestsUsed: requestsUsed, probesUsed: probesUsed, maxRequests: maxRequests, budget: budget)
+    private func allowance(_ requestsUsed: Double, _ probesUsed: Double, _ maxRequests: Double, _ budget: DriveProbeBudget = .default, reserve: Double? = 0) -> Int {
+        Probe.checkProbeAllowance(requestsUsed: requestsUsed, probesUsed: probesUsed, maxRequests: maxRequests, budget: budget, reserve: reserve)
     }
 
     // it('one probe per check, with room left over for the check of the current path')
@@ -562,6 +562,23 @@ final class ProbeTestsDuringADrive: XCTestCase {
         XCTAssertEqual(allowance(.nan, 0, 60), 0)
         // Two probes on the 58th request: only one fits before the path check's room.
         XCTAssertEqual(allowance(58, 0, 60, DriveProbeBudget(requestsPerCheck: 2)), 1)
+    }
+
+    // it('keeps back what the plain checks until the arrival need, so the drive never goes blind (#183)')
+    func testCheckProbeAllowance_keepsBackWhatThePlainChecksUntilTheArrivalNeed() {
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 2520, pollIntervalSec: 60), 45)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 2521, pollIntervalSec: 60), 46)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 0, pollIntervalSec: 60), 3)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60, budget: DriveProbeBudget(arrivalReserve: 1.5)), 48)
+        XCTAssertEqual(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 60, budget: DriveProbeBudget(reserveMargin: 0)), 30)
+        XCTAssertNil(Probe.plainCheckReserve(remainingSec: nil, pollIntervalSec: 60))
+        XCTAssertNil(Probe.plainCheckReserve(remainingSec: .nan, pollIntervalSec: 60))
+        XCTAssertNil(Probe.plainCheckReserve(remainingSec: 1800, pollIntervalSec: 0))
+        XCTAssertEqual(allowance(10, 3, 60, reserve: 45), 1)
+        XCTAssertEqual(allowance(14, 3, 60, reserve: 45), 0)
+        XCTAssertEqual(allowance(13, 3, 60, reserve: 45), 1)
+        XCTAssertEqual(allowance(13, 0, 60, DriveProbeBudget(requestsPerCheck: 2), reserve: 45), 1)
+        XCTAssertEqual(allowance(1, 0, 60, reserve: nil), 0)
     }
 
     // MARK: describe('checkProbes: where a check probes')
