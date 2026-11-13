@@ -1,3 +1,4 @@
+import type { OfferLifeEvent } from '../../core/index.ts'
 import { currentPosition, type LocationResult, type PositionSource } from '../geolocation.ts'
 import type { Speaker } from '../speech.ts'
 import type { PageVisibility } from '../visibility.ts'
@@ -28,6 +29,8 @@ export interface NativeDevice {
   readonly simulated: boolean
   /** A drive check was decided: its outcome goes into the diagnostics (DriveDiagnostics.checked). */
   readonly checked: (code: string, routes: number | null, savingSec: number | null) => void
+  /** What happened to a switch offer (#202): shown, then one ending (DriveDiagnostics.offerShown, offerEnded). */
+  readonly offer: (event: OfferLifeEvent) => void
 }
 
 export interface NativeDeviceOptions {
@@ -53,6 +56,7 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
   return {
     simulated: simulate !== null,
     checked: (code, routes, faster) => log.checked(code, routes, faster),
+    offer: (e) => (e.kind === 'shown' ? log.offerShown(e.why, e.savingSec) : log.offerEnded(e.how, e.reason, e.afterSec, e.directions)),
     source: {
       start(onFix, onError) {
         log.gps(true)

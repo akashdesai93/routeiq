@@ -1287,7 +1287,15 @@ plugin `RouteIQNative` is present, `src/device/native`):
   "another was faster, by less than the minimum saving", "waiting for the next check to
   confirm it" ...) and the best saving another route offered, in whole seconds, from the
   reroute engine's own like-for-like comparison of the alternative it weighed (0 when yours
-  was the fastest, unknown when it could not compare). Counts
+  was the fastest, unknown when it could not compare). And the life of each switch offer
+  (#202): "offer shown" with the check outcome that offered it and its saving (or "saving
+  unknown"), then exactly one ending with the seconds since it was shown: taken by the
+  driver (Take it), kept by the driver (Keep my route), confirmed by the app (the next
+  check), withdrawn (no longer faster, could not be confirmed, or a different one took its
+  place) or expired (its turn came too close, off the route, the drive ended). After a taken
+  or confirmed switch it says whether the directions ahead changed: "directions unchanged"
+  means the maneuvers still to come were the very same as on the route left, so the driver
+  was told nothing new (`src/core/offerLife.ts`). A summary line counts them. Counts
   and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
