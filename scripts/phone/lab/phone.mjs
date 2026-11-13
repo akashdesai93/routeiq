@@ -16,6 +16,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { redact } from './assertions.mjs'
+import { BACKGROUND_APP, DEFAULT_LAB_LAUNCH, startsFromBackground } from './launch.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -23,12 +24,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 export const REPORT_IN_APP = '/tmp/routeiq-lab-report.txt'
 export const WEB_IN_APP = '/tmp/routeiq-lab-www'
 /** A plain app with nothing personal on it, opened to put RouteIQ in the background. */
-export const BACKGROUND_APP = 'com.apple.calculator'
+export { BACKGROUND_APP }
 /** The shell app's own process, and the process that runs its web code. */
 export const APP_PROCESS = 'App'
 export const WEB_PROCESS = 'com.apple.WebKit.WebContent'
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 
 export function findPmd3() {
   const candidates = [process.env.ROUTEIQ_PMD3, path.join(homedir(), 'dev', 'tools', 'pmd3', 'Scripts', 'pymobiledevice3.exe'), path.join(homedir(), 'dev', 'tools', 'pmd3', 'bin', 'pymobiledevice3')]
@@ -143,6 +145,11 @@ export async function connectPhone({ log = () => {} } = {}) {
 
     /** Starts an app, or brings it to the front when `keep` is true and it is running. Returns the pid, or null. */
     async launch(bundleId, { args = [], keep = false } = {}) {
+      if (startsFromBackground(bundleId, { keep })) {
+        const away = await agent.send({ cmd: 'launch', bundle: BACKGROUND_APP, args: [], keep: false })
+        if (!away.ok) log(`could not send the app to the background first: ${away.error}`)
+        await sleep(DEFAULT_LAB_LAUNCH.backgroundFirstMs)
+      } else if (!keep && bundleId !== BACKGROUND_APP) log('ROUTEIQ_LAB_HOT=1: ending the app in front and starting it at once (this start makes the screen black, #136)')
       const answer = await agent.send({ cmd: 'launch', bundle: bundleId, args, keep })
       if (!answer.ok) log(`launch failed: ${answer.error}`)
       return answer.ok ? answer.pid : null

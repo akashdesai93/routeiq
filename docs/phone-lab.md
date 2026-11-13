@@ -143,7 +143,7 @@ place names; it is for the person at the console and is never written to the rep
 | `starts-and-plans` | Starts the app, waits for the plan screen, takes a screenshot. No simulated position. | 30 s |
 | `locked-wrong-turn` | Stands 4.4 km into the Uptown → SouthPark drive, starts the app in lab mode (it starts the drive), sends it to the background, replays the `wrong-turn` track for 170 s (the turn comes about 70 s in), waits 15 s, brings the app back. | 5 min |
 | `background-soak` | The same with the track that stays on the route, from its start, for `--minutes` (default 10). One CPU, memory and battery sample a minute. | 12 min |
-| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots 3, 9, 18 and 30 s into the drive. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 45 s |
+| `drive-screen` | Starts the in-app test drive, leaves the app in front and takes screenshots one after another for 40 s, each stamped with its seconds since Start drive (`drawn.json`). Passes when every screenshot from 2 s after Start drive on is drawn. With `--fix <name>` the app tries one thing on the page 12 s in (`resize`, `reflow`, `layer`, `nomap`, `red`, `scroll`: `src/lab/probe.ts`), and the report's `layout` line says how the page is laid out. No simulated position. | 60 s |
 
 Options: `--lock --owner-unlocks-after` (put the phone to sleep while away; the car is then the
 in-app test drive; the screen stays off afterwards, so nothing visual can be checked after it),
@@ -153,7 +153,7 @@ the drive, the phone stands still, and the off-route check must then fail), `--a
 
 ```powershell
 node scripts/phone/lab/run.mjs --scenario locked-wrong-turn            # background, GPS over USB
-node scripts/phone/lab/run.mjs --scenario drive-screen                 # is the driving screen drawn? 45 s
+node scripts/phone/lab/run.mjs --scenario drive-screen                 # is the driving screen drawn? about 60 s
 node scripts/phone/lab/run.mjs --scenario locked-wrong-turn --lock --owner-unlocks-after   # phone asleep; LAST run of a session
 node scripts/phone/lab/run.mjs --scenario locked-wrong-turn --no-gps   # must FAIL the off-route check
 node scripts/phone/lab/run.mjs --scenario background-soak --minutes 10
@@ -189,7 +189,29 @@ answered and failed, spoken lines, and new routes after leaving the route.
 `background-soak`: fixes and ticks at 30 a minute or more for the whole time away, the same tick
 and request checks, no failed route request, and the speech check.
 
-`drive-screen`: the screen is drawn at each of the four moments.
+`drive-screen`: every screenshot from 2 s after Start drive on is drawn (`DEFAULT_LAB_CHECKS.maxDrawnSec`), and the first one came within 5 s of the press (a later one cannot judge the start). The PC learns of the press from the report the app writes the moment it presses Start drive, so the first screenshot comes about 2.5 s after it; a screen drawn in that first screenshot passes. The summary says when it was first drawn and when it was last flat: a screen that drew by itself at 18 s reads "first drawn 18.2 s … flat … the last at 15.1 s", not as a pass. Flatness is measured from 20 % down the screen, so a notification banner over a black screen does not count as drawn.
+
+### How the lab starts the app (#136)
+
+**The lab never ends RouteIQ while it is in front and starts it again at once.** That start, through
+the developer process-control service, left the whole app unshown: black under the status bar,
+not even native marker colours on the glass, while the app ran, spoke and answered script (black 4
+of 4 on 2026-11-13; drawn 5 of 5 when started from the background). So every launch that ends the
+app (`phone.launch` without `keep`) first puts Calculator in front and waits 6 s
+(`DEFAULT_LAB_LAUNCH` in `scripts/phone/lab/launch.mjs`). The owner's finger-started drives were
+never black. `ROUTEIQ_LAB_HOT=1` brings the old start back, only to reproduce that black screen on
+purpose.
+
+### The screen-drawn check is part of every build's lab run (#136)
+
+- **Every build that touches `native/shell`, the drive view (`src/LiveDriveView.tsx`,
+  `src/live.css`, `src/index.css`, `src/useLiveDrive.ts`) or the map (`src/map/`) gets
+  `drive-screen` on the phone**, five starts in a row when the change is to one of those, and the
+  PR says what the phone showed ("drawn from 2 s on, 5 of 5").
+- `queue.mjs` refuses a build whose runs leave `drive-screen` out, unless the plan says why in
+  `"noDriveScreen"`. The default runs have it.
+- A real lock and unlock and a finger-tap Start drive are not things the lab can do (passcode, no
+  touch). The owner does them once per such build.
 
 `starts-and-plans`: at least one route is listed and Start drive is there.
 
