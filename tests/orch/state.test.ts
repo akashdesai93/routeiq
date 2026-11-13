@@ -211,6 +211,17 @@ describe('sessions in the new format', () => {
     expect(m.sessions.map((x: Json) => x.id)).toEqual(['dev-18', 'cloud-x'])
     expect(m.events).toHaveLength(s.events.length + 1)
   })
+
+  it('writes every file with a local session that has no lists (#205)', () => {
+    const s = derive(board([comment(1, '2026-11-12T10:00:00Z', status('cloud-x', 'role: builder\nstate: working\nwhere: claude/x, PR #7'))]))
+    // The local roster names a session and when it was seen; it carries no PR or claim lists.
+    const m = mergeLocal(s, { sessions: [{ id: 'local-x', name: 'local-x', kind: 'local', surface: 'local', status: 'working', last_seen: '2026-11-12T11:30:00Z' }, { id: 'cloud-x', name: 'cloud-x', last_seen: '2026-11-12T11:45:00Z' }] })
+    const files = outputs(m)
+    expect(files['board.md']).toMatch(/^\| `local-x` \(local\) \|.*\| — \|/m)
+    // A local row for a session GitHub already knows keeps the lists GitHub gave it.
+    expect(m.sessions.find((x: Json) => x.id === 'cloud-x').prs).toEqual(s.sessions.find((x: Json) => x.id === 'cloud-x').prs)
+    expect(m.sessions.find((x: Json) => x.id === 'cloud-x').prs).toContain(7)
+  })
 })
 
 describe('what the owner reads', () => {
