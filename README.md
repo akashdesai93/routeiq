@@ -1316,14 +1316,20 @@ that is over says so.
   **Take it** (the screen's one filled button) switches at once, exactly like a switch the
   engine makes (the spoken line with the distance from where the car is now, the confirmed
   banner, the cooldown, "Keep my route" to undo); **Keep my route** turns it down. A check
-  that is out when Take it is pressed is cancelled: it was about the route being left.
+  that is out when Take it is pressed is cancelled: it was about the route being left. The
+  tap stands in for the second confirming check, never for the cooldown: within
+  `cooldownSec` (5 minutes) of a switch, and with no fix for longer than `maxFixAgeSec`
+  (10 s, so the distance it would say is not known), Take it is not shown and a tap does
+  nothing (`canTakeOffer`).
 - **Withdrawn** (#197): the offer ended without a switch. Its turn-off came nearer than
   the lead the reroute rules ask for (`requiredLead`: `minLeadDistanceM` 400 m, or
   `minLeadTimeSec` 20 s of driving, or `freewayLeadDistanceM` 1200 m on a freeway). That is
   judged on every fix, not at the next check, so the offer never stays on screen past the
   point where it can still be taken safely; or a check no longer finds it faster. A calm
-  outline for `switchBannerSec` (8 s): "Too late for that turn. Staying on your route." or
-  "No longer faster. Staying on your route." On screen only: nothing is said, as nothing
+  outline for `switchBannerSec` (8 s): "Too late for that turn. Staying on your route.",
+  "No longer faster. Staying on your route." (a check compared and it lost), or "Can't
+  confirm that route now. Staying on your route." (a check could not compare: unknown is
+  never "not faster"). On screen only: nothing is said, as nothing
   changed. After a withdrawal for "too late" the engine's confirmation starts over, so a
   route the screen has let go of is never switched to unannounced; it can only come back
   as a new pending offer. This is what happened on the owner's evening drive (#197): a

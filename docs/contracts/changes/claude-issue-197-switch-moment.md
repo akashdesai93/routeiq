@@ -4,20 +4,24 @@
   `RouteCandidate`, as the check gave it), `turnAlongM` (its turn-off, meters along the route
   being driven), `step` (its `GuidanceStep` at the turn-off, the step nearest it within
   `heldTurnMatchM`; null when none) and `onFreeway` (from `RerouteAlternative.onFreeway`).
-- `LiveState` gains `withdrawn: { untilMs, tooLate } | null`: the calm banner after an offer
-  ended without a switch, shown for `switchBannerSec`. Never spoken.
+- `LiveState` gains `withdrawn: { untilMs, reason } | null`: the calm banner after an offer
+  ended without a switch, shown for `switchBannerSec`. Never spoken. `WithdrawnReason` is
+  'too-late', 'not-faster' (the check compared: current-best, no-alternative, the saving rules,
+  recently-abandoned, driver-declined) or 'unconfirmed' (any other code: it could not compare).
 - `LiveEvent` gains `{ type: 'take-offer', nowMs }` ("Take it"): switches at once to
   `offer.route`, exactly like the engine's switch (spoken `switchLine` with the live distance
   to the turn-off, banner, undo), with the engine state from `takeRoute`. A check that is out
-  is cancelled. Ignored with no offer, off the route, or while a switch banner shows.
+  is cancelled and the probe being confirmed dropped. Ignored unless `canTakeOffer` (new, pure):
+  an offer, on the route, a fix no older than `maxFixAgeSec`, no switch banner, and no switch
+  within the engine's `cooldownSec`. The tap passes the confirmation polls, never the cooldown.
   `lastDecision.code` gains `'taken-offer'`.
 - `SwitchMoment` 'pending' gains `turn: { arrow, distanceM, primaryText }` (arrow and text null
   when `step` is null) and `canTake: true`; a new stage `'withdrawn'` (`title`:
-  `WITHDRAWN_TITLE.tooLate` or `.notFaster`, `canKeep: false`).
+  `WITHDRAWN_TITLE[reason]`, `canKeep: false`). `canTake` is `canTakeOffer` at that moment.
 - Rules the port must keep: on every on-route fix, an offer whose turn-off is nearer than
   `requiredLead(speed, onFreeway)` ends at once (offer and turn cleared, `engine.pending`
-  cleared, `withdrawn.tooLate`); a check that does not renew an offer ends it
-  (`withdrawn.tooLate` only for code 'too-late').
+  cleared, `probes.keep` cleared, reason 'too-late'); a check that does not renew an offer
+  ends it with the reason of its code.
 - Reroute: new pure `requiredLead(speedMps, onFreeway, options)` (the lead `measure` already
   used) and `takeRoute(state, leftAhead, nowSec)` (the state after a switch; `decideReroute`'s
   own switches now use the same function). No threshold changed.

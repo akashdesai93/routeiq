@@ -289,10 +289,12 @@ export interface LiveState {
   } | null
   /**
    * Shown for a few seconds after an offer ended without a switch (#197): the calm banner of
-   * the withdrawn stage. `tooLate`: its turn-off came too close to take; otherwise a check
+   * the withdrawn stage. `reason`: 'too-late', its turn-off came too close to take;
+   * 'not-faster', a check compared and found it no longer worth a switch; 'unconfirmed', a
+   * check could not compare it (unknown is never "not faster"). The rest of the old text:
    * found it no longer faster.
    */
-  readonly withdrawn: { readonly untilMs: number; readonly tooLate: boolean } | null
+  readonly withdrawn: { readonly untilMs: number; readonly reason: WithdrawnReason } | null
   /** Shown for a few seconds after "Keep my route": the calm banner of the declined stage (#43). */
   readonly kept: { readonly untilMs: number; readonly noReturnSec: number } | null
   /** Where the routes the driver turned down on this drive turn off: a new offer that turns off there is "still faster". */
@@ -692,7 +694,9 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
         turn: null,
         // The confirmation starts over: a route offered again is offered as new, never switched to unannounced.
         engine: { ...next.engine, pending: null },
-        withdrawn: { untilMs: nowMs + opts.switchBannerSec * 1000, tooLate: true },
+        // ...and with it the side-street probe being confirmed, as after "Keep my route".
+        probes: { ...next.probes, keep: null },
+        withdrawn: { untilMs: nowMs + opts.switchBannerSec * 1000, reason: 'too-late' },
       }
     }
     const due = dueAnnouncement(route.guidance, next.guidance, tracking.alongRouteM)
@@ -892,7 +896,10 @@ function checked(
     // An offer on screen that this check did not renew is over: the driver is told, calmly (#197).
     const withdrawn =
       offer === null && state.offer !== null
-        ? { untilMs: nowMs + opts.switchBannerSec * 1000, tooLate: decision.code === 'too-late' }
+        ? {
+            untilMs: nowMs + opts.switchBannerSec * 1000,
+            reason: (decision.code === 'too-late' ? 'too-late' : NOT_FASTER.has(decision.code) ? 'not-faster' : 'unconfirmed') as WithdrawnReason,
+          }
         : offer !== null
           ? null
           : next.withdrawn
@@ -1160,8 +1167,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
     }
     case 'take-offer': {
       const { offer, route, tracking } = state
-      if (state.status !== 'driving' || offer === null || route === null || tracking === null || tracking.offRoute) return { state, effects: [] }
-      if (state.switchBanner !== null) return { state, effects: [] }
+      if (!canTakeOffer(state, event.nowMs, opts) || offer === null || route === null || tracking === null) return { state, effects: [] }
       const nowSec = (event.nowMs - (state.startedAtMs ?? event.nowMs)) / 1000
       const turnInM = Math.max(0, offer.turnAlongM - tracking.alongRouteM)
       const saves = offer.savingSec === null ? '' : `, saves ${spokenDuration(offer.savingSec)}`
@@ -1171,6 +1177,8 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           ...state,
           // The check that is out was asked about the route being left; its answer will never come.
           request: null,
+          // The side-street probe being confirmed was the offer itself, or one beside the route left.
+          probes: { ...state.probes, keep: null },
           lastDecision: { action: 'switch', code: 'taken-offer', reason, atMs: event.nowMs, routes: null, savingSec: offer.savingSec },
         },
         state,
@@ -1265,8 +1273,8 @@ export type SwitchMoment =
         readonly distanceM: number
         readonly primaryText: string | null
       }
-      /** "Take it" switches at once; "Keep my route" turns it down. */
-      readonly canTake: true
+      /** "Take it" switches at once (canTakeOffer: false in the cooldown or with a stale fix); "Keep my route" turns it down. */
+      readonly canTake: boolean
       readonly canKeep: true
     }
   | {
@@ -1292,11 +1300,42 @@ export type SwitchMoment =
       readonly canKeep: false
     }
 
+/** Why an offer ended without a switch (#197). */
+export type WithdrawnReason = 'too-late' | 'not-faster' | 'unconfirmed'
+
 /** The withdrawn banner's title (#197): on screen only, nothing was switched. */
-export const WITHDRAWN_TITLE = {
-  tooLate: 'Too late for that turn. Staying on your route.',
-  notFaster: 'No longer faster. Staying on your route.',
-} as const
+export const WITHDRAWN_TITLE: Readonly<Record<WithdrawnReason, string>> = {
+  'too-late': 'Too late for that turn. Staying on your route.',
+  'not-faster': 'No longer faster. Staying on your route.',
+  unconfirmed: "Can't confirm that route now. Staying on your route.",
+}
+
+/** The checks that compared the offer and found it no longer worth a switch; any other code could not tell. */
+const NOT_FASTER: ReadonlySet<RerouteCode> = new Set([
+  'current-best',
+  'no-alternative',
+  'saving-too-small',
+  'saving-share-too-small',
+  'recently-abandoned',
+  'driver-declined',
+])
+
+/**
+ * Whether "Take it" may switch now (#197): an offer on screen, the car on the route with a
+ * fresh fix (no older than maxFixAgeSec, so the distance it says is true), no switch banner
+ * up, and no switch within the engine's cooldown. A driver's tap passes the confirmation
+ * polls, never the cooldown: that rule against flapping holds for every switch.
+ */
+export function canTakeOffer(state: LiveState, nowMs: number, options: Partial<LiveOptions> = {}): boolean {
+  const opts = resolve(options)
+  const { offer, tracking } = state
+  if (state.status !== 'driving' || offer === null || state.route === null || tracking === null || tracking.offRoute) return false
+  if (state.switchBanner !== null) return false
+  if ((nowMs - tracking.fix.timeMs) / 1000 > opts.maxFixAgeSec) return false
+  const last = state.engine.lastSwitchAtSec
+  const nowSec = (nowMs - (state.startedAtMs ?? nowMs)) / 1000
+  return last === null || nowSec - last >= rerouteOptions(opts).cooldownSec
+}
 
 /** The pending banner's title (#44, #43). */
 export const OFFER_TITLE = { first: 'Checking a faster route', again: 'Still faster. Checking again.' } as const
@@ -1314,7 +1353,7 @@ export function cardDistance(spoken: string): string {
   return spoken.replace(/ miles?$/, ' mi').replace(/ feet$/, ' ft')
 }
 
-function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null {
+function switchMoment(state: LiveState, offRoute: boolean, nowMs: number, opts: LiveOptions): SwitchMoment | null {
   if (state.status !== 'driving') return null
   const banner = state.switchBanner
   if (banner !== null) {
@@ -1340,12 +1379,12 @@ function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null 
         distanceM: Math.max(0, offer.turnAlongM - (state.tracking?.alongRouteM ?? 0)),
         primaryText: step === null ? null : step.primaryText,
       },
-      canTake: true,
+      canTake: canTakeOffer(state, nowMs, opts),
       canKeep: true,
     }
   }
   if (state.withdrawn !== null) {
-    return { stage: 'withdrawn', title: state.withdrawn.tooLate ? WITHDRAWN_TITLE.tooLate : WITHDRAWN_TITLE.notFaster, canKeep: false }
+    return { stage: 'withdrawn', title: WITHDRAWN_TITLE[state.withdrawn.reason], canKeep: false }
   }
   if (state.kept !== null) {
     return {
@@ -1399,7 +1438,7 @@ export function liveView(state: LiveState, nowMs: number, options: Partial<LiveO
   return {
     status: state.status,
     nextTurn: turn,
-    moment: switchMoment(state, offRoute),
+    moment: switchMoment(state, offRoute, nowMs, opts),
     heldTurnText,
     remainingM,
     remainingSec,

@@ -141,6 +141,8 @@ export {
   liveView,
   OFFER_TITLE,
   WITHDRAWN_TITLE,
+  canTakeOffer,
+  type WithdrawnReason,
   POSITION_ERROR_MESSAGES,
   REQUEST_TIMED_OUT,
   SPOKEN,

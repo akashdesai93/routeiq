@@ -542,7 +542,7 @@ export function LiveDriveView({
           )}
           {moment !== null && moment.canKeep && (
             <div className="live-moment-actions">
-              {moment.stage === 'pending' && (
+              {moment.stage === 'pending' && moment.canTake && (
                 <button type="button" className="live-button live-primary live-take" onClick={onTakeOffer}>
                   Take it
                 </button>
