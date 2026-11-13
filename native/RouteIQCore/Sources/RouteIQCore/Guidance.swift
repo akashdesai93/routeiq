@@ -148,6 +148,31 @@ public enum Guidance {
         )
     }
 
+    /// After a new route found off the route, the next maneuver is announced at once, unless it,
+    /// or its next announcement still ahead of the car, is within this many meters.
+    public static let nextTurnSoonM = 300.0
+
+    /// What to say about the way ahead right after the route changed under the car (#183): the
+    /// next maneuver's own last announcement with the distance to it in front ("In 2.1 miles,
+    /// turn left onto Cross Street."). Nil when its next announcement still ahead is due within
+    /// `soonM`, when it is the arrival, or when nothing is left.
+    public static func nextManeuverLine(_ guidance: [GuidanceStep]?, _ alongM: Double, soonM: Double = nextTurnSoonM) -> DueAnnouncement? {
+        guard alongM.isFinite else { return nil }
+        guard let step = (guidance ?? []).first(where: { $0.type != "depart" && $0.atDistanceM >= alongM - maneuverPassedM }),
+              step.type != "arrive" else { return nil }
+        let lines = step.announcements.filter { $0.atDistanceM.isFinite && JS.trim($0.text) != "" }
+        guard let lastLine = lines.last else { return nil }
+        let last = JS.trim(lastLine.text)
+        // Only the bare instruction takes a distance in front.
+        if last.hasPrefix("In ") || last == "In" || last.contains("Then,") { return nil }
+        // A maneuver this near (or just behind) is said by its own prompt, or is already done.
+        let distanceToManeuverM = step.atDistanceM - alongM
+        if !(distanceToManeuverM > soonM) { return nil }
+        let ahead = lines.map(\.atDistanceM).filter { $0 > alongM }
+        if let nextDueM = ahead.min(), nextDueM - alongM <= soonM { return nil }
+        return DueAnnouncement(text: "In \(Reroute.spokenDistance(distanceToManeuverM)), \(lowerFirst(last))", distanceToManeuverM: distanceToManeuverM)
+    }
+
     /// How far before a maneuver the first made-up announcement comes, at most, in meters (half a mile).
     public static let synthFarM = 800.0
     /// How far before a maneuver the last made-up announcement comes, in meters.

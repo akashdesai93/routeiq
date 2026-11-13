@@ -304,6 +304,16 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       out of checks without any probe (a cost decision for the owner); back-off after
       probes that keep losing, and the reason a probe was skipped in the diagnostics,
       follow in their own PR.
+      Live drive after a reroute (#183, item 5): a new route whose line names no turn
+      now goes on to the next maneuver in the same line (`nextManeuverLine`), so a long
+      freeway stretch after a new route is not silent until half a mile before its exit.
+      e2e: "after a wrong turn and a new route, it tells me the next turn straight away".
+      Ported to Swift (`Guidance.nextManeuverLine`); no contract shape changed. Open for
+      later: a Swift twin of the live test for the new-route line; a second new route in one
+      excursion is still taken without a word, so its next turn is not said either; the
+      banner with a long exit line ("take exit 4B toward ...") wraps to several lines, to be
+      seen on the phone; the guidance constants (`SYNTH_FAR_M`, `NEXT_TURN_SOON_M`, ...) could
+      move into one `DEFAULT_GUIDANCE_OPTIONS`.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.
