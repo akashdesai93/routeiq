@@ -155,6 +155,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    the owner's evening drive was an offer that won one check and was too late by the next.
    Open for later: whether the pending stage should also be spoken (today only the switch
    is); the Swift port of `take-offer` and `withdrawn` (docs/contracts/changes).
+   More map, more air (Nov 13, 2026, #197 part 2): the trip screen's map is half the
+   screen, the drive view's turn card and sheet are shorter, every gap between controls is
+   8 px or more. Guarded by a minimum map share and tap gap in `e2e/design.spec.ts`.
+   Open for later: a real pull-up sheet on the trip screen (today the page scrolls); the
+   black band under the drive sheet in the iPhone shell (the page is 860 of 922 points;
+   `contentInset: "never"` alone did not change it on the phone, #136).
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,
