@@ -86,10 +86,22 @@ export function labWindowFrom(comments) {
  * The lab window from #17, read with `gh` (a function from an API path to parsed JSON), as
  * { window } or { error }. A failed read refuses: no answer is not a yes.
  */
+/** How many pages of #17's comments of the last day are read for the window, at most. */
+export const LAB_WINDOW_MAX_PAGES = 10
+
 export function readLabWindow(gh, repo, now) {
   const since = new Date(new Date(now).getTime() - 24 * 3600e3).toISOString()
   try {
-    return { window: labWindowFrom(gh(`repos/${repo}/issues/17/comments?since=${since}&per_page=100`)) }
+    // The board gets more than 100 comments a day (statuses, the heartbeat's edits), and the API
+    // gives them oldest first: the window is usually on a later page. Read every page.
+    const comments = []
+    for (let page = 1; page <= LAB_WINDOW_MAX_PAGES; page++) {
+      const batch = gh(`repos/${repo}/issues/17/comments?since=${since}&per_page=100&page=${page}`)
+      if (!Array.isArray(batch)) throw new Error('unexpected answer')
+      comments.push(...batch)
+      if (batch.length < 100) return { window: labWindowFrom(comments) }
+    }
+    return { error: `Could not read the lab window on #17 (more than ${LAB_WINDOW_MAX_PAGES * 100} comments in a day): not starting.` }
   } catch (e) {
     return { error: `Could not read the lab window on #17 (${String(e.message || e).split('\n')[0]}): not starting.` }
   }

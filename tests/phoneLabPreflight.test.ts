@@ -98,6 +98,23 @@ describe('the queue checks the window itself: a lab agent that skips the preflig
   it('starts inside an open window', () => {
     expect(labStartProblem(board([{ created_at: '2026-11-12T01:00:00Z', body: 'lab-window: until 06:30 UTC' }]), 'o/r', now)).toBeNull()
   })
+  it('finds the window on a later page: the board has more than 100 comments a day', () => {
+    // What happened on 2026-11-13: 100 older comments came first, the window was the 191st.
+    const noise = Array.from({ length: 100 }, (_, i) => ({ created_at: `2026-11-12T00:${String(i % 60).padStart(2, '0')}:00Z`, body: 'status: someone' }))
+    const asked: string[] = []
+    const paged = (apiPath: string) => {
+      asked.push(apiPath)
+      const page = Number(/[?&]page=(\d+)/.exec(apiPath)?.[1] ?? 1)
+      return page === 1 ? noise : page === 2 ? [{ created_at: '2026-11-12T01:00:00Z', body: 'lab-window: until 06:30 UTC · voice ok' }] : []
+    }
+    expect(readLabWindow(paged, 'o/r', now.toISOString())).toEqual({ window: { opened_at: '2026-11-12T01:00:00Z', until: '2026-11-12T06:30:00.000Z', voice_ok: true } })
+    expect(asked).toHaveLength(2)
+    expect(labStartProblem(paged, 'o/r', now)).toBeNull()
+  })
+  it('refuses when the board never ends: it does not read forever, and does not guess', () => {
+    const endless = () => Array.from({ length: 100 }, () => ({ created_at: '2026-11-12T00:00:00Z', body: 'status: someone' }))
+    expect(readLabWindow(endless, 'o/r', now.toISOString())).toEqual({ error: expect.stringMatching(/Could not read the lab window/) })
+  })
   it('refuses when #17 cannot be read: no answer is not a yes', () => {
     const down = () => {
       throw new Error('gh: HTTP 502')
