@@ -102,6 +102,11 @@ export interface DriveOptions {
    * stays on the road they are on.
    */
   keepMyRoute?: 'pending' | 'confirmed'
+  /**
+   * The driver presses "Take it" the first time a faster route is offered (the pending stage),
+   * and then follows the app onto it like after any switch.
+   */
+  takeIt?: boolean
 }
 
 export interface DriveLog {
@@ -286,7 +291,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [], onMoment, keepMyRoute } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [], onMoment, keepMyRoute, takeIt = false } = options
     await pauseSoon(page, this.slowMomentAtStartMs)
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
@@ -304,6 +309,7 @@ export class App {
     let lastBanner = ''
     let lastMoment = ''
     let kept = false
+    let took = false
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
       if (hideAtSec !== undefined && sec >= hideAtSec && sec < hideAtSec + STEP_SEC) {
@@ -362,6 +368,13 @@ export class App {
         await page.getByRole('button', { name: 'Keep my route' }).click()
         kept = true
         keptNow = true
+      }
+      if (!took && takeIt && state.moment.stage === 'pending') {
+        await page.clock.runFor(20)
+        await this.snap(`minute ${Math.floor(sec / 60)}: ${state.moment.text}, before Take it`)
+        await page.getByRole('button', { name: 'Take it' }).click()
+        took = true
+        // The switch it makes shows on the next look, and the driver follows it from there.
       }
       if (state.banner !== '' && state.banner !== lastBanner) {
         log.banners.push({ atSec: sec, text: state.banner })

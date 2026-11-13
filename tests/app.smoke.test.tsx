@@ -318,6 +318,7 @@ describe('Start drive and the live drive view', () => {
         view={liveView(state, nowMs)}
         destinationLabel="Charlotte Douglas International Airport"
         onKeepPrevious={nothing}
+        onTakeOffer={nothing}
         onMute={nothing}
         onEnd={nothing}
         onRestart={nothing}
