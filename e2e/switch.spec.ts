@@ -1,5 +1,5 @@
 import { expect, test, type App } from './harness.ts'
-import { JAM_ON_A_FROM_SECOND_CHECK, JAM_ONLY_THE_EAST_LOOP_MISSES } from './world/traffic.ts'
+import { JAM_ON_A_FROM_SECOND_CHECK, JAM_ONLY_THE_EAST_LOOP_MISSES, JAM_ONLY_THE_EAST_LOOP_MISSES_LATE, LATE_OFFER_SPEED_MPS } from './world/traffic.ts'
 
 // The switch moment on the driving screen (#84; design #22, #43, #44): a
 // faster route is first checked (pending: an amber outline, what it would
@@ -12,6 +12,8 @@ import { JAM_ON_A_FROM_SECOND_CHECK, JAM_ONLY_THE_EAST_LOOP_MISSES } from './wor
 // loop round it win that check (pending) and the next (confirmed).
 
 const KEEPING = 'Staying on your route.'
+const OFF_ROUTE = 'You are off the route. Finding a new one.'
+const SWITCH_LINE = /^Switching to a faster route\. Saves [\d.]+ minutes\. Turn in [\d.]+ (miles?|feet)\.$/
 
 test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
 
@@ -206,4 +208,86 @@ test('ten minutes after I kept my route, a route that is still faster is offered
   expect(again!.atSec - first.atSec).toBeGreaterThanOrEqual(600)
   // Nothing was switched in between.
   expect(log.banners.filter((b) => b.atSec < again!.atSec)).toEqual([])
+})
+
+// #197: on the evening drive a faster route was offered (the pending stage) but the
+// directions stayed on the old route. Reproduced here: the East Loop wins one check with its
+// turn-off about a mile ahead, and by the next check that turn-off is too close to take, so
+// the checks alone never confirm it. What the driver gets at each stage: the new route's turn
+// and a way to take it at once, a way to keep the old one, and a word when the offer is over.
+
+test('when a faster route is offered, it shows its turn, and Take it switches at once and guides me onto it', async ({ app, page }) => {
+  await startJammedDrive(app, JAM_ONLY_THE_EAST_LOOP_MISSES_LATE)
+  const sheet = page.getByLabel('Live drive')
+  const news = sheet.locator('.live-news')
+  const card = page.getByLabel('Next turn')
+  const take = page.getByRole('button', { name: 'Take it' })
+  const keep = page.getByRole('button', { name: 'Keep my route' })
+
+  const log = await app.drive({
+    speedMps: LATE_OFFER_SPEED_MPS,
+    takeIt: true,
+    onMoment: async ({ stage }) => {
+      if (stage === 'pending') {
+        await expect(news.locator('.live-news-detail')).toHaveText(/^Would save \d+ min · /)
+        // How to take it: the faster route's turn-off, with its arrow, its distance and its road,
+        // while the turn card still shows the route being driven.
+        await expect(sheet.getByLabel('Turn for the faster route')).toHaveText(/^[\d.]+ (mi|ft)Turn left: East Loop$/)
+        await expect(card).not.toContainText('East Loop')
+        // Both answers are one tap, large, and apart.
+        const [t, k] = [(await take.boundingBox())!, (await keep.boundingBox())!]
+        expect(t.height).toBeGreaterThanOrEqual(44)
+        expect(k.height).toBeGreaterThanOrEqual(44)
+        expect(k.x - (t.x + t.width)).toBeGreaterThanOrEqual(8)
+        await app.snap('pending: the faster route turns left onto East Loop, Take it or Keep my route')
+      }
+      if (stage === 'confirmed') {
+        // Guidance moved with it: the next turn is the East Loop.
+        await expect(card).toContainText('East Loop')
+        await expect(keep).toBeVisible()
+        await app.snap('taken: switched at once, the turn card shows East Loop')
+      }
+    },
+  })
+
+  expect(log.arrived).toBe(true)
+  const stages = log.moments.map((m) => m.stage)
+  expect(stages.slice(0, 2)).toEqual(['pending', 'confirmed'])
+  // At once: the switch came with the tap, not with a later check.
+  expect(log.moments[1]!.atSec - log.moments[0]!.atSec).toBeLessThan(10)
+  const spoken = await app.spoken()
+  const switches = spoken.filter((l) => l.startsWith('Switching'))
+  expect(switches).toHaveLength(1)
+  expect(switches[0]).toMatch(SWITCH_LINE)
+  // The turns said after it are the East Loop's, and the driver never left the route.
+  expect(spoken.slice(spoken.indexOf(switches[0]!) + 1).some((l) => l.includes('East Loop'))).toBe(true)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  await expect(page.getByLabel('Drive summary')).toContainText('RouteIQ changed route once')
+})
+
+test('when an offered route turns off too close to be confirmed, the offer ends before the turn and I stay on my route', async ({ app, page }) => {
+  await startJammedDrive(app, JAM_ONLY_THE_EAST_LOOP_MISSES_LATE)
+  const news = page.getByLabel('Live drive').locator('.live-news')
+  const card = page.getByLabel('Next turn')
+
+  const log = await app.drive({
+    speedMps: LATE_OFFER_SPEED_MPS,
+    onMoment: async ({ stage }) => {
+      if (stage !== 'withdrawn') return
+      // Calm, not amber news: the offer is over, and nothing is left to tap.
+      await expect(news.locator('strong')).toHaveText('Too late for that turn. Staying on your route.')
+      await expect(page.getByRole('button', { name: 'Take it' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Keep my route' })).toHaveCount(0)
+      await expect(card).not.toContainText('East Loop')
+      await app.snap('withdrawn: too late for that turn, staying on my route')
+    },
+  })
+
+  expect(log.arrived).toBe(true)
+  expect(log.moments.map((m) => m.stage)).toEqual(['pending', 'withdrawn'])
+  // It ended while the turn-off was still ahead: before the check that finds it too late.
+  const tooLate = log.statusLines.find((l) => /too late to take safely/.test(l.text))
+  expect(tooLate, 'the next check finds the turn-off too close').toBeDefined()
+  expect(log.moments[1]!.atSec).toBeLessThan(tooLate!.atSec)
+  expect((await app.spoken()).filter((l) => l.startsWith('Switching'))).toEqual([])
 })

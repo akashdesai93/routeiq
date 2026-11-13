@@ -75,3 +75,18 @@ export const JAM_ONLY_THE_EAST_LOOP_MISSES: Traffic = (route, at, n) => {
   const onJammedStretch = Math.abs(at.side - 300) < 50 && at.f > 0.42 && at.f < 0.56
   return FREE_FLOW(route, at, n) * (n >= 3 && onJammedStretch ? 5 : 1)
 }
+
+/**
+ * The jam of JAM_ONLY_THE_EAST_LOOP_MISSES (only the East Loop goes round it), but only from
+ * request 7 on, the drive's sixth check (about six minutes in). At 24 m/s that check is the
+ * first to see the East Loop win, with its turn-off about a mile ahead; by the next check, a
+ * minute on, the turn-off is too close to take safely. So the faster route is offered once and
+ * never confirmed by the checks alone: the evening drive of #197.
+ */
+export const JAM_ONLY_THE_EAST_LOOP_MISSES_LATE: Traffic = (route, at, n) => {
+  const onJammedStretch = Math.abs(at.side - 300) < 50 && at.f > 0.42 && at.f < 0.56
+  return FREE_FLOW(route, at, n) * (n >= 7 && onJammedStretch ? 5 : 1)
+}
+
+/** The speed at which JAM_ONLY_THE_EAST_LOOP_MISSES_LATE's offer is seen once and then too late, m/s. */
+export const LATE_OFFER_SPEED_MPS = 24

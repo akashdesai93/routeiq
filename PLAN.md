@@ -147,6 +147,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    line is now kept until spoken, with the new route said straight after it. Which
    carriageway the car is on is not known. The first route is the best-ranked one
    from the device's position, not the one picked in the list.
+   Switch moment, done (Nov 13, 2026, #197 part 1): a faster route offered but not yet
+   confirmed shows its own turn-off (arrow, distance, road) with **Take it** beside
+   **Keep my route**; Take it switches at once like an engine switch. An offer whose
+   turn-off comes nearer than the lead is withdrawn on that fix, with a calm "Too late for
+   that turn" banner, and the confirmation starts over. Reproduced first in the e2e world:
+   the owner's evening drive was an offer that won one check and was too late by the next.
+   Open for later: whether the pending stage should also be spoken (today only the switch
+   is); the Swift port of `take-offer` and `withdrawn` (docs/contracts/changes).
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,

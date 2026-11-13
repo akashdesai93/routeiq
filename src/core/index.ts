@@ -100,6 +100,8 @@ export {
 export {
   decideReroute,
   declineRoute,
+  requiredLead,
+  takeRoute,
   DEFAULT_REROUTE_OPTIONS,
   baselineProbe,
   findCurrentRoute,
@@ -138,6 +140,7 @@ export {
   liveStep,
   liveView,
   OFFER_TITLE,
+  WITHDRAWN_TITLE,
   POSITION_ERROR_MESSAGES,
   REQUEST_TIMED_OUT,
   SPOKEN,

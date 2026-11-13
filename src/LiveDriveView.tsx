@@ -34,6 +34,8 @@ interface LiveDriveViewProps {
   initiallyOpen?: boolean
   /** "Keep my route": turns down the switch, pending or made. */
   onKeepPrevious: () => void
+  /** "Take it": switches at once to the faster route on offer (#197). */
+  onTakeOffer: () => void
   onMute: (muted: boolean) => void
   onEnd: () => void
   /** "Try again" after a failure. */
@@ -53,6 +55,12 @@ const ARROW_LABEL: Readonly<Record<ArrowKind, string>> = {
   roundabout: 'Roundabout',
   depart: 'Head out',
   arrive: 'Arrive',
+}
+
+/** The offered route's turn in words (#197): "Turn left: East Loop", "Turn left", or "Turn-off" when nothing is known. */
+function offerTurnLine(arrow: ArrowKind | null, road: string | null): string {
+  if (arrow === null) return road ?? 'Turn-off'
+  return road === null ? ARROW_LABEL[arrow] : `${ARROW_LABEL[arrow]}: ${road}`
 }
 
 /** Arrow shapes drawn for a left-hand maneuver; the right-hand ones are the same, mirrored. */
@@ -176,16 +184,42 @@ interface NewsProps {
  * The banner of the switch moment (#84, design #22, #43, #44): an amber
  * outline while a faster route is being confirmed, filled amber once the
  * switch is made (its words are the spoken line), and a calm outline after
- * "Keep my route". Amber means news and nothing else.
+ * "Keep my route" or when an offer ends (#197). Amber means news and nothing else.
  */
 const News = memo(function News({ stage, title, detail }: NewsProps) {
   return (
     <div className="live-news" data-stage={stage} role="status">
-      {stage === 'pending' ? <span className="live-news-ring" aria-hidden="true" /> : <SpeakerIcon />}
+      {/* The speaker marks a banner that was said out loud; the withdrawn one is on screen only. */}
+      {stage === 'pending' ? <span className="live-news-ring" aria-hidden="true" /> : stage === 'withdrawn' ? null : <SpeakerIcon />}
       <div className="live-news-text">
         <strong>{title}</strong>
         {detail !== null && <span className="live-news-detail">{detail}</span>}
       </div>
+    </div>
+  )
+})
+
+interface OfferTurnProps {
+  /** Null: the offered route's guidance has no maneuver there; no arrow is drawn. */
+  arrow: ArrowKind | null
+  distance: string
+  /** "Turn left: East Loop"; just the verb when it names no road there; "Turn-off" when nothing is known. */
+  line: string
+}
+
+/**
+ * How to take the faster route on offer (#197): its turn-off, as the turn card shows a turn
+ * (arrow, distance, road), smaller, inside the pending banner's block. Words only, so a fix
+ * that moves the car less than the rounding does not render it again.
+ */
+const OfferTurn = memo(function OfferTurn({ arrow, distance, line }: OfferTurnProps) {
+  return (
+    <div className="live-offer-turn" aria-label="Turn for the faster route">
+      {arrow !== null && <TurnArrow kind={arrow} />}
+      <span className="live-offer-distance">
+        <Figure text={distance} unitClass="live-unit" />
+      </span>
+      <span className="live-offer-road">{line}</span>
     </div>
   )
 })
@@ -362,6 +396,7 @@ export function LiveDriveView({
   extra = null,
   initiallyOpen = false,
   onKeepPrevious,
+  onTakeOffer,
   onMute,
   onEnd,
   onRestart,
@@ -478,7 +513,18 @@ export function LiveDriveView({
         {/* The switch just made is one block: its banner, its figures and the way to undo it. */}
         <div className={moment?.stage === 'confirmed' ? 'live-moment live-banner' : 'live-moment'}>
           {moment !== null && (
-            <News stage={moment.stage} title={moment.title} detail={moment.stage === 'confirmed' ? null : moment.detail} />
+            <News
+              stage={moment.stage}
+              title={moment.title}
+              detail={moment.stage === 'pending' || moment.stage === 'kept' ? moment.detail : null}
+            />
+          )}
+          {moment?.stage === 'pending' && (
+            <OfferTurn
+              arrow={moment.turn.arrow}
+              distance={formatDistance(moment.turn.distanceM)}
+              line={offerTurnLine(moment.turn.arrow, moment.turn.primaryText)}
+            />
           )}
           {moment?.stage === 'confirmed' ? (
             <SwitchEta
@@ -495,9 +541,16 @@ export function LiveDriveView({
             />
           )}
           {moment !== null && moment.canKeep && (
-            <button type="button" className="live-button live-keep" onClick={onKeepPrevious}>
-              Keep my route
-            </button>
+            <div className="live-moment-actions">
+              {moment.stage === 'pending' && (
+                <button type="button" className="live-button live-primary live-take" onClick={onTakeOffer}>
+                  Take it
+                </button>
+              )}
+              <button type="button" className="live-button live-keep" onClick={onKeepPrevious}>
+                Keep my route
+              </button>
+            </div>
           )}
         </div>
         {/* With More closed the engine's latest word is still there to be read out, just not drawn.

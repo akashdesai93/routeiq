@@ -1301,13 +1301,34 @@ style reload under a drive. While following the car, the base map's points of in
 transit and traffic layers are off (traffic's orange sits next to amber); they come back on
 the trip screen. Same Mapbox style service as before, with the same token: no new network
 call.
-**The switch moment** (#84; design #22, #43, #44) has three stages in the sheet, each a
-banner over the time line. Amber appears only here, and only for news.
+**The switch moment** (#84; design #22, #43, #44, #197) has four stages in the sheet, each a
+banner over the time line. Amber appears only here, and only for news. The rule behind all
+four (#197): if the app says a route is better, it also says how to take it, and an offer
+that is over says so.
 - **Pending**: the engine is confirming a faster route (`confirming`, or held by its
   cooldown). An amber outline with a hollow ring: "Checking a faster route", and under it
   "Would save 8 min · 2 fewer lights". The lights are compared only when both counts are
-  full; otherwise "lights: can't compare", never a number. Nothing has changed yet and
-  nothing is said. "Keep my route" is offered already.
+  full; otherwise "lights: can't compare", never a number. Under the banner, the offered
+  route's turn-off as the turn card shows a turn, smaller: its arrow, the distance to it
+  (counting down with the car) and its road ("1.1 mi · Turn left: East Loop"), so the
+  driver can see where it goes while the turn card still shows the route being driven.
+  Nothing has changed yet and nothing is said. Two answers, side by side, 60 px tall:
+  **Take it** (the screen's one filled button) switches at once, exactly like a switch the
+  engine makes (the spoken line with the distance from where the car is now, the confirmed
+  banner, the cooldown, "Keep my route" to undo); **Keep my route** turns it down. A check
+  that is out when Take it is pressed is cancelled: it was about the route being left.
+- **Withdrawn** (#197): the offer ended without a switch. Its turn-off came nearer than
+  the lead the reroute rules ask for (`requiredLead`: `minLeadDistanceM` 400 m, or
+  `minLeadTimeSec` 20 s of driving, or `freewayLeadDistanceM` 1200 m on a freeway). That is
+  judged on every fix, not at the next check, so the offer never stays on screen past the
+  point where it can still be taken safely; or a check no longer finds it faster. A calm
+  outline for `switchBannerSec` (8 s): "Too late for that turn. Staying on your route." or
+  "No longer faster. Staying on your route." On screen only: nothing is said, as nothing
+  changed. After a withdrawal for "too late" the engine's confirmation starts over, so a
+  route the screen has let go of is never switched to unannounced; it can only come back
+  as a new pending offer. This is what happened on the owner's evening drive (#197): a
+  faster route won one check with its turn-off about a mile ahead, the next check found it
+  too close, and the banner had shown "Would save" with no directions and no way to take it.
 - **Confirmed**: the switch is made. Filled amber, and the words are the spoken line,
   word for word ("Switching to a faster route. Saves 8 minutes. Turn in 0.8 miles.").
   The time line shows the old travel time and arrival, small, dim and struck through,

@@ -1,6 +1,6 @@
 import { formatDuration } from './format.ts'
 import { distanceM, isValidLngLat, lineFrom } from './geo.ts'
-import { armGuidance, dueAnnouncement, nextTurn, type GuidanceCursor, type NextTurn } from './guidance.ts'
+import { armGuidance, arrowKind, dueAnnouncement, nextTurn, type ArrowKind, type GuidanceCursor, type NextTurn } from './guidance.ts'
 import {
   checkProbeAllowance,
   INITIAL_CHECK_PROBES,
@@ -15,8 +15,10 @@ import {
   declineRoute,
   DEFAULT_REROUTE_OPTIONS,
   INITIAL_REROUTE_STATE,
+  requiredLead,
   spokenDistance,
   spokenDuration,
+  takeRoute,
   type RerouteCode,
   type RerouteDecision,
   type RerouteOptions,
@@ -33,7 +35,7 @@ import {
   type TrackingOptions,
   type TrackingState,
 } from './tracking.ts'
-import type { LngLat, RouteCandidate } from './types.ts'
+import type { GuidanceStep, LngLat, RouteCandidate } from './types.ts'
 
 /**
  * The live drive: the reroute engine (reroute.ts) fed by the device's real
@@ -230,7 +232,7 @@ export interface LiveState {
    */
   readonly lastDecision: {
     readonly action: 'stay' | 'switch'
-    readonly code: RerouteCode | 'kept-previous'
+    readonly code: RerouteCode | 'kept-previous' | 'taken-offer'
     readonly reason: string
     readonly atMs: number
     readonly routes: number | null
@@ -268,13 +270,29 @@ export interface LiveState {
    * (negative: fewer), compared with the route being driven as the same
    * answer gave it, null unless both counts are full; `again` when it turns
    * off where a route the driver turned down did. Null otherwise.
+   *
+   * What the driver needs to take it (#197): `route`, the offered route as the check gave it
+   * ("Take it" switches to it at once); `turnAlongM`, where it turns off, in meters along the
+   * route being driven; `step`, its maneuver there (null when its guidance has none);
+   * `onFreeway`, whether that turn-off is on a freeway (the longer lead applies). The offer
+   * ends as soon as the turn-off is nearer than the lead the reroute rules ask for.
    */
   readonly offer: {
     readonly savingSec: number | null
     readonly lightsDelta: number | null
     readonly turnInM: number
     readonly again: boolean
+    readonly route: RouteCandidate
+    readonly turnAlongM: number
+    readonly step: GuidanceStep | null
+    readonly onFreeway: boolean
   } | null
+  /**
+   * Shown for a few seconds after an offer ended without a switch (#197): the calm banner of
+   * the withdrawn stage. `tooLate`: its turn-off came too close to take; otherwise a check
+   * found it no longer faster.
+   */
+  readonly withdrawn: { readonly untilMs: number; readonly tooLate: boolean } | null
   /** Shown for a few seconds after "Keep my route": the calm banner of the declined stage (#43). */
   readonly kept: { readonly untilMs: number; readonly noReturnSec: number } | null
   /** Where the routes the driver turned down on this drive turn off: a new offer that turns off there is "still faster". */
@@ -326,6 +344,7 @@ export const LIVE_IDLE: LiveState = {
   turn: null,
   switchBanner: null,
   offer: null,
+  withdrawn: null,
   kept: null,
   declinedTurns: [],
   undo: null,
@@ -386,6 +405,8 @@ export type LiveEvent =
   | { readonly type: 'wake-lock'; readonly result: 'held' | 'unavailable' | 'released' }
   /** The driver pressed "Keep my route": turns down the switch just made, or the faster route still being confirmed. */
   | { readonly type: 'keep-previous'; readonly nowMs: number }
+  /** The driver pressed "Take it": switches at once to the faster route still being confirmed (#197). */
+  | { readonly type: 'take-offer'; readonly nowMs: number }
   | { readonly type: 'mute'; readonly muted: boolean }
   /** The End tap, or the drive view being closed. */
   | { readonly type: 'end' }
@@ -543,7 +564,7 @@ export function livePollGate(state: LiveState, nowMs: number, options: Partial<L
 const STOP_EFFECTS: readonly LiveEffect[] = [{ type: 'cancel-request' }, { type: 'stop-watching' }, { type: 'release-wake-lock' }]
 
 function fail(state: LiveState, message: string): LiveStep {
-  return { state: { ...state, status: 'failed', message, request: null, switchBanner: null, offer: null, kept: null, undo: null }, effects: STOP_EFFECTS }
+  return { state: { ...state, status: 'failed', message, request: null, switchBanner: null, offer: null, withdrawn: null, kept: null, undo: null }, effects: STOP_EFFECTS }
 }
 
 /** A route with a line to drive. */
@@ -622,7 +643,7 @@ function arrive(state: LiveState, nowMs: number): LiveStep {
     requestsUsed: state.requestsUsed,
   }
   return {
-    state: { ...state, status: 'arrived', summary, request: null, turn: null, switchBanner: null, offer: null, kept: null, undo: null, pausedNote: null },
+    state: { ...state, status: 'arrived', summary, request: null, turn: null, switchBanner: null, offer: null, withdrawn: null, kept: null, undo: null, pausedNote: null },
     effects: [...STOP_EFFECTS, { type: 'speak', line: { text: arrivalLine(summary), priority: 'urgent' } }],
   }
 }
@@ -639,7 +660,7 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   if (tracking.offRoute) {
     const firstWord = !next.offRouteNotified
     if (firstWord) {
-      next = { ...next, offRouteNotified: true, switchBanner: null, offer: null, kept: null, undo: null }
+      next = { ...next, offRouteNotified: true, switchBanner: null, offer: null, withdrawn: null, kept: null, undo: null }
       // Must be heard: the "New route" line that follows within a second or two would
       // otherwise take its place in the queue, and the driver would never hear why.
       effects.push({ type: 'speak', line: { text: SPOKEN.offRoute, priority: 'urgent', mustHear: true } })
@@ -661,6 +682,19 @@ function drive(state: LiveState, fix: PositionFix, nowMs: number, opts: LiveOpti
   }
   if (tracking.offFixes === 0) {
     if (next.offRouteNotified || next.offRouteReplans > 0) next = { ...next, offRouteNotified: false, offRouteReplans: 0 }
+    // An offer whose turn-off is now too close to take is over at once, not at the next check:
+    // a faster route the driver can no longer take is no help on the screen (#197).
+    const offer = next.offer
+    if (offer !== null && offer.turnAlongM - tracking.alongRouteM < requiredLead(tracking.speedMps, offer.onFreeway, rerouteOptions(opts))) {
+      next = {
+        ...next,
+        offer: null,
+        turn: null,
+        // The confirmation starts over: a route offered again is offered as new, never switched to unannounced.
+        engine: { ...next.engine, pending: null },
+        withdrawn: { untilMs: nowMs + opts.switchBannerSec * 1000, tooLate: true },
+      }
+    }
     const due = dueAnnouncement(route.guidance, next.guidance, tracking.alongRouteM)
     if (due.cursor !== next.guidance) next = { ...next, guidance: due.cursor }
     if (due.say !== null) {
@@ -775,6 +809,22 @@ function timedOut(state: LiveState, nowMs: number, opts: LiveOptions): LiveStep 
   return { state: step.state, effects: [cancel, ...step.effects] }
 }
 
+/** The reroute rules in force: the defaults with this drive's overrides. */
+function rerouteOptions(opts: LiveOptions): RerouteOptions {
+  return { ...DEFAULT_REROUTE_OPTIONS, ...opts.reroute }
+}
+
+/** The maneuver of `route` at its turn-off `at`: the step nearest it, within `withinM`. Null when there is none so near. */
+function stepAt(route: RouteCandidate, at: LngLat, withinM: number): GuidanceStep | null {
+  let best: { step: GuidanceStep; m: number } | null = null
+  for (const step of route.guidance ?? []) {
+    if (step.type === 'depart' || step.type === 'arrive') continue
+    const m = distanceM(step.location, at)
+    if (m <= withinM && (best === null || m < best.m)) best = { step, m }
+  }
+  return best?.step ?? null
+}
+
 /** A check, or a search for a new route, has come back. */
 function checked(
   state: LiveState,
@@ -824,48 +874,95 @@ function checked(
   if (chosen === undefined) {
     const current = decision.current
     const pending = decision.code === 'confirming' || decision.code === 'cooldown'
+    const considered = decision.considered
+    const offered = considered !== null && pending ? routes.find((c) => c.id === considered.routeId) : undefined
+    const offer: LiveState['offer'] =
+      considered !== null && offered !== undefined
+        ? {
+            savingSec: considered.savingSec,
+            lightsDelta: lightsDelta(freshCurrent(current, [...routes, ...(baseline ?? [])]), offered),
+            turnInM: considered.turnInM,
+            again: state.declinedTurns.some((p) => distanceM(p, considered.turnAt) <= opts.heldTurnMatchM),
+            route: offered,
+            turnAlongM: tracking.alongRouteM + considered.turnInM,
+            step: stepAt(offered, considered.turnAt, opts.heldTurnMatchM),
+            onFreeway: considered.onFreeway,
+          }
+        : null
+    // An offer on screen that this check did not renew is over: the driver is told, calmly (#197).
+    const withdrawn =
+      offer === null && state.offer !== null
+        ? { untilMs: nowMs + opts.switchBannerSec * 1000, tooLate: decision.code === 'too-late' }
+        : offer !== null
+          ? null
+          : next.withdrawn
     return {
       state: {
         ...next,
         eta: current === null ? next.eta : { durationSec: current.durationSec, remainingM: current.distanceM },
-        turn: decision.considered !== null && pending ? { at: decision.considered.turnAt, pending: true } : null,
-        offer:
-          decision.considered !== null && pending
-            ? {
-                savingSec: decision.considered.savingSec,
-                lightsDelta: lightsDelta(
-                  freshCurrent(current, [...routes, ...(baseline ?? [])]),
-                  routes.find((c) => c.id === decision.considered!.routeId),
-                ),
-                turnInM: decision.considered.turnInM,
-                again: state.declinedTurns.some((p) => distanceM(p, decision.considered!.turnAt) <= opts.heldTurnMatchM),
-              }
-            : null,
+        turn: offer !== null ? { at: considered!.turnAt, pending: true } : null,
+        offer,
+        withdrawn,
         // A new offer is news of its own: the calm "kept" banner gives way to it.
-        kept: decision.considered !== null && pending ? null : next.kept,
+        kept: offer !== null ? null : next.kept,
       },
       effects: [],
     }
   }
 
   const offRoute = decision.code === 'off-route'
-  // A second new route in one excursion (still off the first) is taken without another word.
-  const quiet = offRoute && state.offRouteReplans > 1
-  const saving = decision.considered?.savingSec ?? null
+  return switchTo(next, state, chosen, {
+    code: decision.code,
+    reason: decision.reason,
+    savingSec: decision.considered?.savingSec ?? null,
+    turnInM: decision.considered?.turnInM ?? null,
+    turnAt: decision.considered?.turnAt ?? null,
+    engine: decision.nextState,
+    // A second new route in one excursion (still off the first) is taken without another word.
+    quiet: offRoute && state.offRouteReplans > 1,
+  }, nowMs, opts)
+}
+
+/**
+ * Drive `chosen` from now on: the switch the engine made, or the one the driver took ("Take it").
+ * `next` is the state to build on, `before` the state before the check or the tap (what
+ * "Keep my route" goes back to).
+ */
+function switchTo(
+  next: LiveState,
+  before: LiveState,
+  chosen: RouteCandidate,
+  made: {
+    readonly code: RerouteCode
+    readonly reason: string
+    readonly savingSec: number | null
+    readonly turnInM: number | null
+    readonly turnAt: LngLat | null
+    readonly engine: RerouteState
+    readonly quiet: boolean
+  },
+  nowMs: number,
+  opts: LiveOptions,
+): LiveStep {
+  const route = before.route!
+  const tracking = before.tracking!
+  const offRoute = made.code === 'off-route'
+  const { quiet, turnInM } = made
+  const saving = made.savingSec
   const sideStreet = chosen.source === 'probe'
   const onNew = retrack(tracking, trackedRoute(chosen.geometry), opts.tracking)
-  const made: LiveSwitch = { atMs: nowMs, code: decision.code, reason: decision.reason, savingSec: offRoute ? null : saving }
-  const turnInM = decision.considered?.turnInM ?? null
+  const record: LiveSwitch = { atMs: nowMs, code: made.code, reason: made.reason, savingSec: offRoute ? null : saving }
   // The banner shows what is said, word for word (#22).
-  const spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet)
-  next = {
+  const spokenSwitch = switchLine(made.code, saving, turnInM, chosen.durationSec, sideStreet)
+  const after: LiveState = {
     ...next,
+    engine: made.engine,
     route: chosen,
     tracking: onNew,
     guidance: armGuidance(chosen.guidance, onNew.alongRouteM, false),
     eta: { durationSec: chosen.durationSec, remainingM: chosen.distanceM },
-    turn: decision.considered === null ? null : { at: decision.considered.turnAt, pending: false },
-    switches: quiet ? state.switches : [...state.switches, made],
+    turn: made.turnAt === null ? null : { at: made.turnAt, pending: false },
+    switches: quiet ? before.switches : [...before.switches, record],
     switchBanner: quiet ? null : {
       untilMs: nowMs + opts.switchBannerSec * 1000,
       text: spokenSwitch,
@@ -876,12 +973,13 @@ function checked(
       turnInM: offRoute ? null : turnInM,
     },
     offer: null,
+    withdrawn: null,
     kept: null,
     // Off the route there is no previous route to keep.
-    undo: offRoute ? null : { route, alongM: tracking.alongRouteM, engine: state.engine, eta: state.eta },
+    undo: offRoute ? null : { route, alongM: tracking.alongRouteM, engine: before.engine, eta: before.eta },
   }
   const say: LiveEffect = { type: 'speak', line: { text: spokenSwitch, priority: 'urgent' } }
-  return { state: next, effects: [{ type: 'follow-route', geometry: chosen.geometry }, ...(quiet ? [] : [say])] }
+  return { state: after, effects: [{ type: 'follow-route', geometry: chosen.geometry }, ...(quiet ? [] : [say])] }
 }
 
 /**
@@ -1018,6 +1116,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
             probes: { ...state.probes, keep: null },
             turn: null,
             offer: null,
+            withdrawn: null,
             kept,
             declinedTurns: state.turn === null ? state.declinedTurns : [...state.declinedTurns, state.turn.at],
             declinedSwitches: state.declinedSwitches + 1,
@@ -1043,6 +1142,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           request: null,
           switchBanner: null,
           offer: null,
+          withdrawn: null,
           kept,
           declinedTurns: state.turn === null ? state.declinedTurns : [...state.declinedTurns, state.turn.at],
           undo: null,
@@ -1057,6 +1157,37 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
           { type: 'speak', line: { text: SPOKEN.keptPrevious, priority: 'urgent' } },
         ],
       }
+    }
+    case 'take-offer': {
+      const { offer, route, tracking } = state
+      if (state.status !== 'driving' || offer === null || route === null || tracking === null || tracking.offRoute) return { state, effects: [] }
+      if (state.switchBanner !== null) return { state, effects: [] }
+      const nowSec = (event.nowMs - (state.startedAtMs ?? event.nowMs)) / 1000
+      const turnInM = Math.max(0, offer.turnAlongM - tracking.alongRouteM)
+      const saves = offer.savingSec === null ? '' : `, saves ${spokenDuration(offer.savingSec)}`
+      const reason = `Switching: you took the faster route${saves}, turn in ${spokenDistance(turnInM)}`
+      const taken = switchTo(
+        {
+          ...state,
+          // The check that is out was asked about the route being left; its answer will never come.
+          request: null,
+          lastDecision: { action: 'switch', code: 'taken-offer', reason, atMs: event.nowMs, routes: null, savingSec: offer.savingSec },
+        },
+        state,
+        offer.route,
+        {
+          code: 'faster-route',
+          reason,
+          savingSec: offer.savingSec,
+          turnInM,
+          turnAt: state.turn?.at ?? null,
+          engine: takeRoute(state.engine, lineFrom(route.geometry, tracking.alongRouteM), nowSec),
+          quiet: false,
+        },
+        event.nowMs,
+        opts,
+      )
+      return { state: taken.state, effects: [...(state.request === null ? [] : ([{ type: 'cancel-request' }] as const)), ...taken.effects] }
     }
     case 'visibility': {
       if (!active) return { state, effects: [] }
@@ -1078,6 +1209,7 @@ export function liveStep(state: LiveState, event: LiveEvent, options: Partial<Li
       if (next.switchBanner !== null && event.nowMs >= next.switchBanner.untilMs) next = { ...next, switchBanner: null, undo: null }
       if (next.pausedNote !== null && event.nowMs >= next.pausedNote.untilMs) next = { ...next, pausedNote: null }
       if (next.kept !== null && event.nowMs >= next.kept.untilMs) next = { ...next, kept: null }
+      if (next.withdrawn !== null && event.nowMs >= next.withdrawn.untilMs) next = { ...next, withdrawn: null }
       const request = next.request
       if (request !== null && event.nowMs - request.sentAtMs >= opts.requestTimeoutSec * 1000) {
         return maybePoll(timedOut(next, event.nowMs, opts), event.nowMs, opts)
@@ -1124,6 +1256,17 @@ export type SwitchMoment =
       readonly stage: 'pending'
       readonly title: string
       readonly detail: string
+      /**
+       * How to take it (#197): the offered route's maneuver at its turn-off and the meters to it
+       * from the car. `arrow` and `primaryText` are null when its guidance has no step there.
+       */
+      readonly turn: {
+        readonly arrow: ArrowKind | null
+        readonly distanceM: number
+        readonly primaryText: string | null
+      }
+      /** "Take it" switches at once; "Keep my route" turns it down. */
+      readonly canTake: true
       readonly canKeep: true
     }
   | {
@@ -1142,6 +1285,18 @@ export type SwitchMoment =
       readonly detail: string
       readonly canKeep: false
     }
+  | {
+      /** An offer ended without a switch (#197): its turn-off came too close, or it is no longer faster. Calm. */
+      readonly stage: 'withdrawn'
+      readonly title: string
+      readonly canKeep: false
+    }
+
+/** The withdrawn banner's title (#197): on screen only, nothing was switched. */
+export const WITHDRAWN_TITLE = {
+  tooLate: 'Too late for that turn. Staying on your route.',
+  notFaster: 'No longer faster. Staying on your route.',
+} as const
 
 /** The pending banner's title (#44, #43). */
 export const OFFER_TITLE = { first: 'Checking a faster route', again: 'Still faster. Checking again.' } as const
@@ -1175,12 +1330,22 @@ function switchMoment(state: LiveState, offRoute: boolean): SwitchMoment | null 
   const offer = state.offer
   if (offer !== null) {
     const saves = offer.savingSec === null ? 'Faster than your route' : `Would save ${formatDuration(offer.savingSec)}`
+    const step = offer.step
     return {
       stage: 'pending',
       title: offer.again ? OFFER_TITLE.again : OFFER_TITLE.first,
       detail: `${saves} · ${lightsWords(offer.lightsDelta)}`,
+      turn: {
+        arrow: step === null ? null : arrowKind(step.type, step.modifier),
+        distanceM: Math.max(0, offer.turnAlongM - (state.tracking?.alongRouteM ?? 0)),
+        primaryText: step === null ? null : step.primaryText,
+      },
+      canTake: true,
       canKeep: true,
     }
+  }
+  if (state.withdrawn !== null) {
+    return { stage: 'withdrawn', title: state.withdrawn.tooLate ? WITHDRAWN_TITLE.tooLate : WITHDRAWN_TITLE.notFaster, canKeep: false }
   }
   if (state.kept !== null) {
     return {
