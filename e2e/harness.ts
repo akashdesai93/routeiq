@@ -73,8 +73,8 @@ export interface DriveOptions {
    * trip (the recommended one when no side street beats it).
    */
   road?: RoadName
-  /** Car speed on the road, meters per second. */
-  speedMps?: number
+  /** Car speed on the road, meters per second: one number, or by simulated second (0 stands the car still, see `standing`). */
+  speedMps?: number | ((sec: number) => number)
   /** Give up after this many simulated seconds. */
   maxSec?: number
   /** At this simulated second the driver turns off the route the wrong way. */
@@ -314,11 +314,11 @@ export class App {
         // Straight on, square to the road: "left of" the heading turned a quarter to the right.
         position = sideStep(astray.at, astray.headingDeg + 90, speed * astray.sec)
       } else if (route !== null) {
-        alongM += speedMps * STEP_SEC
+        alongM += speedAt(speedMps, sec) * STEP_SEC
         const here = along(route, alongM)
         position = gpsNoiseM === 0 ? here.point : sideStep(here.point, here.headingDeg, gpsNoiseM * Math.sin(sec * 0.37) * Math.cos(sec * 0.11))
         heading = here.headingDeg
-        speed = here.atEnd ? 0 : speedMps
+        speed = here.atEnd ? 0 : speedAt(speedMps, sec)
       }
       await page.evaluate(([lng, lat, h, v]) => (window as unknown as E2EWindow).__e2e.fix(lng, lat, h, v), [
         position[0],
@@ -535,3 +535,25 @@ export const test = base.extend<{ app: App }>({
     expect(app.unexpected, 'requests that would have left this PC').toEqual([])
   },
 })
+
+const speedAt = (speedMps: number | ((sec: number) => number), sec: number) => (typeof speedMps === 'number' ? speedMps : speedMps(sec))
+
+/**
+ * A speed for DriveOptions.speedMps: `cruiseMps`, except that the car stands still `forSec`
+ * seconds once it has driven `atM` meters, for each stop in order. It stands at the last whole
+ * step before `atM` (at most one step's driving short of it), so a stop meant for a light is
+ * never past it.
+ */
+export function standing(stops: readonly { atM: number; forSec: number }[], cruiseMps = 25): (sec: number) => number {
+  const plan: { fromSec: number; toSec: number }[] = []
+  let sec = 0
+  let alongM = 0
+  for (const stop of stops) {
+    const steps = Math.max(0, Math.floor((stop.atM - alongM) / (cruiseMps * STEP_SEC)))
+    sec += steps * STEP_SEC
+    alongM += steps * STEP_SEC * cruiseMps
+    plan.push({ fromSec: sec, toSec: sec + stop.forSec })
+    sec += stop.forSec
+  }
+  return (at) => (plan.some((p) => at >= p.fromSec && at < p.toSec) ? 0 : cruiseMps)
+}
