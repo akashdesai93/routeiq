@@ -213,7 +213,7 @@ export function parseDiagnostics(text) {
         continue
       }
       const [kind, mm] = hit
-      const e = { kind, atSec: at(h, m, s), state, line }
+      const e = { kind, atSec: at(h, m, s), state, line, i: out.events.length }
       if (kind === 'gps') e.on = mm[1] === 'on'
       if (kind === 'gap') Object.assign(e, { of: mm[1], sec: Number(mm[2]) })
       if (kind === 'sent') Object.assign(e, { n: Number(mm[1]), type: kindOf(mm[2]) })
@@ -359,7 +359,9 @@ export function analyse(text, options = {}) {
   const drive = windows.reduce((a, w) => (a === null || w.endSec - w.startSec > a.endSec - a.startSec ? w : a), null)
   const inDrive = (sec) => windows.some((w) => inside(w, sec))
   const lengthSec = drive === null ? null : drive.endSec - drive.startSec
-  const perSec = (count) => (count === undefined || !lengthSec ? null : Math.round((count / lengthSec) * 100) / 100)
+  // The header counts cover the whole log: per second of all the spells with the GPS on.
+  const gpsSec = windows.reduce((sum, w) => sum + (w.endSec - w.startSec), 0)
+  const perSec = (count) => (count === undefined || !gpsSec ? null : Math.round((count / gpsSec) * 100) / 100)
 
   const sent = log.events.filter((e) => e.kind === 'sent')
   const ended = log.events.filter((e) => e.kind === 'answered' || e.kind === 'failed')
@@ -380,23 +382,34 @@ export function analyse(text, options = {}) {
     const endLine = log.events.find((e) => e.kind === 'gps' && !e.on && e.atSec === w.endSec)?.line ?? null
     gaps.push({ fromSec: prev, toSec: w.endSec, fromLine: prevLine, toLine: endLine, trailing: true })
     const last = plain.at(-1) ?? null
-    const usedBy = last === null ? 0 : sent.filter((e) => inside(w, e.atSec) && e.atSec <= last.atSec).length
-    return { w, plain, offCycle, gaps, last, usedBy }
+    // Counted by the requests' numbers, which run on without a gap: a log that dropped its oldest
+    // events still knows how many went out after the first one it kept. With the drive's start
+    // dropped, that is a lower bound (unknown is never a plain number).
+    const first = sent.find((e) => inside(w, e.atSec))
+    const usedBy = last === null || first === undefined ? 0 : last.n - first.n + 1
+    const usedPartial = !w.startInLog
+    return { w, plain, offCycle, gaps, last, usedBy, usedPartial }
   })
 
-  for (const { w, plain, gaps, last, usedBy } of perWindow) {
+  for (const { w, plain, gaps, last, usedBy, usedPartial } of perWindow) {
     for (const g of gaps) {
       const len = g.toSec - g.fromSec
       if (len < o.blindAfterSec) continue
       const away = notActiveSec(log, g.fromSec, g.toSec)
       const lines = [g.fromLine, ...log.events.filter((e) => e.kind === 'app' && e.atSec > g.fromSec && e.atSec < g.toSec).map((e) => e.line), g.toLine].filter(Boolean)
       if (g.trailing && last !== null) {
-        const budget = usedBy >= o.requestBudget - 2 ? `, about the whole budget of ${o.requestBudget}` : ` (the budget is ${o.requestBudget})`
+        // The budget is spent this close to it: the last check may leave a request or two unused.
+        const nearBudget = (n) => n >= o.requestBudget - 2
+        const used = usedPartial
+          ? `The log dropped the drive's start, so how many requests this drive made is not known: at least ${usedBy}, and request ${last.n} was the last to go out${
+              nearBudget(last.n) ? `, which may be the whole budget of ${o.requestBudget}` : ` (the budget is ${o.requestBudget})`
+            }.`
+          : `${count(usedBy, 'request')} had gone out on this drive by then${nearBudget(usedBy) ? `, about the whole budget of ${o.requestBudget}` : ` (the budget is ${o.requestBudget})`}.`
         find(
           'checks-stopped',
           `The minute-by-minute checks stopped at ${clockOf(last.atSec)} and the drive went on ${lengthOf(len)} without one${
             w.endInLog ? '' : ' (and was still going when the log was copied)'
-          }. ${count(usedBy, 'request')} had gone out on this drive by then${budget}.${away > 0 ? ` The app was not active for ${lengthOf(away)} of it.` : ''}`,
+          }. ${used}${away > 0 ? ` The app was not active for ${lengthOf(away)} of it.` : ''}`,
           lines,
         )
       } else if (g.trailing && plain.length === 0) {
@@ -486,7 +499,7 @@ export function analyse(text, options = {}) {
           shown: h.offers?.shown ?? shown.length,
           ended: Object.fromEntries(Object.values(OFFER_ENDINGS).map((how) => [how, h.offers?.[how] ?? endings.filter((e) => e.how === how).length])),
           list: shown.map((e) => {
-            const end = endings.find((x) => x.atSec >= e.atSec && !shown.some((y) => y !== e && y.atSec > e.atSec && y.atSec <= x.atSec))
+            const end = endings.find((x) => x.i > e.i && !shown.some((y) => y.i > e.i && y.i < x.i))
             return { at: clockOf(e.atSec), savingSec: e.savingSec, why: e.why, how: end?.how ?? null, afterSec: end?.afterSec ?? null, because: end?.because ?? null, directions: end?.directions ?? null }
           }),
         }
@@ -540,6 +553,8 @@ export function analyse(text, options = {}) {
       averageMs: h.requestTime?.averageMs ?? null,
       slowestMs: h.requestTime?.longestMs ?? slowest?.ms ?? null,
       plainChecksInDrive: blind?.plain.length ?? 0,
+      // True when the drive's start was dropped from the log: the count above is then at least that many.
+      plainChecksPartial: drive !== null && !drive.startInLog,
       checksStoppedAt: blindStretchSec > 0 && blind.last !== null ? clockOf(blind.last.atSec) : null,
       blindStretchSec,
       longestCheckGapSec: blind ? Math.max(...blind.gaps.map((g) => g.toSec - g.fromSec)) : null,
@@ -565,13 +580,13 @@ export function reportText(r) {
     const d = r.drive
     out.push(
       `Drive: ${d.startInLog ? '' : 'before '}${d.start} to ${d.end}${d.endInLog ? '' : ' (still on)'}, ${lengthOf(d.lengthSec)}${d.spells > 1 ? ` (the longest of ${d.spells} spells with the GPS on)` : ''}.`,
-      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${lengthOf(d.notActiveSec)}.`,
+      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${or(d.notActiveSec, lengthOf)}.`,
     )
   }
   const q = r.requests
   out.push(
     `Requests: ${or(q.sent, String)} sent, ${or(q.answered, String)} answered, ${or(q.failed, String)} failed, slowest ${or(q.slowestMs, (v) => `${v} ms`)}.`,
-    `  checks during the drive: ${q.plainChecksInDrive}${
+    `  checks during the drive: ${q.plainChecksPartial ? `≥ ${q.plainChecksInDrive} (partial)` : q.plainChecksInDrive}${
       q.blindStretchSec > 0 ? `; they stopped at ${q.checksStoppedAt ?? 'the start'} and the drive went on ${lengthOf(q.blindStretchSec)} without one` : ''
     }.`,
   )

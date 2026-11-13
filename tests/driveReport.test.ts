@@ -151,6 +151,44 @@ describe('drive report: the request budget and the blind stretch (#202)', () => 
     expect(finding(r, 'checks-stopped')?.says).toContain('about the whole budget of 60')
   })
 
+  it('the budget boundary: 58 requests is about the whole budget, 57 is not', () => {
+    const at = (n: number) => analyse(text([], ['09:00:00 gps on [active]', ...checks(1, n), '10:30:00 gps off [active]']))
+    expect(finding(at(58), 'checks-stopped')?.says).toContain('58 requests had gone out on this drive by then, about the whole budget of 60')
+    expect(finding(at(57), 'checks-stopped')?.says).toContain('57 requests had gone out on this drive by then (the budget is 60)')
+  })
+
+  it('a long drive whose start the log dropped: the budget is read from the request numbers, and partial counts say so', () => {
+    // The app keeps 200 events: 2 planning requests, 58 one-minute checks, then 25 minutes with none.
+    let now = new Date(2026, 10, 12, 7, 0, 0).getTime()
+    const log = createDriveDiagnostics(() => now)
+    const step = (sec: number) => (now += sec * 1000)
+    const request = (kind?: 'probe') => {
+      const n = log.requestSent(kind)
+      step(1)
+      log.requestEnded(n, 'answered', 200, 500)
+    }
+    request()
+    request()
+    log.gps(true)
+    for (let i = 0; i < 58; i++) {
+      // A fix a minute (a weak signal): each gap is an event too, as on a long drive with tunnels.
+      log.fix()
+      step(59)
+      request()
+      log.checked(i % 2 === 0 ? 'current-best' : 'saving-too-small', 2, i % 2 === 0 ? 0 : 30)
+    }
+    step(25 * 60)
+    log.gps(false)
+    const r = analyse(log.text())
+    expect(r.log.eventsDropped).toBeGreaterThan(0)
+    expect(r.drive?.startInLog).toBe(false)
+    const says = finding(r, 'checks-stopped')?.says ?? ''
+    expect(says).toContain('request 60 was the last to go out, which may be the whole budget of 60')
+    expect(says).toContain("The log dropped the drive's start")
+    expect(r.requests.plainChecksPartial).toBe(true)
+    expect(reportText(r)).toMatch(/checks during the drive: ≥ \d+ \(partial\)/)
+  })
+
   it('a stretch with no check in the middle of a drive is a gap, and says the app was away', () => {
     const events = ['09:00:00 gps on [active]', ...checks(1, 5), '09:05:30 app background [background]', '09:09:00 app active [active]', ...checks(10, 5, 6), '09:14:30 gps off [active]']
     const r = analyse(text([], events))
@@ -185,6 +223,11 @@ describe('drive report: probes, checks and faults (#202)', () => {
     const f = finding(r, 'probes-only-at-plan')
     expect(f?.says).toContain('not-held-up 9')
     expect(f?.lines).toEqual(['07:59:21 request 2 (probe) sent [active]', '07:59:22 request 3 (probe) sent [active]'])
+  })
+
+  it('a gap in the fixes before the GPS was switched on for the drive is not a position gap of the drive', () => {
+    const r = analyse(text([], ['08:59:00 no fix for 40 s [active]', '09:00:00 gps on [active]', ...checks(1, 2), '09:02:30 gps off [active]']))
+    expect(ids(r)).not.toContain('position-gaps')
   })
 
   it('a probe during the drive is not "only at plan time"', () => {
@@ -266,6 +309,21 @@ describe('drive report: the life of each offer (#202 part 2)', () => {
       ['09:03:10', null],
     ])
     expect(ids(r)).not.toContain('directions-unchanged')
+  })
+
+  it('an ending written in the same second as the next offer belongs to the offer before it', () => {
+    const events = [
+      '09:00:00 gps on [active]',
+      ...checks(1, 3),
+      '09:01:01 offer shown: a faster one, waiting for the next check to confirm it (saves 130 s) [active]',
+      '09:02:01 offer withdrawn after 60 s: a different one took its place [active]',
+      '09:02:01 offer shown: a faster one, waiting for the next check to confirm it (saves 140 s) [active]',
+      '09:03:30 gps off [active]',
+    ]
+    expect(analyse(text([], events)).offers?.list.map((f) => [f.at, f.how])).toEqual([
+      ['09:01:01', 'withdrawn'],
+      ['09:02:01', null],
+    ])
   })
 
   it('without offer lines the report says the log version does not record them', () => {

@@ -55,6 +55,7 @@ export interface DriveReport {
     averageMs: number | null
     slowestMs: number | null
     plainChecksInDrive: number
+    plainChecksPartial: boolean
     checksStoppedAt: string | null
     blindStretchSec: number
     longestCheckGapSec: number | null
