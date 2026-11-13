@@ -21,7 +21,7 @@ function nav(): ShareNavigator | null {
 }
 
 /** The iPhone shell's share sheet, or null outside the shell (or in an older app without it). */
-function pluginShare(): ((text: string) => Promise<unknown>) | null {
+export function pluginShare(): ((text: string) => Promise<unknown>) | null {
   const plugin = nativePlugin()
   return plugin === null || typeof plugin.share !== 'function' ? null : (text) => plugin.share!({ text })
 }
