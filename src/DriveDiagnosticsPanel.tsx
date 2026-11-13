@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { shellDiagnostics, type DriveDiagnostics } from './device/native/diagnostics.ts'
 import { readLastDrive } from './device/native/lastDrive.ts'
-import { nativePlugin } from './device/native/plugin.ts'
+import { copyText, pluginShare } from './device/share.ts'
 import type { TextStore } from './storage/local.ts'
 
 interface Props {
@@ -13,27 +13,6 @@ interface Props {
   share?: ((text: string) => Promise<unknown>) | null
   /** Where the last drive's diagnostics are kept (device/native/lastDrive.ts). Left out: none are shown. */
   store?: TextStore
-}
-
-/** The clipboard, where the web view offers it; the old "copy the selection" otherwise. */
-async function copyText(text: string, field: HTMLTextAreaElement | null): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return
-  } catch {
-    // Not offered here: try the selection.
-  }
-  if (field === null) throw new Error('nothing to select')
-  field.focus()
-  field.select()
-  field.setSelectionRange(0, field.value.length)
-  if (!document.execCommand('copy')) throw new Error('copy refused')
-}
-
-/** The plugin's share sheet, or null where there is none (a browser, an older app). */
-function pluginShare(): ((text: string) => Promise<unknown>) | null {
-  const plugin = nativePlugin()
-  return plugin === null || typeof plugin.share !== 'function' ? null : (text) => plugin.share!({ text })
 }
 
 function savedAt(ms: number): string {
