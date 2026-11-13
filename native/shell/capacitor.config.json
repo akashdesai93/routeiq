@@ -4,6 +4,6 @@
   "webDir": "www",
   "loggingBehavior": "none",
   "ios": {
-    "contentInset": "never"
+    "contentInset": "always"
   }
 }

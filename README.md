@@ -1144,12 +1144,11 @@ stays at the right.
 - **Safe areas.** The page asks to run edge to edge (`viewport-fit=cover`) and pads itself
   with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
   sits below the notch and the content clear of the home indicator and the rounded corners.
-  The iPhone shell runs its web view edge to edge too (`contentInset: "never"` in
-  `native/shell/capacitor.config.json`, since #197), so the same `env()` padding keeps the
-  turn card below the notch and the controls above the home indicator. With `"always"`
-  the scroll view added the safe areas itself and the page was 860 points tall in a
-  922-point window: the 62 points left were the black band under the driving screen's
-  sheet (#136, H4).
+  The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
+  `native/shell/capacitor.config.json`), so there the insets read 0 and the gaps apply.
+  The page is 860 points tall in a 922-point window there, which shows as a black band
+  under the driving screen's sheet (#136). `contentInset: "never"` alone did not change
+  that on the phone (#197, phone lab 2026-11-13): the cause is still open.
 
 ## Live drive
 
@@ -1307,9 +1306,9 @@ side the panel is 340 px (was 380). On the driving screen the turn card is 112 p
 alone (not 14 px more); in landscape the column is 340 px. Spacing between controls is at least 8 px,
 from the token gaps (8, 12, 14 px). The map's share, before and after, at 390 x 844,
 430 x 932 and 844 x 390: trip screen 40 / 39 / 48 % → 48 / 48 / 53 %, driving screen
-56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). In the
-iPhone shell the page now fills the window (`contentInset: "never"`): before, it stopped
-62 points short and left a black band under the sheet.
+56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). On the
+iPhone (phone lab, 2026-11-13) the drive map grew from 676 to 695 points of an 860-point
+page, and the plan map from about 40 % to 55 % of the screen.
 **The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
 the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
 casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and
