@@ -147,6 +147,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    line is now kept until spoken, with the new route said straight after it. Which
    carriageway the car is on is not known. The first route is the best-ranked one
    from the device's position, not the one picked in the list.
+   More map, more air (Nov 13, 2026, #197 part 2): the trip screen's map is half the
+   screen, the drive view's turn card and sheet are shorter, every gap between controls is
+   8 px or more, and the shell's web view fills the window (`contentInset: "never"`, the
+   black band of #136). Guarded by a minimum map share and tap gap in `e2e/design.spec.ts`.
+   Open for later: a real pull-up sheet on the trip screen (today the page scrolls); the
+   map's share on the device itself, which e2e cannot measure with the safe areas.
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,
