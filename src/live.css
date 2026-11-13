@@ -8,8 +8,16 @@
    in a box that does not grow, the two cards are their own layout islands (contain), and the
    only motion is a transform. The figures of a switch are those of its moment: they do not tick. */
 .app.live {
-  /* The tokens (--bg, --glass, --fg, ...) are on :root in index.css. */
-  background: var(--bg);
+  /* The containing block of the turn card. Not .main: during a drive .main neither clips
+     nor is positioned, so it never becomes a clipping layer around the map's WebGL canvas
+     and the two cards that sit over it. On the iPhone (WKWebView) that layer kept every
+     composited child from being drawn after Start drive, and the screen showed only the
+     black that .app and .main were painted (#136). The tokens (--bg, --glass, --fg, ...)
+     are on :root in index.css. */
+  position: relative;
+  /* The map's ground, not black: nothing full-screen and dark sits under the map, so a map
+     that has not drawn yet shows as the map, never as a black screen. */
+  background: var(--map-ground);
   color: var(--fg);
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-weight: 600;
@@ -17,10 +25,12 @@
   -webkit-font-smoothing: antialiased;
 }
 .app.live .bar, .app.live .side { display: none; }
-.app.live .main { position: relative; flex-direction: column; overflow: hidden; background: var(--bg); }
+/* No overflow clip, no position, no background (#136): see .app.live above. Nothing in it
+   overflows: the map takes what the sheet leaves. */
+.app.live .main { flex-direction: column; overflow: visible; background: none; }
 /* The map keeps its own ink: its attribution is dark text on a light ground. The ground colour
    is what shows for the one frame the map takes to redraw after the sheet changes height. */
-.app.live .map { order: 2; flex: 1; height: auto; min-height: 0; background: #eceae4; color: #1f2328; font-weight: 400; letter-spacing: normal; }
+.app.live .map { order: 2; flex: 1; height: auto; min-height: 0; background: var(--map-ground); color: #1f2328; font-weight: 400; letter-spacing: normal; }
 .app.live .map .mapboxgl-ctrl-top-right { display: none; }
 /* Clear of the sheet's rounded top, which laps 24px over the map. */
 .app.live .map .mapboxgl-ctrl-bottom-left, .app.live .map .mapboxgl-ctrl-bottom-right { bottom: 30px; }
