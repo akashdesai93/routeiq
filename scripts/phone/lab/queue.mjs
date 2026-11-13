@@ -63,6 +63,10 @@ export function readPlan(text, exists = existsSync) {
     const runs = b.runs ?? DEFAULT_RUNS
     if (!Array.isArray(runs) || runs.length === 0 || !runs.every((r) => Array.isArray(r) && r.every((a) => typeof a === 'string'))) return { error: `build "${b.name}": "runs" must be a list of argument lists` }
     if (runs.some((r) => r.includes('--lock'))) return { error: `build "${b.name}": --lock ends a session and cannot be part of a queue` }
+    // #136: every build is checked for a driving screen that is drawn after Start drive. Leaving
+    // that out takes a written reason (a build that cannot start a drive at all, say).
+    const drawCheck = runs.some((r) => r[r.indexOf('--scenario') + 1] === 'drive-screen' && r.includes('--scenario'))
+    if (!drawCheck && (typeof b.noDriveScreen !== 'string' || b.noDriveScreen.trim() === '')) return { error: `build "${b.name}": its runs have no "--scenario drive-screen" (is the driving screen drawn after Start drive?). Add one, or say why not in "noDriveScreen"` }
     builds.push({ name: b.name, ipa: b.ipa ?? null, runs, keep: b.keep !== false })
   }
   return { rollback: plan.rollback, builds }

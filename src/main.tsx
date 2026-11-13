@@ -7,7 +7,7 @@ import { shellDiagnostics } from './device/native/diagnostics.ts'
 import { isNativeShell, nativePlugin, startNativeShell } from './device/native/index.ts'
 import { startOfflineShell } from './device/offline.ts'
 import { startLab, type RouteIQLab } from './lab/lab.ts'
-import { LAYOUT_FIXES, layoutProbe } from './lab/probe.ts'
+import { EARLY_FIXES, LAYOUT_FIXES, layoutProbe } from './lab/probe.ts'
 import { setDirectionsTransport } from './providers/mapbox/client.ts'
 import { Root } from './ShellRoot.tsx'
 import { forgetOldSignalData } from './signalData.ts'
@@ -37,6 +37,7 @@ void startLab({
   probe: {
     layout: () => layoutProbe(document, window),
     fixes: Object.fromEntries(Object.entries(LAYOUT_FIXES).map(([name, fix]) => [name, () => fix(document, window)])),
+    early: Object.fromEntries(Object.entries(EARLY_FIXES).map(([name, fix]) => [name, () => fix(document, window)])),
   },
 })
 // Page errors and a lost map (WebGL) context, as words only, for the lab's report.
