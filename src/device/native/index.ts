@@ -28,6 +28,8 @@ export interface NativeDevice {
   readonly simulated: boolean
   /** A drive check was decided: its outcome goes into the diagnostics (DriveDiagnostics.checked). */
   readonly checked: (code: string, routes: number | null, savingSec: number | null) => void
+  /** A drive check sent no side-street probe, and why (DriveDiagnostics.probeSkipped). */
+  readonly probeSkipped: (reason: string) => void
 }
 
 export interface NativeDeviceOptions {
@@ -53,6 +55,7 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
   return {
     simulated: simulate !== null,
     checked: (code, routes, faster) => log.checked(code, routes, faster),
+    probeSkipped: (reason) => log.probeSkipped(reason),
     source: {
       start(onFix, onError) {
         log.gps(true)

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
   checkProbeAllowance,
+  checkProbePlan,
   plainCheckReserve,
   checkProbes,
+  probeBackoffHolds,
   type CongestionLevel,
   DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_OPTIONS,
@@ -396,7 +398,7 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
   const route = world('A', 1700)
 
   it('has one documented budget', () => {
-    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1, reserveMargin: 3 })
+    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1, reserveMargin: 3, losingChecks: 3, rearmSlowdownChange: 0.1 })
   })
 
   describe('checkProbeAllowance: probes share the drive request budget', () => {
@@ -555,27 +557,120 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
     const b = freshB()
     const confirming = (id: string) => ({
       action: 'stay' as const,
+      code: 'confirming' as const,
       considered: { routeId: id, savingSec: 200, turnInM: 5000, turnAt: at(6000, 0), requiredLeadM: 400, onFreeway: false },
       nextState: { ...INITIAL_REROUTE_STATE, pending: { geometry: s.geometry, polls: 1 } },
     })
 
     it('keeps the via of the side street being confirmed, and counts the probes', () => {
-      expect(rememberCheckProbes(INITIAL_CHECK_PROBES, 1, confirming(s.id), [b, s])).toEqual({ used: 1, round: 1, keep: s.via })
+      expect(rememberCheckProbes(INITIAL_CHECK_PROBES, 1, confirming(s.id), [b, s])).toEqual({ ...INITIAL_CHECK_PROBES, used: 1, round: 1, keep: s.via })
     })
 
     it('drops it when the route being confirmed is not a probed one, nothing is pending, or on a switch', () => {
-      const memory = { used: 4, round: 4, keep: s.via }
+      const memory = { ...INITIAL_CHECK_PROBES, used: 4, round: 4, keep: s.via }
       expect(rememberCheckProbes(memory, 1, confirming(b.id), [b, s]).keep).toBeNull()
-      const none = { action: 'stay' as const, considered: confirming(s.id).considered, nextState: INITIAL_REROUTE_STATE }
+      const none = { action: 'stay' as const, code: 'saving-too-small' as const, considered: confirming(s.id).considered, nextState: INITIAL_REROUTE_STATE }
       expect(rememberCheckProbes(memory, 1, none, [b, s]).keep).toBeNull()
       expect(rememberCheckProbes(memory, 1, { ...confirming(s.id), action: 'switch' }, [b, s]).keep).toBeNull()
     })
 
     it('a failed check keeps it, as the engine keeps its confirmation; a check without probes takes no turn', () => {
-      const memory = { used: 4, round: 4, keep: s.via }
-      const failed = { action: 'stay' as const, considered: null, nextState: INITIAL_REROUTE_STATE }
+      const memory = { ...INITIAL_CHECK_PROBES, used: 4, round: 4, keep: s.via }
+      const failed = { action: 'stay' as const, code: 'poll-failed' as const, considered: null, nextState: INITIAL_REROUTE_STATE }
       expect(rememberCheckProbes(memory, 0, failed, null)).toEqual(memory)
-      expect(rememberCheckProbes(memory, 0, confirming(s.id), [b, s])).toEqual({ used: 4, round: 4, keep: s.via })
+      expect(rememberCheckProbes(memory, 0, confirming(s.id), [b, s])).toEqual({ ...memory, keep: s.via })
+    })
+
+    it('counts a loss only for a side street that came back, was compared like for like and did not hold up (#183)', () => {
+      // The engine compared a probed route like for like (probeCompared), and it was not faster by enough.
+      const lost = { action: 'stay' as const, code: 'saving-too-small' as const, considered: null, nextState: INITIAL_REROUTE_STATE, probeCompared: true }
+      // The route being driven, 1.25 times its typical time (1500 s for 1200) as the check found it.
+      const driven = { route, alongM: 1000 }
+      const once = rememberCheckProbes(INITIAL_CHECK_PROBES, 1, lost, [freshA(), b, s], 0, driven)
+      expect(once).toMatchObject({ losing: 1, losingSlowdown: 1.25, keep: null })
+      const slower = candidate('A', here, 1700, { typicalDurationSec: 1200 })!
+      const twice = rememberCheckProbes(once, 1, lost, [slower, b, s], 0, driven)
+      expect(twice.losing).toBe(2)
+      expect(twice.losingSlowdown).toBeCloseTo(1700 / 1200, 9)
+      const unchanged = { losing: 2, losingSlowdown: twice.losingSlowdown }
+      // Nothing compared like for like tells nothing: no probed route came back (no road there, a
+      // failed or timed-out probe), no like-for-like time, or the engine stopped before comparing
+      // (no traffic data, no ETA, the route not found). Whatever the code says.
+      for (const code of ['saving-too-small', 'probe-unconfirmed', 'no-traffic-data', 'no-eta', 'route-unconfirmed', 'current-best'] as const) {
+        expect(rememberCheckProbes(twice, 1, { ...lost, code, probeCompared: false }, [freshA(), b, s], 0, driven), code).toMatchObject(unchanged)
+        expect(rememberCheckProbes(twice, 1, { ...lost, code, probeCompared: undefined }, [freshA(), b, s], 0, driven), code).toMatchObject(unchanged)
+      }
+      // A check that did not probe, or failed, changes nothing.
+      expect(rememberCheckProbes(twice, 0, lost, [freshA(), b, s], 0, driven)).toMatchObject(unchanged)
+      expect(rememberCheckProbes(twice, 1, lost, null, 0, driven)).toMatchObject(unchanged)
+      // A probed route being confirmed, or a switch, starts the count again.
+      expect(rememberCheckProbes(twice, 1, confirming(s.id), [b, s])).toMatchObject({ losing: 0, losingSlowdown: null })
+      expect(rememberCheckProbes(twice, 0, { ...lost, action: 'switch' }, [b, s])).toMatchObject({ losing: 0, losingSlowdown: null })
+      // The slowdown ahead not known (no route given, not found, or no typical time): not a loss,
+      // since nothing could then end the back-off.
+      expect(rememberCheckProbes(twice, 1, lost, [freshA(), b, s])).toMatchObject(unchanged)
+      expect(rememberCheckProbes(twice, 1, lost, [b, s], 0, driven)).toMatchObject(unchanged)
+      const untyped = candidate('A', here, 1500, { typicalDurationSec: null })!
+      expect(rememberCheckProbes(twice, 1, lost, [untyped, b, s], 0, driven)).toMatchObject(unchanged)
+    })
+  })
+
+  describe('the back-off after probes that keep losing (#183)', () => {
+    const memory = (losing: number, losingSlowdown: number | null) => ({ ...INITIAL_CHECK_PROBES, losing, losingSlowdown })
+    it('holds after 3 losses in a row, until the slowdown ahead changes by 0.1 (1.6 to 1.7 times the usual time)', () => {
+      expect(probeBackoffHolds(memory(2, 1.6), 1.6)).toBe(false)
+      expect(probeBackoffHolds(memory(3, 1.6), 1.6)).toBe(true)
+      expect(probeBackoffHolds(memory(3, 1.6), 1.69)).toBe(true)
+      expect(probeBackoffHolds(memory(3, 1.6), 1.71)).toBe(false)
+      expect(probeBackoffHolds(memory(3, 1.6), 1.49)).toBe(false)
+      expect(probeBackoffHolds(memory(3, 1.6), 1.51)).toBe(true)
+      // Not known now: it holds (a probe costs a request; unknown is not a change).
+      expect(probeBackoffHolds(memory(3, 1.6), null)).toBe(true)
+      // A hold with no slowdown of its own never holds: nothing could ever end it.
+      expect(probeBackoffHolds(memory(3, null), 3)).toBe(false)
+      expect(probeBackoffHolds(memory(3, null), null)).toBe(false)
+      expect(probeBackoffHolds(memory(5, 1.6), 1.6, { losingChecks: 6 })).toBe(false)
+    })
+  })
+
+  describe('checkProbePlan: why a check sends no probe (#183)', () => {
+    const fresh = [freshA(), freshB()]
+    const plan = (over: Partial<Parameters<typeof checkProbePlan>[0]> = {}) =>
+      checkProbePlan({ route, alongM: 1000, fresh, memory: INITIAL_CHECK_PROBES, allowed: 1, ...over })
+    // freshA is 1.25 times its typical time.
+    const backedOff = { ...INITIAL_CHECK_PROBES, losing: 3, losingSlowdown: 1.25 }
+    const freeway = { limitedAccessSpansM: [[0, 30_000]] as [number, number][] }
+
+    it('probes: no reason', () => {
+      expect(plan()).toMatchObject({ skipped: null })
+      expect(plan().points).toHaveLength(1)
+    })
+
+    it('each reason, in the order the rules are asked', () => {
+      // Nothing to spend comes first, whatever else holds.
+      expect(plan({ allowed: 0, fresh: [] }).skipped).toBe('budget')
+      expect(plan({ fresh: [] }).skipped).toBe('route-not-found')
+      expect(plan({ route: world('C', 1700), alongM: 9000 }).skipped).toBe('route-not-found')
+      // On time, and backing off as well: "not held up" is the reason.
+      const onTime = [candidate('A', here, 1500, { typicalDurationSec: 1450 })!, freshB()]
+      expect(plan({ fresh: onTime }).skipped).toBe('not-held-up')
+      expect(plan({ fresh: onTime, memory: backedOff }).skipped).toBe('not-held-up')
+      // Held up, freeway all the way: nowhere to probe beside.
+      const allFreeway = [candidate('A', here, 1500, { typicalDurationSec: 1200, ...freeway })!, freshB()]
+      expect(plan({ fresh: allFreeway }).skipped).toBe('nothing-to-probe')
+      // On time and freeway all the way: not held up.
+      expect(plan({ fresh: [candidate('A', here, 1500, { typicalDurationSec: 1450, ...freeway })!, freshB()] }).skipped).toBe('not-held-up')
+      expect(plan({ memory: backedOff })).toEqual({ points: [], skipped: 'backing-off' })
+      // The slowdown ahead changed by 0.1 since the last loss (1.14 then, 1.25 now): probing again.
+      expect(plan({ memory: { ...backedOff, losingSlowdown: 1.14 } }).skipped).toBeNull()
+      expect(plan({ memory: { ...backedOff, losingSlowdown: 1.16 } }).skipped).toBe('backing-off')
+    })
+
+    it('the via of a side street being confirmed is asked even when backing off, or with nothing new to probe beside', () => {
+      const keep: LngLat = at(9000, -500)
+      expect(plan({ memory: { ...backedOff, keep } })).toEqual({ points: [keep], skipped: null })
+      const allFreeway = [candidate('A', here, 1500, { typicalDurationSec: 1200, ...freeway })!, freshB()]
+      expect(plan({ fresh: allFreeway, memory: { ...INITIAL_CHECK_PROBES, keep } })).toEqual({ points: [keep], skipped: null })
     })
   })
 })

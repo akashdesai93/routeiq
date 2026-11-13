@@ -1303,7 +1303,7 @@ describe('side-street probes on the checks (#5)', () => {
     expect(s.state.lastDecision).toMatchObject({ action: 'stay', code: 'confirming' })
     // The probe and its path check count against the budget, and its via is asked first next time.
     expect(s.state.requestsUsed).toBe(4)
-    expect(s.state.probes).toEqual({ used: 1, round: 1, keep: at(10_000, -500) })
+    expect(s.state.probes).toEqual({ used: 1, round: 1, keep: at(10_000, -500), losing: 0, losingSlowdown: null })
 
     cruiseWithProbes(s, 120, 1000)
     expect(s.requests()[2]!.effect.probes.memory.keep).toEqual(at(10_000, -500))
@@ -1312,7 +1312,7 @@ describe('side-street probes on the checks (#5)', () => {
     expect(s.state.switches).toHaveLength(1)
     expect(s.spoken()).toEqual(['Switching to a faster route via side streets. Saves 5 minutes. Turn in 2.6 miles.'])
     expect(s.state.switchBanner).toMatchObject({ text: 'Switching to a faster route via side streets. Saves 5 minutes. Turn in 2.6 miles.', canKeep: true })
-    expect(s.state.probes).toEqual({ used: 2, round: 2, keep: null })
+    expect(s.state.probes).toEqual({ used: 2, round: 2, keep: null, losing: 0, losingSlowdown: null })
   })
 
   it('without the path check a probe needs, a side street never counts', () => {
