@@ -172,6 +172,20 @@ test('the web view is not inspectable by configuration: only the lab turns it on
   assert.equal(config.server, undefined);
 });
 
+test('the web view runs edge to edge: the page fills the window and pads itself for the safe areas (#197, #136)', () => {
+  // "always" made the scroll view add the safe areas to its insets: the page was 860 points tall in a
+  // 922-point window, and the 62 points left showed as a black band under the driving screen's sheet.
+  // The page asks for the whole screen (viewport-fit=cover) and keeps clear of the notch and the home
+  // indicator with env(safe-area-inset-*) itself.
+  const config = JSON.parse(readFileSync(new URL('../capacitor.config.json', import.meta.url), 'utf8'));
+  assert.equal(config.ios?.contentInset, 'never');
+  const html = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8');
+  assert.match(html, /viewport-fit=cover/);
+  const live = readFileSync(new URL('../../../src/live.css', import.meta.url), 'utf8');
+  assert.match(live, /top: max\(12px, env\(safe-area-inset-top/);
+  assert.match(live, /env\(safe-area-inset-bottom/);
+});
+
 test('a test drive replaces the GPS positions, marks its own, and ends with the drive', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
   const engine = readFileSync(new URL('RouteIQEngine.swift', dir), 'utf8');
