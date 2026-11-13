@@ -151,6 +151,12 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    line is now kept until spoken, with the new route said straight after it. Which
    carriageway the car is on is not known. The first route is the best-ranked one
    from the device's position, not the one picked in the list.
+   More map, more air (Nov 13, 2026, #197 part 2): the trip screen's map is half the
+   screen, the drive view's turn card and sheet are shorter, every gap between controls is
+   8 px or more. Guarded by a minimum map share and tap gap in `e2e/design.spec.ts`.
+   Open for later: a real pull-up sheet on the trip screen (today the page scrolls); the
+   black band under the drive sheet in the iPhone shell (the page is 860 of 922 points;
+   `contentInset: "never"` alone did not change it on the phone, #136).
    For the native shell: `src/core` (tracking, live, guidance, speechQueue, reroute)
    and `src/live/runner.ts` run as they are, or port one to one; it replaces the
    three device wrappers (position source -> Core Location with background updates,
@@ -291,6 +297,17 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       turns out to miss
       side streets on real trips; probes from inside the side street's own stretch see
       only what Mapbox offers from there.
+      11d (#183, desk-drive findings): the drive never goes blind. A probe goes out only
+      from what is left after one request per poll interval until the expected arrival
+      (times `arrivalReserve`, 1, plus `reserveMargin`, 3) is kept back for the plain checks
+      (`plainCheckReserve`, `checkProbeAllowance`); the time left is the view's own
+      (`remainingDriveSec`). e2e: "when the side streets keep losing, they never use up
+      the checks before I arrive" and "on a 40-minute drive that is slow from the start,
+      the side streets are tried early and the checks still last to the end". Open for later: the total budget (`maxRequests`, 60)
+      does not grow with a longer planned drive, so a drive of over an hour still runs
+      out of checks without any probe (a cost decision for the owner); back-off after
+      probes that keep losing, and the reason a probe was skipped in the diagnostics,
+      follow in their own PR.
     - **Guard rails.** Leave out routes that only win by modeled noise: the existing
       minimum saving (120 s and 5%) applies. Optionally penalize many turns or
       residential cut-throughs, behind a setting and with tests.
