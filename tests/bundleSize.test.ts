@@ -18,9 +18,8 @@ describe('bundle ceiling (#170)', () => {
     const shipped = (await import('../scripts/bundle-budget.json', { with: { type: 'json' } })).default
     expect(budgetProblems(shipped)).toEqual([])
     // The ceiling the owner set on #170 (option (b)): changing it is an owner decision.
-    // entryJs / entryCss: #127's first-paint numbers (measured + 10 %), owner numbers once the
-    // owner accepts them (#188, "How the open PRs migrate").
-    expect(shipped.ceiling).toEqual({ appJs: 480_000, css: 85_000, entryJs: 452_123, entryCss: 25_822 })
+    // entryJs / entryCss: what loads before first paint, the owner's option (b) on #97 (2026-11-13).
+    expect(shipped.ceiling).toEqual({ appJs: 480_000, css: 85_000, entryJs: 480_000, entryCss: 30_000 })
     // The growth limits the owner chose with option (a) on #170.
     expect(shipped.growthPerPr).toEqual({ appJs: 4000, css: 2000, entryJs: 4000, entryCss: 2000 })
     expect(shipped.alertAt).toBe(0.9)

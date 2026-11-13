@@ -3,8 +3,8 @@
   "ceiling": {
     "appJs": 480000,
     "css": 85000,
-    "entryJs": 452123,
-    "entryCss": 25822
+    "entryJs": 480000,
+    "entryCss": 30000
   },
   "growthPerPr": {
     "appJs": 4000,
