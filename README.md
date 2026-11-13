@@ -1175,8 +1175,10 @@ stays at the right.
   with `max(<gap>, env(safe-area-inset-*))`: in Safari and the Home Screen app the top bar
   sits below the notch and the content clear of the home indicator and the rounded corners.
   The iPhone shell keeps insetting its web view itself (`contentInset: "always"` in
-  `native/shell/capacitor.config.json`, unchanged), so there the insets read 0 and the
-  gaps apply; the shell's layout is the same as before this change.
+  `native/shell/capacitor.config.json`), so there the insets read 0 and the gaps apply.
+  The page is 860 points tall in a 922-point window there, which shows as a black band
+  under the driving screen's sheet (#136). `contentInset: "never"` alone did not change
+  that on the phone (#197, phone lab 2026-11-13): the cause is still open.
 
 ## Live drive
 
@@ -1322,6 +1324,21 @@ the phone's safe areas, and the one animation is off under `prefers-reduced-moti
 On a phone on its side (landscape, up to 500 px tall: a dash mount) the turn card and
 the sheet stack in a column on the left and the map fills the right, so the car stays in
 view; the sheet scrolls in its column with More and End pinned at its foot (#131).
+**More map, more air** (#197, the owner: "a bit congested"): the map is the main thing on
+both screens, and `e2e/design.spec.ts` holds it there with a minimum share of the screen
+where the map can be seen (`MIN_MAP_SHARE`, measured on a grid of points: cards, sheets
+and bars count against it) and a minimum gap of 8 px between any two things a finger taps
+(`MIN_TAP_GAP_PX`). Each run plants a regression (a taller turn card, More and End 4 px
+apart) and checks that the guard catches it. On the trip screen the map takes half the
+screen (50 %, was 42 %) and the trip and the routes scroll up under it; on a phone on its
+side the panel is 340 px (was 380). On the driving screen the turn card is 112 px (was
+124), the sheet's top padding 24 px, and under the controls the home indicator's inset
+alone (not 14 px more); in landscape the column is 340 px. Spacing between controls is at least 8 px,
+from the token gaps (8, 12, 14 px). The map's share, before and after, at 390 x 844,
+430 x 932 and 844 x 390: trip screen 40 / 39 / 48 % → 48 / 48 / 53 %, driving screen
+56 / 62 / 55 % → 58.5 / 62 / 60 % (screenshots in `docs/design/197-more-map/`). On the
+iPhone (phone lab, 2026-11-13) the drive map grew from 676 to 695 points of an 860-point
+page, and the plan map from about 40 % to 55 % of the screen.
 **The map by day and by night** (#145, `src/map/mapTheme.ts`): when the map starts it takes
 the phone's appearance. By day it is `streets-v12` with the route ahead in ink on a white
 casing; by night `navigation-night-v1` with a light route (`#f2f4f6`) on a dark casing, and

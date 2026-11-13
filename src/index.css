@@ -51,7 +51,7 @@ button:hover { background: var(--raised2); }
 .plan { padding: 12px 16px; border-bottom: 1px solid var(--hair); }
 .field { position: relative; margin-bottom: 4px; }
 .field label { display: block; margin-bottom: 4px; font-weight: 600; }
-.field-row { display: flex; gap: 6px; }
+.field-row { display: flex; gap: 8px; }
 /* 16px: iOS Safari zooms the page when a smaller input takes the focus. */
 .plan input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 8px 12px; border: 1.5px solid var(--hair); border-radius: 14px; background: var(--raised); color: inherit; }
 .plan input::placeholder { color: var(--dim); }
@@ -65,22 +65,22 @@ button:hover { background: var(--raised2); }
 .option-detail { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
 .field-status { min-height: 4px; margin: 2px 0 6px; color: var(--dim); font-size: 13px; }
 .field-status.failed { color: var(--danger); }
-.plan-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.plan-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
 .plan button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
 .plan button:disabled { color: var(--hair2); cursor: default; }
 .chip { border-radius: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.unset { border-style: dashed; border-color: var(--hair2); background: transparent; color: var(--dim); }
 .plan-more summary { cursor: pointer; }
 .plan-more h3 { margin: 12px 0 6px; font-size: 14px; }
-.place-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.place-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .place-go { width: 100%; text-align: left; background: var(--glass); overflow-wrap: anywhere; }
-.saved-row { display: flex; gap: 6px; align-items: center; }
+.saved-row { display: flex; gap: 8px; align-items: center; }
 .saved-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .name-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .panel h2 { margin: 0 0 8px; font-size: 16px; }
 .panel .notice { margin: 0 0 12px; padding: 12px; }
 .panel .notice p { margin: 0 0 8px; }
-.routes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.routes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 /* A route card (#85; design merged-2-pick-a-route, merged-signal-states): time leads, large, in
    the figure face; then the name and badges, distance and lights, and the reasons, dim. The
    selected card has the white outline. The name is first in the markup (it starts the button's
@@ -105,20 +105,20 @@ button:hover { background: var(--raised2); }
 .route-delta-words { align-self: center; color: var(--dim); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.25; white-space: normal; }
 .hint { color: var(--dim); font-size: 13px; }
 .offline-note { margin: 0 0 8px; padding: 10px 12px; border-radius: 16px; background: var(--raised); color: var(--fg); font-size: 14px; }
-.handoff { margin: 4px 0 8px; font-size: 14px; }
+.handoff { margin: 8px 0; font-size: 14px; }
 button.link { padding: 0; border: 0; background: none; font-size: inherit; color: var(--fg); text-decoration: underline; }
 button.link:hover { background: none; color: #ffffff; }
 .drive { margin: 12px 0; padding-top: 10px; border-top: 1px solid var(--hair); }
 .drive h3 { display: inline; margin: 0; font-size: 15px; }
 .drive > details > summary { cursor: pointer; margin-bottom: 8px; }
-.drive-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.drive-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .drive button[aria-pressed='true'] { background: var(--raised2); border-color: var(--fg); }
 .drive button:disabled { color: var(--hair2); cursor: default; }
 .drive-status { margin: 0 0 8px; }
 .whatif { margin: 0 0 8px; padding: 8px; border: 1px dashed var(--hair2); border-radius: 12px; background: var(--raised); }
 .whatif .drive-row { margin: 6px 0 0; }
 .whatif .hint { margin: 6px 0 0; }
-.setting { display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; margin: 4px 0; font-size: 13px; }
+.setting { display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; margin: 8px 0; font-size: 13px; }
 .setting input { width: 72px; font: inherit; font-size: 13px; padding: 2px 4px; }
 .drive-settings { margin-bottom: 8px; }
 .drive-settings summary { cursor: pointer; }
@@ -143,7 +143,8 @@ button.link:hover { background: none; color: #ffffff; }
   .plan { order: 2; flex: none; position: relative; z-index: 2; margin-top: -24px; padding-top: 22px; border: 0; border-top: 1.5px solid var(--hair); border-radius: 28px 28px 0 0; background: var(--glass); font-size: 15px; }
   .plan::before { content: ''; position: absolute; top: 9px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: var(--hair2); }
   .main > .notice { flex: none; align-self: auto; }
-  .map { flex: none; height: 42vh; height: 42dvh; min-height: 260px; }
+  /* Half the screen for the map (#197: "the map is too small"); the trip and the routes scroll up under it. */
+  .map { flex: none; height: 50vh; height: 50dvh; min-height: 300px; }
   .panel { order: 3; flex: none; background: var(--glass); font-size: 15px; }
   /* Clear of the sheet's rounded top, which laps 24px over the map. */
   .map .mapboxgl-ctrl-bottom-left, .map .mapboxgl-ctrl-bottom-right { bottom: 24px; }
@@ -164,6 +165,10 @@ button.link:hover { background: none; color: #ffffff; }
   .hint a, .handoff a { display: inline-flex; align-items: center; min-height: 44px; }
   .setting input { width: 88px; font-size: 16px; }
   .map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
+}
+/* A phone on its side keeps the side-by-side trip screen, with a narrower panel: more map (#197). */
+@media (orientation: landscape) and (max-height: 500px) {
+  .side { width: 340px; }
 }
 /* The attribution is never collapsed (it carries the OpenStreetMap credit), so on a narrow map it is kept clear of the Mapbox logo in the other corner. */
 .map .mapboxgl-ctrl-bottom-right { max-width: calc(100% - 110px); }
@@ -220,7 +225,7 @@ button.link:hover { background: none; color: #ffffff; }
 .drives th, .drives td { text-align: left; padding: 2px 10px 2px 0; }
 .corridor-sources { margin: 4px 0; padding-left: 18px; }
 .drives-export textarea { width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--hair); border-radius: 10px; }
-.other-eta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.other-eta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
 .other-eta input { width: 9em; }
 .other-eta .field-status { flex-basis: 100%; }
 /* "Other app's ETA" before Start drive (#118): a field a thumb can hit, 16 px so iOS does not zoom on focus. */
