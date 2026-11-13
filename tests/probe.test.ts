@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   alongRouteM,
   checkProbeAllowance,
+  plainCheckReserve,
   checkProbes,
   type CongestionLevel,
   DEFAULT_DRIVE_PROBE_BUDGET,
@@ -395,34 +396,56 @@ describe('side-street probes during a drive (PLAN step 11c, #5)', () => {
   const route = world('A', 1700)
 
   it('has one documented budget', () => {
-    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8 })
+    expect(DEFAULT_DRIVE_PROBE_BUDGET).toEqual({ requestsPerCheck: 1, requestsPerDrive: 20, minDelaySec: 120, timeoutSec: 8, arrivalReserve: 1, reserveMargin: 3 })
   })
 
   describe('checkProbeAllowance: probes share the drive request budget', () => {
     it('one probe per check, with room left over for the check of the current path', () => {
       // 60 requests: this check is the 10th.
-      expect(checkProbeAllowance({ requestsUsed: 10, probesUsed: 3 }, 60)).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 10, probesUsed: 3 }, 60, {}, 0)).toBe(1)
       // The 59th request: one is left, and it is the path check's.
-      expect(checkProbeAllowance({ requestsUsed: 59, probesUsed: 3 }, 60)).toBe(0)
-      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 3 }, 60)).toBe(1)
-      expect(checkProbeAllowance({ requestsUsed: 60, probesUsed: 3 }, 60)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 59, probesUsed: 3 }, 60, {}, 0)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 3 }, 60, {}, 0)).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 60, probesUsed: 3 }, 60, {}, 0)).toBe(0)
     })
 
     it('stops at the per-drive cap', () => {
-      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 19 }, 60)).toBe(1)
-      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 20 }, 60)).toBe(0)
-      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 25 }, 60)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 19 }, 60, {}, 0)).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 20 }, 60, {}, 0)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 30, probesUsed: 25 }, 60, {}, 0)).toBe(0)
     })
 
     it('takes a budget of its own, rounded down; under 1 or not a number turns probing off', () => {
-      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2 })).toBe(2)
-      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2.9 })).toBe(2)
-      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 0.5 })).toBe(0)
-      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: NaN })).toBe(0)
-      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerDrive: 0 })).toBe(0)
-      expect(checkProbeAllowance({ requestsUsed: NaN, probesUsed: 0 }, 60)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2 }, 0)).toBe(2)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 2.9 }, 0)).toBe(2)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: 0.5 }, 0)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerCheck: NaN }, 0)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, { requestsPerDrive: 0 }, 0)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: NaN, probesUsed: 0 }, 60, {}, 0)).toBe(0)
       // Two probes on the 58th request: only one fits before the path check's room.
-      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 0 }, 60, { requestsPerCheck: 2 })).toBe(1)
+      expect(checkProbeAllowance({ requestsUsed: 58, probesUsed: 0 }, 60, { requestsPerCheck: 2 }, 0)).toBe(1)
+    })
+
+    it('keeps back what the plain checks until the arrival need, so the drive never goes blind (#183)', () => {
+      // 42 minutes left, a check a minute: 42 checks, plus 3 for the odd path check = 45 kept back.
+      expect(plainCheckReserve(2520, 60)).toBe(45)
+      expect(plainCheckReserve(2521, 60)).toBe(46)
+      expect(plainCheckReserve(0, 60)).toBe(3)
+      expect(plainCheckReserve(1800, 60, { arrivalReserve: 1.5 })).toBe(48)
+      expect(plainCheckReserve(1800, 60, { reserveMargin: 0 })).toBe(30)
+      // Not known: no reserve can be worked out, and an unknown one is never zero.
+      expect(plainCheckReserve(null, 60)).toBeNull()
+      expect(plainCheckReserve(NaN, 60)).toBeNull()
+      expect(plainCheckReserve(1800, 0)).toBeNull()
+      // The 10th request of 60 with 45 kept back: 60 - 10 - 1 (path check) - 45 = 4 left, one probe.
+      expect(checkProbeAllowance({ requestsUsed: 10, probesUsed: 3 }, 60, {}, 45)).toBe(1)
+      // The 14th: 60 - 14 - 1 - 45 = 0, no probe; the 45 plain checks are still all there.
+      expect(checkProbeAllowance({ requestsUsed: 14, probesUsed: 3 }, 60, {}, 45)).toBe(0)
+      expect(checkProbeAllowance({ requestsUsed: 13, probesUsed: 3 }, 60, {}, 45)).toBe(1)
+      // Two probes asked for with room for one.
+      expect(checkProbeAllowance({ requestsUsed: 13, probesUsed: 0 }, 60, { requestsPerCheck: 2 }, 45)).toBe(1)
+      // The time left is not known: no probe.
+      expect(checkProbeAllowance({ requestsUsed: 1, probesUsed: 0 }, 60, {}, null)).toBe(0)
     })
   })
 

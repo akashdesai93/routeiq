@@ -1061,8 +1061,26 @@ lead distance, the cooldown, no return. No threshold changed.
   check now offers.
 - **Budget.** Probes share the drive's request budget (`maxRequests`, 60) and never take
   the request a check's path check may need: a probe goes out only while, after the check
-  itself, one request would still be left for that path check (`checkProbeAllowance`). At
-  most `requestsPerDrive` (20) probes a drive, so most of the budget stays for the checks.
+  itself, one request would still be left for that path check (`checkProbeAllowance`).
+- **Never blind.** Nor do probes take what the plain checks until the arrival need (#183):
+  before a probe, one request per poll interval of the expected time left (the arrival
+  the drive view shows, `remainingDriveSec`), times `arrivalReserve` (1), plus
+  `reserveMargin` (3) for the odd plain check that needs its path check, is kept back
+  (`plainCheckReserve`), and probes spend only what is left after that. With 30 minutes
+  left and a check a minute, 33 requests are kept back. It is worked out again at every
+  check from the latest travel time: it shrinks a request a minute as the drive goes on,
+  and grows when the traffic gets worse. When the time left is not known,
+  no probe goes out (an unknown reserve is never zero). A desk drive on a real corridor
+  had spent 54 of its 60 requests on probing checks and drove the last 5.5 minutes with
+  no checks at all. The price: with 60 requests, a drive with more than about 55 minutes
+  left has no room for a probe yet. A first version kept back 1.5 requests a minute, and
+  on a 40-minute rush-hour desk drive it sent 1 probe in 40 minutes, with the route 200 s
+  over its typical time and a jam on a probe-able stretch early on; keeping back one a
+  minute leaves a 40-minute drive about 15 requests for probes from the start. The
+  simulated drive keeps back the same, for its own time left (the line ahead at the speed
+  it now drives, `simulatedTimeLeftSec`).
+- **Per drive.** At most `requestsPerDrive` (20) probes a drive, so most of the budget stays
+  for the checks.
   A search for a new route (off the route) and the first route never probe. Nothing to
   probe (under 3 km left, freeway only, a route not held up) costs nothing. Every request
   is counted as it is sent (the shell reports it: `request-sent`), so the requests of a
@@ -1081,6 +1099,8 @@ lead distance, the cooldown, no return. No threshold changed.
 | `requestsPerDrive` | 20 | Most probe requests per drive, out of `maxRequests` (60) |
 | `minDelaySec` | 120 s | A route with no jam reported ahead is probed only when it is this far over its typical time |
 | `timeoutSec` | 8 s | How long a check's probes and the path check they need may take in all |
+| `arrivalReserve` | 1 | Before a probe, this many requests per poll interval until the expected arrival are kept back for the plain checks |
+| `reserveMargin` | 3 | Requests kept back on top of those, for the odd plain check that needs its path check |
 
 What a check costs: 1 request, plus 1 for the path check when the route being driven is
 not among the fresh routes, plus 0 or 1 probe, plus 1 path check after a probe that found

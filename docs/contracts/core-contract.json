@@ -32,7 +32,7 @@
     "DistanceSpanM": "type DistanceSpanM = readonly [ startM : number , endM : number ]",
     "DriveLog": "interface DriveLog { readonly version : typeof DRIVE_LOG_VERSION readonly drives : readonly DriveRecord [ ] }",
     "DriveOutcome": "type DriveOutcome = 'arrived' | 'ended' | 'unfinished'",
-    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number }",
+    "DriveProbeBudget": "interface DriveProbeBudget { readonly requestsPerCheck : number readonly requestsPerDrive : number readonly minDelaySec : number readonly timeoutSec : number readonly arrivalReserve : number readonly reserveMargin : number }",
     "DriveRecord": "interface DriveRecord { readonly id : string readonly startedAtMs : number readonly startHour : number readonly endedAtMs : number | null readonly corridor : string readonly routeSource : RouteSource readonly predictedSec : number readonly actualSec : number readonly distanceM : number readonly signals : LoggedSignals | null readonly otherAppSec : number | null readonly switches : readonly LoggedSwitch [ ] readonly offRouteEvents : number readonly requests : number readonly outcome : DriveOutcome readonly stops : DriveStops | null }",
     "DriveStops": "interface DriveStops { readonly list : readonly LoggedStop [ ] readonly count : number readonly stoppedSec : number readonly lightStops : number readonly lightSec : number readonly unknownStops : number readonly parts : { readonly surface : PartTime readonly freeway : PartTime } | null }",
     "GuidanceAnnouncement": "interface GuidanceAnnouncement { readonly atDistanceM : number readonly text : string }",
