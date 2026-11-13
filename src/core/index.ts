@@ -137,6 +137,7 @@ export {
   DEFAULT_LIVE_OPTIONS,
   LIVE_IDLE,
   livePollGate,
+  remainingDriveSec,
   liveStep,
   liveView,
   OFFER_TITLE,
@@ -199,6 +200,7 @@ export {
 } from './handoff.ts'
 export {
   checkProbeAllowance,
+  plainCheckReserve,
   checkProbes,
   DEFAULT_DRIVE_PROBE_BUDGET,
   DEFAULT_PROBE_BUDGET,

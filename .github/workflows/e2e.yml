@@ -68,23 +68,24 @@ jobs:
           path: |
             ~/.cache/ms-playwright
             ~/.cache/playwright-debs
-          key: playwright-shell-${{ steps.image.outputs.id }}-${{ steps.pw.outputs.version }}
+          key: playwright-shell-webkit-${{ steps.image.outputs.id }}-${{ steps.pw.outputs.version }}
 
-      # Headless Chromium only (no full browser), plus the system packages it needs. With the
+      # Headless Chromium (no full browser), plus WebKit for the small iPhone smoke set
+      # (e2e/webkit.smoke.spec.ts, #136), and the system packages they need. With the
       # cache, the same packages are installed from their saved .deb files (no apt-get update,
       # no download); without it, as before, and the .deb files are kept for the next run.
       # Either way Playwright checks the browser's libraries when it starts it.
-      - name: Headless Chromium and its system packages
+      - name: Headless Chromium, WebKit and their system packages
         run: |
           debs=~/.cache/playwright-debs
           # Package triggers rebuild the man page index otherwise (seconds, never used here).
           sudo rm -f /var/lib/man-db/auto-update
           if compgen -G "$debs/*.deb" > /dev/null && { ls "$debs"; sudo dpkg -i "$debs"/*.deb; }; then
             echo "installed the $(ls "$debs"/*.deb | wc -l) cached packages install-deps added on this image"
-            npx playwright install --only-shell chromium
+            npx playwright install --only-shell chromium webkit
           else
             # No cache, or its packages would not install: the full install, as before.
-            npx playwright install --with-deps --only-shell chromium
+            npx playwright install --with-deps --only-shell chromium webkit
             mkdir -p "$debs"
             cp /var/cache/apt/archives/*.deb "$debs"/ 2>/dev/null || true
             echo "kept $(ls "$debs" | wc -l) .deb files for the cache"

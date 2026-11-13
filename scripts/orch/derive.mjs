@@ -342,6 +342,9 @@ export function derive(raw, opts = {}) {
   return { generated_at: now, repo: raw.repo, sessions: sessionList, prs: prs.map(({ body: _body, ...p }) => p), merged, issues, events, decisions, health, phoneQueue }
 }
 
+/** The list fields of a derived session, which the board and the dashboard map over. */
+const SESSION_LISTS = ['prs', 'open_prs', 'claimed']
+
 /**
  * Adds local-only facts (the fleet roster and events) in the same shapes, without duplicates,
  * and `health`: the dashboard health fields only the PC knows (phone_build, phone_state, notes).
@@ -350,7 +353,10 @@ export function mergeLocal(state, local) {
   const sessions = new Map(state.sessions.map((s) => [s.id, s]))
   for (const s of local.sessions || []) {
     const had = sessions.get(s.id)
-    if (!had || String(s.last_seen) > String(had.last_seen)) sessions.set(s.id, { ...had, ...s })
+    if (had && String(s.last_seen) <= String(had.last_seen)) continue
+    // The local roster carries no PR or claim lists (#205): keep GitHub's, or none.
+    const lists = Object.fromEntries(SESSION_LISTS.map((k) => [k, Array.isArray(s[k]) ? s[k] : had?.[k] ?? []]))
+    sessions.set(s.id, { ...had, ...s, ...lists })
   }
   const key = (e) => `${e.at}|${e.who}|${e.kind}`
   const events = new Map(state.events.map((e) => [key(e), e]))

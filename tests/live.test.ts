@@ -6,6 +6,7 @@ import {
   livePollGate,
   liveStep,
   liveView,
+  remainingDriveSec,
   POSITION_ERROR_MESSAGES,
   REQUEST_TIMED_OUT,
   SPOKEN,
@@ -1271,7 +1272,8 @@ describe('side-street probes on the checks (#5)', () => {
   it('probes share the request budget: never the request the path check needs, and none once it is spent', () => {
     // 4 requests: the first route, then checks. The 2nd request may probe (room for it and a path check);
     // the 3rd may not (the 4th is the path check's); the 4th has no room for either.
-    const s = driving({ maxRequests: 4 })
+    // (Nothing kept back for the checks until the arrival here: the next test is about that.)
+    const s = driving({ maxRequests: 4, probes: { arrivalReserve: 0, reserveMargin: 0 } })
     cruise(s, 60)
     cruise(s, 120)
     cruise(s, 180)
@@ -1281,6 +1283,28 @@ describe('side-street probes on the checks (#5)', () => {
       ['poll', true, 0],
       ['poll', false, 0],
     ])
+  })
+
+  it('probes never take the requests the plain checks until the arrival need (#183)', () => {
+    // The first check goes out 60 s in, 900 m along a route last heard at 1300 s: the time
+    // left is 1300 s for the share of the route ahead, and one request per minute of it, plus 3,
+    // is kept back. The 2nd request has room for a probe only when the budget has
+    // 2 (requests so far) + 1 (its path check) + that reserve + 1.
+    const first = candidate('A', at(0, 0), 1300)!
+    const reserve = Math.ceil((1300 * ((first.distanceM - 900) / first.distanceM)) / 60) + 3
+    expect(reserve).toBeGreaterThan(20)
+    const tight = driving({ maxRequests: 3 + reserve }, first)
+    cruise(tight, 60)
+    expect(tight.requests()[1]!.effect.probes.allowed).toBe(0)
+    const room = driving({ maxRequests: 4 + reserve }, first)
+    cruise(room, 60)
+    expect(room.requests()[1]!.effect.probes.allowed).toBe(1)
+    // A slower answer (more time left) keeps more back: the check after it may not probe.
+    cruise(room, 120, (xM) => routesAt(xM, { A: 1900 }))
+    cruise(room, 180, (xM) => routesAt(xM, { A: 1900 }))
+    expect(room.requests()[3]!.effect.probes.allowed).toBe(0)
+    // The time left is what the view shows too.
+    expect(remainingDriveSec(room.state)).toBeCloseTo(liveView(room.state, room.nowMs()).remainingSec!, 6)
   })
 
   it('a side street found by the probes is confirmed through the same via, switched to by the usual rules, and announced as such', () => {
