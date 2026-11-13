@@ -50,6 +50,19 @@ async function clipped(root: import('@playwright/test').Locator): Promise<string
   })
 }
 
+/** True when the middle and both ends of `part` are inside the window and nothing else is drawn over them. */
+async function uncovered(part: import('@playwright/test').Locator): Promise<boolean> {
+  return part.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const y = r.top + r.height / 2
+    return [r.left + 4, r.left + r.width / 2, r.right - 4].every((x) => {
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false
+      const top = document.elementFromPoint(x, y)
+      return top !== null && (el === top || el.contains(top))
+    })
+  })
+}
+
 /** "10:24 AM" → minutes since midnight. */
 function clockMin(text: string): number {
   const m = /^(\d{1,2}):(\d{2})/.exec(text.trim())
@@ -240,6 +253,14 @@ test('when a faster route is offered, it shows its turn, and Take it switches at
         expect(k.height).toBeGreaterThanOrEqual(44)
         expect(k.x - (t.x + t.width)).toBeGreaterThanOrEqual(8)
         await app.snap('pending: the faster route turns left onto East Loop, Take it or Keep my route')
+        // On a phone on its side the sheet is a short column: the turn and both answers are still
+        // all in sight at once, none under another (the buttons are pinned over a column that scrolls).
+        await page.setViewportSize({ width: 844, height: 390 })
+        for (const part of [sheet.getByLabel('Turn for the faster route'), take, keep]) {
+          expect(await uncovered(part), `${await part.textContent()} in sight in landscape`).toBe(true)
+        }
+        await app.snap('pending in landscape: the turn, Take it and Keep my route all in sight')
+        await page.setViewportSize({ width: 390, height: 844 })
       }
       if (stage === 'confirmed') {
         // Guidance moved with it: the next turn is the East Loop.

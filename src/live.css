@@ -211,6 +211,13 @@
   .live-bottom > .live-warning, .live-more { order: 1; }
   .live-controls { order: 2; }
   .live-moment-actions { position: sticky; z-index: 1; bottom: 78px; background: var(--glass); box-shadow: 0 12px 0 var(--glass); }
+  /* While a faster route is offered the column cannot hold the banner, its turn, the time line and
+     two rows of buttons (#197): the time line steps aside, as the banner says what it saves. */
+  .live-moment:has(.live-news[data-stage='pending']) .live-eta { display: none; }
+  /* ...and the banner keeps one line, "Would save 9 min · 1 fewer light", which says it all. */
+  .live-news[data-stage='pending'] { margin-bottom: 8px; padding: 8px 12px; }
+  .live-news[data-stage='pending'] .live-news-text strong { display: none; }
+  .live-offer-turn { margin-bottom: 8px; }
   .live-controls {
     position: sticky;
     bottom: 0;
