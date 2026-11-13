@@ -9,6 +9,9 @@
 // - Network bookkeeping: fetch counts requests in flight, so the test can wait
 //   until the app has its answers before moving the clock on. Where requests
 //   go is decided by the test's router, not here.
+// - Work counters: every React commit (through React's devtools hook, which a
+//   production build calls too) and every WebGL draw call, so a scenario can
+//   show that nothing is drawn while nobody can see the screen.
 //
 // It must be self-contained: Playwright serializes this function into the page.
 
@@ -23,6 +26,8 @@ export interface E2EWindow {
     deny: () => void
     /** The position "Use my location" gets; null answers with a refusal. */
     here: [number, number] | null
+    /** React commits and WebGL draw calls (the map drawing a frame) since the page opened. */
+    work: { commits: number; draws: number }
   }
 }
 
@@ -42,12 +47,43 @@ export function installBrowserStubs(): void {
     inflight: 0,
     fetched: [],
     here: [-80.8431, 35.2271],
+    work: { commits: 0, draws: 0 },
     fix(lng, lat, headingDeg, speedMps) {
       for (const watcher of watchers.values()) watcher.ok(position(lng, lat, speedMps > 0.5 ? headingDeg : null, speedMps))
     },
     deny() {
       for (const watcher of watchers.values()) watcher.fail?.({ code: 1, PERMISSION_DENIED: 1, message: 'denied' } as GeolocationPositionError)
     },
+  }
+
+  // React reports each commit to a devtools hook, when there is one (production builds too).
+  const hooked = w as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown }
+  if (hooked.__REACT_DEVTOOLS_GLOBAL_HOOK__ === undefined) {
+    let renderer = 0
+    hooked.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+      supportsFiber: true,
+      renderers: new Map(),
+      inject: () => ++renderer,
+      onCommitFiberRoot: () => {
+        w.__e2e.work.commits++
+      },
+      onCommitFiberUnmount: () => {},
+      onPostCommitFiberRoot: () => {},
+      checkDCE: () => {},
+    }
+  }
+  // Every draw call of every WebGL context: what the map costs the GPU.
+  for (const gl of [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext]) {
+    if (gl === undefined) continue
+    const proto = gl.prototype as unknown as Record<string, unknown>
+    for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']) {
+      const original = proto[name]
+      if (typeof original !== 'function') continue
+      proto[name] = function (this: unknown, ...args: unknown[]) {
+        w.__e2e.work.draws++
+        return (original as (...a: unknown[]) => unknown).apply(this, args)
+      }
+    }
   }
 
   const geolocation = {

@@ -81,8 +81,18 @@ export interface DriveOptions {
   wrongTurnAtSec?: number
   /** GPS error, up to this many meters to either side of the road (deterministic). Default 0. */
   gpsNoiseM?: number
-  /** At this simulated second the page goes hidden and stays hidden: the phone was locked, or another app is in front. */
+  /**
+   * At this simulated second the page goes hidden: the phone was locked, or another app is in
+   * front. Nothing is drawn then, so the driver goes by what is said: a switch heard is
+   * followed, and on "You have arrived" the driver picks the phone up (the page is shown).
+   */
   hideAtSec?: number
+  /** At this simulated second a hidden page is shown again: the phone was unlocked. Default: on arrival. */
+  showAtSec?: number
+  /** The hidden page is shown again on the step after a switch or a new route is heard: the driver looks. */
+  showAfterHeard?: boolean
+  /** Looks at the screen the moment it is shown (`showAtSec`, `showAfterHeard`), before any other fix or tick. */
+  onShow?: () => Promise<void>
   /** Screenshots at these simulated seconds (one is also taken whenever a banner appears). */
   snapAtSec?: readonly number[]
   /** At this simulated second the page's wall clock (Date.now) is put back `clockBackSec` seconds, as NTP or a carrier can. */
@@ -107,6 +117,10 @@ export interface DriveOptions {
 export interface DriveLog {
   /** Every switch banner, in the order they appeared, with the second they appeared at. */
   banners: { atSec: number; text: string }[]
+  /** What the driver heard while the screen was hidden that told them to take another road: switches and new routes. */
+  heard: { atSec: number; text: string }[]
+  /** The page's work while it was hidden: React commits from the moment it was hidden, WebGL draw calls from the step after, and the fixes the GPS sent meanwhile. */
+  hiddenWork: { commits: number; draws: number; fixes: number }
   /** The switch moment's banner (pending, confirmed, kept), each time it appeared or changed. */
   moments: { atSec: number; stage: string; text: string }[]
   /** The drive view's quiet line (the engine's latest reason), each time it changed, with the second it showed. */
@@ -286,7 +300,7 @@ export class App {
    */
   async drive(options: DriveOptions = {}): Promise<DriveLog> {
     const { page } = this
-    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [], onMoment, keepMyRoute } = options
+    const { speedMps = 25, maxSec = 2400, wrongTurnAtSec, snapAtSec = [], gpsNoiseM = 0, road, hideAtSec, showAtSec, showAfterHeard = false, onShow, clockBackAtSec, clockBackSec = 30, readTurnAtSec = [], lookAtSec = [], onMoment, keepMyRoute } = options
     await pauseSoon(page, this.slowMomentAtStartMs)
     await page.getByRole('button', { name: 'Start drive' }).click()
     await this.settle()
@@ -300,14 +314,75 @@ export class App {
     let position: LngLat = UPTOWN
     let heading = 180
     let speed = 0
-    const log: DriveLog = { banners: [], moments: [], statusLines: [], arrived: false, seconds: 0, turnDistances: [] }
+    const log: DriveLog = { banners: [], moments: [], heard: [], hiddenWork: { commits: 0, draws: 0, fixes: 0 }, statusLines: [], arrived: false, seconds: 0, turnDistances: [] }
     let lastBanner = ''
     let lastMoment = ''
     let kept = false
+    // While the page is hidden: how many lines had been said, the React commits from the moment
+    // it was hidden, and the draw calls from the step after. (The frame the map was drawing at
+    // that moment may finish: a page really hidden gets no animation frames at all, but this
+    // one only says it is hidden.)
+    let hidden = false
+    let commitsFrom: number | null = null
+    let drawsFrom: number | null = null
+    let heardUpTo = 0
+    const work = () => this.page.evaluate(() => ({ ...(window as unknown as E2EWindow).__e2e.work }))
+    const stopCounting = async () => {
+      const now = await work()
+      if (commitsFrom !== null) log.hiddenWork.commits += now.commits - commitsFrom
+      if (drawsFrom !== null) log.hiddenWork.draws += now.draws - drawsFrom
+      commitsFrom = drawsFrom = null
+    }
+    const show = async () => {
+      await stopCounting()
+      hidden = false
+      await page.evaluate(() => {
+        // Animation frames held while hidden (below) run now, as a browser runs them on return.
+        const w = window as unknown as { __heldFrames?: { raf: typeof requestAnimationFrame; held: FrameRequestCallback[] } }
+        const frames = w.__heldFrames
+        if (frames !== undefined) {
+          window.requestAnimationFrame = frames.raf
+          delete w.__heldFrames
+          frames.held.forEach((cb) => frames.raf(cb))
+        }
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    // The driver follows the app onto the route it switched to: a side street a probe
+    // found during the drive, or else the fastest of what Mapbox offered.
+    const followSwitch = (text: string) => {
+      const probed = this.probes.filter((p) => p.duringDrive && p.road !== null && p.road !== 'off-route').at(-1)?.road as RoadName | undefined
+      const next = text.includes('via side streets') && probed !== undefined && world !== undefined ? { corners: world.cornersOf(probed) } : world?.lastOffered[0]
+      if (next !== undefined) {
+        route = next.corners
+        alongM = alongOf(route, position)
+        astray = null
+      }
+    }
 
     for (let sec = 0; sec < maxSec; sec += STEP_SEC) {
+      if (hidden && ((showAtSec !== undefined && sec >= showAtSec && sec < showAtSec + STEP_SEC) || (showAfterHeard && log.heard.length > 0))) {
+        await show()
+        await onShow?.()
+      }
       if (hideAtSec !== undefined && sec >= hideAtSec && sec < hideAtSec + STEP_SEC) {
+        hidden = true
+        heardUpTo = (await this.spoken()).length
+        commitsFrom = (await work()).commits
         await page.evaluate(() => {
+          // A hidden page gets no animation frames: they are held until it is shown, as a
+          // browser does. (A frame already asked for may still run once: that is why draw
+          // calls are counted from the step after.)
+          const w = window as unknown as { __heldFrames?: { raf: typeof requestAnimationFrame; held: FrameRequestCallback[] } }
+          if (w.__heldFrames === undefined) {
+            const frames = { raf: window.requestAnimationFrame.bind(window), held: [] as FrameRequestCallback[] }
+            w.__heldFrames = frames
+            window.requestAnimationFrame = (cb) => {
+              frames.held.push(cb)
+              return 0
+            }
+          }
           Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
           document.dispatchEvent(new Event('visibilitychange'))
         })
@@ -341,9 +416,30 @@ export class App {
         heading,
         speed,
       ] as const)
+      if (hidden) log.hiddenWork.fixes++
       // fastForward fires each due timer once: the app sees the time pass, but the map draws one frame, not sixty a second.
       await page.clock.fastForward(STEP_SEC * 1000)
-      const state = await this.settle()
+      let state = await this.settle()
+      if (hidden) {
+        const said = (await this.spoken()).slice(heardUpTo)
+        heardUpTo += said.length
+        let arrivedHeard = false
+        for (const text of said) {
+          if (text.startsWith('Switching to a faster route') || text.startsWith('New route.')) {
+            log.heard.push({ atSec: sec, text })
+            // As after a banner below: the same 20 ms, so a hidden drive keeps the visible one's timing.
+            await page.clock.runFor(20)
+            followSwitch(text)
+          }
+          if (text.startsWith('You have arrived')) arrivedHeard = true
+        }
+        if (arrivedHeard) {
+          await show()
+          state = await this.settle()
+        } else if (drawsFrom === null) {
+          drawsFrom = (await work()).draws
+        }
+      }
       if (state.status !== '' && state.status !== log.statusLines.at(-1)?.text) log.statusLines.push({ atSec: sec, text: state.status })
       const momentKey = `${state.moment.stage}|${state.moment.text}`
       if (state.moment.stage !== '' && momentKey !== lastMoment) {
@@ -370,18 +466,7 @@ export class App {
         if (!keptNow) await this.snap(`minute ${Math.floor(sec / 60)}: ${state.banner}`)
       }
       if (state.banner !== '' && state.banner !== lastBanner && !keptNow) {
-        // The driver follows the app onto the route it switched to: a side street a probe
-        // found during the drive, or else the fastest of what Mapbox offered.
-        const probed = this.probes.filter((p) => p.duringDrive && p.road !== null && p.road !== 'off-route').at(-1)?.road as RoadName | undefined
-        const next =
-          state.banner.includes('via side streets') && probed !== undefined && world !== undefined
-            ? { corners: world.cornersOf(probed) }
-            : world?.lastOffered[0]
-        if (next !== undefined) {
-          route = next.corners
-          alongM = alongOf(route, position)
-          astray = null
-        }
+        followSwitch(state.banner)
       }
       lastBanner = state.banner
       if (snapAtSec.some((at) => at >= sec && at < sec + STEP_SEC)) await this.snap(`driving, minute ${Math.floor(sec / 60)}`)
@@ -397,6 +482,7 @@ export class App {
         break
       }
     }
+    await stopCounting()
     return log
   }
 

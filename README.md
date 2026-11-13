@@ -1266,6 +1266,16 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **A hidden page is not a pause.** In a browser the session stops asking for routes
   while the page is hidden; in the shell it is never told the page was hidden, so the
   checks go on. The rule in `core/live.ts` is unchanged.
+- **Nothing is drawn while nobody can see the screen** (battery, #98). When the app is in
+  the background (the plugin's `appState` event; the phone locked or another app in
+  front) or the web view says the page is hidden (`src/device/native/screen.ts`), the
+  drive's changes are not handed to React: no render, no map update, no camera move. The
+  drive itself (GPS, checks, voice, the drive log) runs exactly the same. The newest state
+  waits in `useLiveDrive` and is drawn in one update when the app is in front again
+  (`e2e/battery.spec.ts`: over 546 fixes while locked, 0 WebGL draw calls and 2 React
+  commits, both from the private drive log's writes at the switch and the arrival; before
+  this change, 28,240 draw calls and 1,111 commits). Drive diagnostics, if it is left open,
+  still refreshes its text every 2 s. The browser does the same while its page is hidden.
 - **The clock's ticks.** iOS may hold back a web page's timers while locked, so the
   session's once-a-second tick is driven by each native position fix and by a native
   one-second timer event, as well as by `setInterval`; whichever comes first counts, at
