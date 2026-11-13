@@ -1276,6 +1276,30 @@ plugin `RouteIQNative` is present, `src/device/native`):
   and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
+- **Drive report** (`node scripts/drive-report.mjs drive.txt`, or `--json`; a tool for
+  whoever reads the pasted diagnostics, not part of the app, #202): reads that text, any
+  version since the first shell build, and says what happened: the drive window (GPS on to
+  off), fixes and ticks per second, time not active; requests sent, answered, failed and
+  the slowest; when the minute-by-minute checks stopped and how long the drive went on
+  after that (the blind stretch); probes and path checks during the drive against while
+  planning; off-cycle requests (re-plans) and switches; each switch offer with how it
+  ended, when the log records offers; the check outcomes and the best saving; speech. Then a list of things to look at, each with the log lines that show it.
+  Its thresholds are `DEFAULT_REPORT_OPTIONS` in the script (the first three are the app's
+  own and a test keeps them equal):
+
+  | Setting | Default | Meaning |
+  | --- | --- | --- |
+  | `pollIntervalSec` | 60 | the app's check interval (`DEFAULT_LIVE_OPTIONS`) |
+  | `requestBudget` | 60 | the app's request budget (`maxRequests`) |
+  | `minSavingSec` | 120 | the app's minimum saving (`DEFAULT_REROUTE_OPTIONS`) |
+  | `blindAfterSec` | 180 | no plain check this long with the GPS on is a blind stretch or a gap |
+  | `offCycleBelowSec` | 45 | a plain request this soon after the last is off the cycle |
+  | `slowRequestMs` | 8000 | an answer this slow is listed |
+  | `longGapSec` | 30 | a gap in fixes or ticks this long is listed |
+
+  Privacy: the report shows only lines it recognises, all of them whole numbers and words
+  from the app's fixed lists. A line it does not know is counted, never shown, and one
+  that looks as if it held a position, a token or a link is left out and reported as such.
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
   selected route in place of the GPS, so a drive can be tried at home with the phone
   locked. Presets: follow the route, a wrong turn after 1 min (a made-up side street

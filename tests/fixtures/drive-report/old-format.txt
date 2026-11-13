@@ -1,0 +1,48 @@
+RouteIQ drive diagnostics
+log started 17:28:05, now 17:52:30, app active, gps off
+fixes: 1130 (240 while not active), longest gap 45 s
+ticks: 1101 (230 while not active), longest gap 41 s
+requests: 17 sent (0 while not active), 15 answered, 1 failed, 1 cancelled, 0 waiting
+request time: average 905 ms, longest 9400 ms
+speech: 14 lines started, 13 finished, 1 cut off or failed
+events (oldest first):
+17:29:40 request 1 sent [active]
+17:29:41 request 1 answered, HTTP 200, 880 ms, native 820 ms [active]
+17:30:00 gps on [active]
+17:31:00 request 2 sent [active]
+17:31:01 request 2 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:32:00 request 3 sent [active]
+17:32:01 request 3 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:33:00 request 4 sent [active]
+17:33:01 request 4 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:34:00 request 5 sent [active]
+17:34:01 request 5 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:35:00 request 6 sent [active]
+17:35:01 request 6 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:36:00 request 7 sent [active]
+17:36:01 request 7 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:37:00 request 8 sent [active]
+17:37:01 request 8 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:37:30 app background [background]
+17:38:15 no fix for 45 s [background]
+17:41:50 app active [active]
+17:42:00 request 9 sent [active]
+17:42:09 request 9 answered, HTTP 200, 9400 ms, native 9310 ms [active]
+17:43:00 request 10 sent [active]
+17:43:30 request 10 timeout after 30000 ms [active]
+17:44:00 request 11 sent [active]
+17:44:01 request 11 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:44:40 speech line cut off or failed [active]
+17:45:00 request 12 sent [active]
+17:45:01 request 12 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:46:00 request 13 sent [active]
+17:46:01 request 13 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:47:00 request 14 sent [active]
+17:47:01 request 14 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:48:00 request 15 sent [active]
+17:48:01 request 15 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:49:00 request 16 sent [active]
+17:49:01 request 16 answered, HTTP 200, 700 ms, native 650 ms [active]
+17:49:20 request 17 sent [active]
+17:49:21 request 17 cancelled after 900 ms [active]
+17:50:00 gps off [active]
