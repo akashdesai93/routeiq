@@ -5,12 +5,14 @@ interface Budget {
   growthPerPr: Sizes
   alertAt: number
 }
+type AssetFile = { name: string; kind: string; upFront: boolean; size: number; gzip: number }
 export const MEASURES: Readonly<Record<string, string>>
 export function baseName(file: string): string
 export function mapboxNamesIn(mapboxEsmDir: string): Set<string>
-export function measureAssets(assetsDir: string, mapboxNames: Set<string>): { name: string; kind: string; size: number; gzip: number }[]
-export function total(files: { kind: string; size: number; gzip: number }[], kind: string, field?: 'size' | 'gzip'): number
-export function measuredSizes(files: { kind: string; size: number; gzip: number }[]): Sizes
+export function upFrontNames(html: string): Set<string>
+export function measureAssets(assetsDir: string, mapboxNames: Set<string>): AssetFile[]
+export function total(files: AssetFile[], key: string, field?: 'size' | 'gzip'): number
+export function measuredSizes(files: AssetFile[]): Sizes
 export function budgetProblems(budget: unknown): string[]
 export function ceilingRows(sizes: Sizes, budget: Budget): { key: string; label: string; size: number; ceiling: number; used: number; over: boolean }[]
 export function growthReport(baseSizes: Sizes, prSizes: Sizes, budget: Budget): Record<string, { base: number; pr: number; limit: number }>
