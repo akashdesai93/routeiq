@@ -16,7 +16,9 @@
     "build:signals": "node scripts/build-signal-tiles.mjs",
     "preview": "vite preview",
     "e2e:build": "node e2e/build.mjs",
-    "e2e": "npm run e2e:build && playwright test",
+    "e2e": "npm run e2e:build && playwright test && node e2e/controls-guard.mjs",
+    "e2e:webkit": "npm run e2e:build && playwright test -c playwright.webkit.config.ts",
+    "review:taps": "node e2e/tap-review.mjs",
     "e2e:report": "playwright show-report e2e-report/playwright",
     "design:shots": "npm run e2e:build && playwright test -c playwright.shots.config.ts"
   },

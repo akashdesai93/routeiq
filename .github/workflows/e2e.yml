@@ -106,6 +106,90 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      # What each scenario had on screen and tapped (e2e/controls.ts), for the controls guard below.
+      - name: Upload the shard's control records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-controls-${{ matrix.shard }}
+          path: e2e-report/results/**/controls.json
+          if-no-files-found: error
+          retention-days: 3
+
+  # Every control on screen is tapped by some scenario (#203): the shards' records joined,
+  # against e2e/controls-untested.json. Only after every shard passed: a failed shard's
+  # scenarios may have stopped before their taps, and that failure is reported already.
+  controls:
+    name: every control is tapped by a scenario
+    needs: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: e2e
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: e2e-controls-*
+          path: controls
+      - run: node e2e/controls-guard.mjs controls
+      - if: ${{ always() }}
+        run: cat e2e-report/controls.md >> "$GITHUB_STEP_SUMMARY" || true
+
+  # The tap scenarios (@tap) in WebKit at an iPhone's size (playwright.webkit.config.ts), the
+  # engine closest to the iPhone's web view. Two runners, split by Playwright's own --shard.
+  webkit:
+    name: tap scenarios in WebKit (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache WebKit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: WebKit and its system packages
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          npx playwright install --with-deps webkit
+
+      - run: npm run e2e:build
+
+      - name: Run this shard's tap scenarios
+        run: npx playwright test -c playwright.webkit.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=2 --reporter=list
+
+      - name: Upload the WebKit report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-webkit-${{ matrix.shard }}
+          path: e2e-report/webkit/
+          retention-days: 7
+
   # Started by hand, this workflow merges its own report. Called from gate.yml (where
   # github.event_name is the gate's event), gate.yml runs the merge itself, outside `required`.
   report:

@@ -90,8 +90,11 @@ it really took against what it predicted".
 
 ```powershell
 npx playwright install --only-shell chromium   # once per machine: headless Chromium, about 290 MB
-npm run e2e                                    # builds, runs every scenario, about 1 minute
+npm run e2e                                    # builds, runs every scenario and the controls guard
 start e2e-report\index.html                    # the one-page report
+npx playwright install webkit                  # once, for the next line: WebKit, the iPhone's engine
+npm run e2e:webkit                             # the tap scenarios in WebKit at iPhone size
+npm run review:taps                            # before/after screenshots of every tap, as one page
 ```
 
 - **What runs:** the production build (`vite build` with a dummy `pk.test` token, plus a
@@ -120,6 +123,27 @@ start e2e-report\index.html                    # the one-page report
   spoken lines with their drive time, what the made-up traffic server answered to each
   route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
   trace of any failure.
+- **Every control is tapped (#203).** The harness records, in each scenario, every control
+  on screen (buttons, links, toggles, inputs, sheet handles, list rows, map pins, read from
+  the rendered DOM as it changes) and every control that got a trusted tap, click or typing
+  (`e2e/controls.ts`; a click made in code does not count). After the run,
+  `e2e/controls-guard.mjs` fails when a control was on screen and no scenario tapped it,
+  unless `e2e/controls-untested.json` gives the reason (with its issue), and fails on a line
+  there that is no longer needed. `npm run e2e` runs it; in CI it is the job "every control is
+  tapped by a scenario" of `e2e.yml`, over all shards. Its table is `e2e-report/controls.md`.
+  Disabled and read-only controls are left out (they cannot be tapped); a control whose
+  words are data (a route row, a suggestion, a saved place) is one control for all of them.
+  The tap scenarios are `e2e/controls.spec.ts`, tagged `@tap`, at 390 × 844 with touch.
+- **WebKit at an iPhone's size.** `npm run e2e:webkit` runs the `@tap` scenarios in WebKit
+  with Playwright's iPhone 15 profile (`playwright.webkit.config.ts`), the engine of the
+  iPhone's web view; CI runs it on two runners. Service workers are blocked there: in WebKit
+  Playwright's router does not see what a service worker fetches, so those requests went out
+  for real. The harness now fails any scenario where a response reached the page without
+  passing its router, in either browser.
+- **Tap review set.** `npm run review:taps` runs the `@tap` scenarios with a screenshot before
+  and 0.4 s after every tap, click and typing, and writes the contact sheet
+  `e2e-report/taps/index.html` (`-- --webkit` for WebKit). It asserts nothing: it is the input
+  of a design and function review (`docs/tap-review.md`).
 
 ## Planning a trip
 
