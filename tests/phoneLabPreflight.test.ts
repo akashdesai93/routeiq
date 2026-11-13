@@ -105,4 +105,36 @@ describe('the queue checks the window itself: a lab agent that skips the preflig
     expect(labStartProblem(down, 'o/r', now)).toMatch(/Could not read the lab window/)
     expect(readLabWindow(down, 'o/r', now.toISOString())).toEqual({ error: expect.stringMatching(/HTTP 502/) })
   })
+
+  // #204: on a busy night #17 has more than 100 comments in a day; the window was on page 2.
+  const statuses = (n: number) => Array.from({ length: n }, (_, i) => ({ created_at: '2026-11-12T02:00:00Z', body: `status: cloud-x${i}` }))
+  const paged = (pages: { body: string; created_at: string }[][]) => (path: string) => {
+    const page = Number(/[?&]page=(\d+)/.exec(path)?.[1] ?? 1)
+    if (/[?&]per_page=100\b/.test(path) === false) throw new Error(`asked for ${path}`)
+    return pages[page - 1] ?? []
+  }
+  it('finds a window on the second page of #17\'s comments', () => {
+    const window = { created_at: '2026-11-12T03:00:00Z', body: 'lab-window: until 06:30 UTC' }
+    expect(labStartProblem(paged([statuses(100), [window, ...statuses(3)]]), 'o/r', now)).toBeNull()
+    expect(readLabWindow(paged([statuses(100), statuses(100), [window]]), 'o/r', now.toISOString())).toEqual({ window: { opened_at: window.created_at, until: '2026-11-12T06:30:00.000Z', voice_ok: false } })
+  })
+  it('takes the newest window across pages, and refuses when a later page cannot be read', () => {
+    const closed = { created_at: '2026-11-12T01:00:00Z', body: 'lab-window: until 03:30 UTC' }
+    const open = { created_at: '2026-11-12T03:00:00Z', body: 'lab-window: until 06:30 UTC' }
+    expect(labStartProblem(paged([[closed, ...statuses(99)], [open]]), 'o/r', now)).toBeNull()
+    const pageTwoDown = (path: string) => {
+      if (/[?&]page=2\b/.test(path)) throw new Error('gh: HTTP 502')
+      return [open, ...statuses(99)]
+    }
+    expect(readLabWindow(pageTwoDown, 'o/r', now.toISOString())).toEqual({ error: expect.stringMatching(/HTTP 502/) })
+  })
+  it('refuses, and stops asking, when #17 has more pages than it may read', () => {
+    let asked = 0
+    const endless = () => {
+      asked++
+      return statuses(100)
+    }
+    expect(readLabWindow(endless, 'o/r', now.toISOString())).toEqual({ error: expect.stringMatching(/More than 2000 comments/) })
+    expect(asked).toBe(20)
+  })
 })
