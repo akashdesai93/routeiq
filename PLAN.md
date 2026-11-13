@@ -287,6 +287,17 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
       turns out to miss
       side streets on real trips; probes from inside the side street's own stretch see
       only what Mapbox offers from there.
+      11d (#183, desk-drive findings): the drive never goes blind. A probe goes out only
+      from what is left after one request per poll interval until the expected arrival
+      (times `arrivalReserve`, 1, plus `reserveMargin`, 3) is kept back for the plain checks
+      (`plainCheckReserve`, `checkProbeAllowance`); the time left is the view's own
+      (`remainingDriveSec`). e2e: "when the side streets keep losing, they never use up
+      the checks before I arrive" and "on a 40-minute drive that is slow from the start,
+      the side streets are tried early and the checks still last to the end". Open for later: the total budget (`maxRequests`, 60)
+      does not grow with a longer planned drive, so a drive of over an hour still runs
+      out of checks without any probe (a cost decision for the owner); back-off after
+      probes that keep losing, and the reason a probe was skipped in the diagnostics,
+      follow in their own PR.
       Live drive after a reroute (#183, item 5): a new route whose line names no turn
       now goes on to the next maneuver in the same line (`nextManeuverLine`), so a long
       freeway stretch after a new route is not silent until half a mile before its exit.
