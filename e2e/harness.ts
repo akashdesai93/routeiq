@@ -156,6 +156,13 @@ export class App {
   readonly cancelledHanging: number[] = []
   private readonly hangingN = new Map<Request, number>()
   readonly unexpected: string[] = []
+  /**
+   * Requests to the outside that this harness never saw: they went round its routing (in
+   * WebKit, everything a page asks for once a service worker controls it, #184) and so
+   * could reach the real network. Any one fails the scenario.
+   */
+  readonly unrouted: string[] = []
+  private readonly routed = new WeakSet<Request>()
   outside: Outside = {}
   /** Real milliseconds lost between reading the page clock and pausing it at drive start: the #71 race, on purpose. */
   slowMomentAtStartMs = 0
@@ -180,6 +187,14 @@ export class App {
   async open(options: { fakeClock?: boolean; storage?: Record<string, string>; path?: string; shell?: boolean } = {}) {
     const { page } = this
     await page.context().route('**/*', (route) => this.answer(route))
+    const checkRouted = (request: Request) => {
+      const url = new URL(request.url())
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || this.routed.has(request)) return
+      this.unrouted.push(`${request.method()} ${url.origin}${url.pathname}`)
+    }
+    page.on('requestfinished', checkRouted)
+    page.on('requestfailed', checkRouted)
     page.on('requestfailed', (request) => {
       const index = this.heldRequests.get(request)
       if (index !== undefined) this.abortedProbes.push(index)
@@ -416,6 +431,7 @@ export class App {
 
   private async answer(route: Route) {
     const request = route.request()
+    this.routed.add(request)
     const url = new URL(request.url())
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue()
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
@@ -535,5 +551,6 @@ export const test = base.extend<{ app: App }>({
     await app.attachSpoken().catch(() => {})
     await app.attachAnswers()
     expect(app.unexpected, 'requests that would have left this PC').toEqual([])
+    expect(app.unrouted, 'requests that went round the harness, to the real network').toEqual([])
   },
 })
