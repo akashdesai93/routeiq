@@ -1443,6 +1443,19 @@ and the entry is marked `synthesized`. `src/core/guidance.ts` picks the turn to 
 and the announcement that is due; each is spoken once, a backlog after a gap is dropped
 except for its newest line, and a new route starts with a fresh cursor.
 
+**The next turn after a new route (#183).** The new route found after leaving the route
+goes straight on to the next maneuver, in the same line: "New route. 28 minutes to your destination. In 18
+miles, take exit 4B." (`nextManeuverLine`). The cursor of a new route skips the lines due
+where the car already is, so without this a long freeway stretch after a new route stayed
+silent until half a mile before its next exit (16 minutes on a desk drive). It is one line,
+not two, because a second line would wait behind the first in the voice's queue and be
+dropped, and the banner shows it word for word. Nothing is added when that maneuver, or its
+own next prompt, is within `NEXT_TURN_SOON_M` (300 m) of the car, when it is the arrival, or
+when its last line is not a bare instruction (it names a distance already, or opens with
+"Then,"), so it never says "In 0 feet" or a distance twice. A switch from the route says
+its turn-off already ("Turn in 1.1 miles") and gets nothing more. A second new route in one
+excursion is taken without a word, as before (Open for later in PLAN).
+
 **Voice** (`src/device/speech.ts`, rules in `src/core/speechQueue.ts`): the browser's
 speech synthesis. Spoken: the turn prompts, every decision that changes the route
 ("Switching to a faster route. Saves 3 minutes. Turn in 0.8 miles."), "You are off the

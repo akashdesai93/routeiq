@@ -120,6 +120,8 @@ export {
   arrowKind,
   dueAnnouncement,
   MANEUVER_PASSED_M,
+  nextManeuverLine,
+  NEXT_TURN_SOON_M,
   nextTurn,
   synthesizeAnnouncements,
   SYNTH_FAR_M,

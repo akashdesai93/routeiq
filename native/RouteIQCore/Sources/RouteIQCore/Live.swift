@@ -1066,8 +1066,10 @@ public enum Live {
         next.turn = decision.considered.map { LiveState.Turn(at: $0.turnAt, pending: false) }
         next.switches = quiet ? state.switches : state.switches + [made]
         let turnInM = decision.considered?.turnInM
+        // The new-route line after leaving the route goes on to the next maneuver, in the same line (#183).
+        let ahead = offRoute ? Guidance.nextManeuverLine(chosen.guidance, onNew.alongRouteM) : nil
         // The banner shows what is said, word for word (#22).
-        let spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet: sideStreet)
+        let spokenSwitch = switchLine(decision.code, saving, turnInM, chosen.durationSec, sideStreet: sideStreet) + (ahead.map { " " + $0.text } ?? "")
         next.switchBanner = quiet ? nil : LiveState.SwitchBanner(
             untilMs: nowMs + opts.switchBannerSec * 1000,
             text: spokenSwitch,
