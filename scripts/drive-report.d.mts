@@ -45,6 +45,7 @@ export interface DriveReport {
     ticksPerSec: number | null
     longestFixGapSec: number | null
     longestTickGapSec: number | null
+    /** A lower bound when `startInLog` is false (the log dropped the drive's start). */
     notActiveSec: number
   }
   requests: {
@@ -59,6 +60,7 @@ export interface DriveReport {
     plainChecksPartial: boolean
     checksStoppedAt: string | null
     blindStretchSec: number
+    /** Null when the log dropped the drive's start: its first gap is then only a lower bound. */
     longestCheckGapSec: number | null
   }
   probes: { total: number | null; inEvents: number; duringDrive: number; atPlanTime: number; times: string[]; skipped: null | { count: number; tally: Record<string, number> } }

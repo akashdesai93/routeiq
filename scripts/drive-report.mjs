@@ -424,6 +424,13 @@ export function analyse(text, options = {}) {
             : `No check for faster routes in the ${lengthOf(len)} of the drive still in the log, from ${clockOf(w.startSec)} (its start was dropped, so earlier checks are not known).`,
           lines,
         )
+      } else if (!w.startInLog && g === gaps[0]) {
+        // The log dropped what came before: this gap began then or earlier, and lasted at least this long.
+        find(
+          'check-gap',
+          `At least ${lengthOf(len)} with no check for faster routes, from the start of what the log kept (${clockOf(g.fromSec)}) to ${clockOf(g.toSec)}; the drive's start was dropped, so the gap may be longer.`,
+          lines,
+        )
       } else {
         find(
           'check-gap',
@@ -567,7 +574,8 @@ export function analyse(text, options = {}) {
       plainChecksPartial: drive !== null && !drive.startInLog,
       checksStoppedAt: blindStretchSec > 0 && blind.last !== null ? clockOf(blind.last.atSec) : null,
       blindStretchSec,
-      longestCheckGapSec: blind ? Math.max(...blind.gaps.map((g) => g.toSec - g.fromSec)) : null,
+      // Null when the drive's start was dropped: its first gap is then only a lower bound.
+      longestCheckGapSec: blind && blind.w.startInLog ? Math.max(...blind.gaps.map((g) => g.toSec - g.fromSec)) : null,
     },
     probes: { ...probes, skipped: h.skips ?? null },
     pathChecks: paths,
@@ -590,7 +598,7 @@ export function reportText(r) {
     const d = r.drive
     out.push(
       `Drive: ${d.startInLog ? '' : 'before '}${d.start} to ${d.end}${d.endInLog ? '' : ' (still on)'}, ${d.startInLog ? '' : 'at least '}${lengthOf(d.lengthSec)}${d.spells > 1 ? ` (the longest of ${d.spells} spells with the GPS on)` : ''}.`,
-      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${d.startInLog ? '' : 'at least '}${or(d.notActiveSec, lengthOf)}.`,
+      `  fixes ${or(d.fixes, String)} (${or(d.fixesPerSec, String)}/s), ticks ${or(d.ticks, String)} (${or(d.ticksPerSec, String)}/s), longest gap ${or(d.longestFixGapSec, (v) => `${v} s`)} / ${or(d.longestTickGapSec, (v) => `${v} s`)}, not active ${d.startInLog ? or(d.notActiveSec, lengthOf) : d.notActiveSec ? `at least ${lengthOf(d.notActiveSec)}` : 'unknown'}.`,
     )
   }
   const q = r.requests

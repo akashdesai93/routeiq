@@ -128,6 +128,19 @@ describe('drive report: the format it reads (#202)', () => {
     expect(out).toContain('they stopped at the start of what the log kept')
   })
 
+  it('the first gap after a dropped start is a lower bound, and the longest gap is not known', () => {
+    const events = ['09:50:00 app active [active]', '09:54:00 request 40 sent [active]', '09:54:01 request 40 answered, HTTP 200, 600 ms [active]', '09:55:30 gps off [active]']
+    const r = analyse(text([], events).replace('events (oldest first):', 'events (oldest first, 100 earlier ones dropped):'))
+    expect(finding(r, 'check-gap')?.says).toContain('At least 4 min with no check for faster routes, from the start of what the log kept (09:50:00)')
+    expect(r.requests.longestCheckGapSec).toBeNull()
+    expect(reportText(r)).toContain('not active unknown')
+  })
+
+  it('a blind stretch of exactly three minutes counts', () => {
+    const r = analyse(text([], ['09:00:00 gps on [active]', ...checks(1, 2), '09:05:00 gps off [active]']))
+    expect(r.requests.blindStretchSec).toBe(180)
+  })
+
   it('a drive past midnight keeps its length', () => {
     const r = analyse(
       [
@@ -388,10 +401,14 @@ describe('drive report: privacy (#202)', () => {
       '09:02:00 check: turn onto elm street (2 routes) [active]',
       '09:02:10 check: constructor (1 routes) [active]',
       '09:02:20 probe skipped: near elm street [active]',
+      '09:02:30 probe skipped: constructor [active]',
+      '09:02:40 offer shown: constructor (saves 120 s) [active]',
+      '09:02:45 offer shown: a faster one, waiting for the next check to confirm it (saves 130 s) [active]',
+      '09:02:50 offer expired after 5 s: near elm street [active]',
       '09:03:00 gps off [active]',
     ]
     const r = analyse(text(['checks: 2: turn onto elm street 2'], events))
-    expect(r.log.unknownLines).toBe(6)
+    expect(r.log.unknownLines).toBe(9)
     const out = reportText(r) + JSON.stringify(r)
     expect(out).not.toMatch(/elm|constructor/i)
   })

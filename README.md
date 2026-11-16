@@ -1294,7 +1294,7 @@ plugin `RouteIQNative` is present, `src/device/native`):
 - **Drive report** (`node scripts/drive-report.mjs drive.txt`, or `--json`; a tool for
   whoever reads the pasted diagnostics, not part of the app, #202): reads that text, any
   version since the first shell build, and says what happened: the drive window (GPS on to
-  off), fixes and ticks per second, time not active; requests sent, answered, failed and
+  off), fixes and ticks per second (unknown when the log dropped the drive's start), time not active; requests sent, answered, failed and
   the slowest; when the minute-by-minute checks stopped and how long the drive went on
   after that (the blind stretch); probes and path checks during the drive against while
   planning; off-cycle requests (re-plans) and switches; each switch offer with how it
