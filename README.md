@@ -267,6 +267,8 @@ src/core/       Pure TypeScript: route data contracts, geo helpers, test points,
                 said when. live.ts is the live drive as a state machine: events in
                 (a fix, an answer, a tick, the page hidden), next state and effects
                 out (see Live drive).
+                jams.ts is the jam meter (#227): the time crawled in jams on main
+                roads during a drive; jamLog.ts runs it beside the drive log's recorder.
                 No React, Mapbox, DOM or network, so all of it can be ported to Swift
                 or served.
 src/providers/mapbox/
@@ -1496,6 +1498,61 @@ positions. Real GPS noise in a car, speech and the wake lock on iOS Safari, audi
 CarPlay or Bluetooth, and battery use have not been tried. The checklist for the first
 real-phone test is [docs/phone-testing.md](docs/phone-testing.md).
 
+## Jam minutes
+
+The direction RouteIQ is being tested for is getting around jams on the main road through
+side streets (`docs/jam-bypass.md`). Before any of that is built, every live drive measures
+the most a bypass could ever have won: **the time the car crawled in jams on main roads**
+(#227). Two weeks of commutes decide whether the direction is built or scrapped: under about
+5 jam minutes per drive on average, it is scrapped. This only measures. No rule of the
+reroute engine reads it. Rules: `src/core/jams.ts` (the meter) and `src/core/jamLog.ts`
+(kept with the drive's record, see Drive log below).
+
+- **A jam** is a run of position fixes under `jamSpeedMps` that lasts `minJamSec` or more,
+  on a main road. Stops inside the run are part of it. A fix at that speed or more, or on a
+  side street, ends the run at that fix. The speed is the device's own reading, else the
+  drive's smoothed speed. The time between two fixes belongs to the earlier one, so a car
+  that stands still and sends no fix for a while is still in its jam. After a gap of more
+  than `maxFixGapSec` that holds only when the car's progress along the same route over the
+  gap was under `jamSpeedMps`; otherwise nobody saw what the car did, and the crawl is unknown.
+- **Main road or side street** comes from the route being driven: the Mapbox adapter reads
+  the class of the road leaving each intersection (`mapbox_streets_v8.class`) into
+  `RouteCandidate.roadKindSpansM`. Main: motorway, trunk, primary, secondary and tertiary,
+  with their link roads. Side street: street, street_limited and service. Any other class,
+  or none, is unknown.
+- **Unknown is never zero.** Slow driving for `minJamSec` or more where the kind of road is
+  not known (Mapbox did not say, or the car was off the route) is kept as unknown time, never
+  as a jam and never as "no jam". A crawl that is partly unknown is unknown as a whole. Such
+  a drive shows "unknown", or "≥ 3 min in 1 jam (partial)" when it also had known jams; its
+  `jam_min` cell is blank and it is left out of the corridor's average.
+- **Not counted:** anything before the car first reaches `setOffSpeedMps` (a drive started
+  while parked), and anything after arrival. A crawl under way at arrival or at the End tap
+  is closed there (at its last fix, when that is older than `maxFixGapSec` at the tap: the
+  drive had lost its position). In a record written mid-drive (at a switch) a crawl under way
+  is unknown time until the next write, so a drive the app is closed during never reads "none".
+- **Kept with the drive** (`DriveRecord.jams`): seconds in jams, the number of jams, unknown
+  seconds, and per jam when it began (seconds into the drive), its length and the meters
+  driven before it, rounded to `drivenRoundM`. No coordinate. A record from before jams were
+  measured reads back as "not measured".
+- **Shown:** on the Drives screen each drive has "In jams on main roads: 6 min in 2 jams"
+  (or none, unknown, not measured), and each corridor "In jams on main roads: 4.2 min per
+  drive on average (9 drives; 1 with unknown jam time left out)", from its arrived drives
+  whose jam time is known in full. The CSV export has `jam_min` as its last column. In the
+  iPhone app, Drive diagnostics has the line "in jams on main roads (latest drive): ...".
+- **Limits:** a red light longer than `minJamSec` on a main road counts as a jam (the number
+  is an upper bound on purpose). Meters driven are progress along the routes, so a stretch
+  driven off the route is not in them. A development replay and the iPhone app's test drive
+  are not logged, so they measure nothing.
+
+| Setting (`DEFAULT_JAM_OPTIONS`) | Value | Meaning |
+| --- | --- | --- |
+| `jamSpeedMps` | 6.7 m/s | below this (about 15 mph) the car is crawling |
+| `minJamSec` | 30 s | a slow run shorter than this is not a jam |
+| `setOffSpeedMps` | 1.5 m/s | nothing is measured until the car has first reached this speed |
+| `maxFixGapSec` | 15 s | after a longer gap between fixes a crawl goes on only if the car's progress was under `jamSpeedMps`; else it is unknown |
+| `maxJamsKept` | 50 | jams listed per drive; the totals count every jam |
+| `drivenRoundM` | 100 m | meters driven before a jam are stored rounded to this |
+
 ## Drive log (private)
 
 RouteIQ's edge over the big navigation apps is the owner's own repeated drives, so each
@@ -1665,6 +1722,13 @@ never sent anywhere: the only way out is Export, which hands the CSV to the shar
 the clipboard for you to send yourself. "Clear drive log" removes all of it, as does
 clearing the site's (or the app's) data. The other app's ETA you type is kept with its
 drive only.
+
+**Jam minutes** (#227) are kept with each drive in the drive log, as totals and, per jam,
+seconds into the drive, its length and the meters driven before it to the nearest 100 m.
+Never a coordinate, a road name or a road class. Someone who also knows the route driven
+could place a jam along it to about 100 m, so this is private like the rest of the log. The
+kind of road comes from the Directions answer the drive already has: no new request is made
+for it.
 
 **Saved places, recent destinations and the last trip** live only in this browser's
 localStorage, under the key `routeiq.places.v1`: names, labels and coordinates. They

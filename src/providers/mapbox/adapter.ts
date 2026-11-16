@@ -10,6 +10,8 @@ import {
   type GuidanceStep,
   type LngLat,
   type Maneuver,
+  type RoadKind,
+  type RoadKindSpan,
   type RouteCandidate,
   type RouteIntersection,
   type SegmentTraffic,
@@ -201,11 +203,10 @@ function leavesOnLimitedAccess(intersection: Record<string, unknown>): boolean {
  * the point where the last one arrived.
  */
 function toLimitedAccessSpans(legs: unknown, geometry: readonly LngLat[]): DistanceSpanM[] | null {
-  if (!Array.isArray(legs)) return null
   const along = alongRouteM(geometry)
+  const placed = placedIntersections(legs, geometry, along)
+  if (placed === null) return null
   const spans: DistanceSpanM[] = []
-  let legStart = 0
-  let previous = -1
   let openedAtM: number | null = null
   const close = (startM: number, endM: number) => {
     const last = spans.at(-1)
@@ -213,6 +214,33 @@ function toLimitedAccessSpans(legs: unknown, geometry: readonly LngLat[]): Dista
     if (last !== undefined && last[1] === startM) spans[spans.length - 1] = [last[0], endM]
     else if (endM > startM) spans.push([startM, endM])
   }
+  for (const { atM, intersection } of placed) {
+    if (leavesOnLimitedAccess(intersection)) {
+      openedAtM ??= atM
+    } else if (openedAtM !== null) {
+      close(openedAtM, atM)
+      openedAtM = null
+    }
+  }
+  const endM = along.at(-1)!
+  if (openedAtM !== null) close(openedAtM, endM)
+  return spans
+}
+
+/**
+ * Every step intersection of the route in driving order, with how far along
+ * `geometry` it lies (`along`: alongRouteM of it). Null whenever the data is
+ * not exactly as expected (see toLimitedAccessSpans), or there is none.
+ */
+function placedIntersections(
+  legs: unknown,
+  geometry: readonly LngLat[],
+  along: readonly number[],
+): { atM: number; intersection: Record<string, unknown> }[] | null {
+  if (!Array.isArray(legs)) return null
+  const placed: { atM: number; intersection: Record<string, unknown> }[] = []
+  let legStart = 0
+  let previous = -1
   for (const leg of legs as unknown[]) {
     if (!isRecord(leg) || !Array.isArray(leg.steps)) return null
     if (previous >= 0) legStart = previous
@@ -228,19 +256,57 @@ function toLimitedAccessSpans(legs: unknown, geometry: readonly LngLat[]): Dista
         if (point === undefined || index < previous) return null
         if (distanceBetweenM(location, point) > GEOMETRY_INDEX_CHECK_M) return null
         previous = index
-        const atM = along[index]!
-        if (leavesOnLimitedAccess(intersection)) {
-          openedAtM ??= atM
-        } else if (openedAtM !== null) {
-          close(openedAtM, atM)
-          openedAtM = null
-        }
+        placed.push({ atM: along[index]!, intersection })
       }
     }
   }
-  if (previous < 0) return null
-  const endM = along.at(-1)!
-  if (openedAtM !== null) close(openedAtM, endM)
+  return previous < 0 ? null : placed
+}
+
+/**
+ * Mapbox Streets v8 road classes, as `mapbox_streets_v8.class` names the road
+ * leaving an intersection, sorted into the two kinds the jam meter tells
+ * apart (core/jams.ts). Main: everything from a collector (tertiary) up to a
+ * freeway, with their link roads. Side: local streets and service roads, the
+ * roads a bypass runs on. Any other class (a path, a ferry, a class added
+ * later) and a missing one are of unknown kind.
+ */
+const ROAD_KIND_OF_CLASS: ReadonlyMap<string, RoadKind> = new Map<string, RoadKind>([
+  ...['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link'].map(
+    (c) => [c, 'main'] as const,
+  ),
+  ...['street', 'street_limited', 'service'].map((c) => [c, 'side'] as const),
+])
+
+function kindOfRoadLeaving(intersection: Record<string, unknown>): RoadKind | null {
+  const streets = intersection.mapbox_streets_v8
+  const named = isRecord(streets) && typeof streets.class === 'string' ? ROAD_KIND_OF_CLASS.get(streets.class) : undefined
+  if (named !== undefined) return named
+  // Documented for every profile: "Road continues on a motorway".
+  return Array.isArray(intersection.classes) && intersection.classes.includes('motorway') ? 'main' : null
+}
+
+/**
+ * The kind of road of each stretch of the route (see
+ * RouteCandidate.roadKindSpansM). Each step intersection describes the road
+ * leaving it, up to the next intersection; a stretch whose intersection names
+ * no known class is left out (unknown kind), and neighbours of one kind are
+ * one span. Null, meaning unknown everywhere, when the intersections cannot
+ * be placed on the line (as for toLimitedAccessSpans).
+ */
+function toRoadKindSpans(legs: unknown, geometry: readonly LngLat[]): RoadKindSpan[] | null {
+  const along = alongRouteM(geometry)
+  const placed = placedIntersections(legs, geometry, along)
+  if (placed === null) return null
+  const spans: RoadKindSpan[] = []
+  placed.forEach(({ atM, intersection }, i) => {
+    const endM = placed[i + 1]?.atM ?? along.at(-1)!
+    const kind = kindOfRoadLeaving(intersection)
+    if (kind === null || endM <= atM) return
+    const last = spans.at(-1)
+    if (last !== undefined && last.kind === kind && last.endM === atM) spans[spans.length - 1] = { startM: last.startM, endM, kind }
+    else spans.push({ startM: atM, endM, kind })
+  })
   return spans
 }
 
@@ -401,6 +467,7 @@ function toCandidate(route: unknown): RouteCandidate | null {
     // A dropped point shifts every geometry_index after it, so the spans would be misplaced.
     limitedAccessSpansM:
       geometry.length === coordinates.length ? toLimitedAccessSpans(route.legs, geometry) : null,
+    roadKindSpansM: geometry.length === coordinates.length ? toRoadKindSpans(route.legs, geometry) : null,
     maneuvers: toManeuvers(route.legs),
     guidance: toGuidance(route.legs),
     // Annotations line up with the line Mapbox sent: with a point dropped they would be misplaced.

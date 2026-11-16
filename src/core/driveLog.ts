@@ -1,4 +1,5 @@
 import { geometryHash } from './hash.ts'
+import { knownJamSec, parseDriveJams, type DriveJams } from './jams.ts'
 import type { LiveState, LiveSwitch } from './live.ts'
 import type { RerouteCode } from './reroute.ts'
 import type { LngLat, RouteSource, SignalCoverage } from './types.ts'
@@ -104,6 +105,11 @@ export interface DriveRecord {
   readonly switches: readonly LoggedSwitch[]
   /** Times the drive said "off the route". */
   readonly offRouteEvents: number
+  /**
+   * The time crawled in jams on main roads (see jams.ts, #227). Null for a drive
+   * recorded before jams were measured: not measured, never "no jams".
+   */
+  readonly jams: DriveJams | null
   /** Route requests the drive made (probes included). */
   readonly requests: number
   readonly outcome: DriveOutcome
@@ -210,6 +216,8 @@ function begin(state: LiveState, nowMs: number, context: DriveContext, options: 
     otherAppSec: context.otherAppSec,
     switches: [],
     offRouteEvents: 0,
+    // Filled in by the jam meter beside the recorder (jamLog.ts).
+    jams: null,
     requests: state.requestsUsed,
     outcome: 'unfinished',
   }
@@ -388,6 +396,7 @@ function parseRecord(raw: unknown): DriveRecord | null {
     otherAppSec: r.otherAppSec,
     switches: switches as LoggedSwitch[],
     offRouteEvents: r.offRouteEvents,
+    jams: parseDriveJams(r.jams),
     requests: r.requests,
     outcome: r.outcome,
   }
@@ -506,12 +515,13 @@ export function errorWords(errorSec: number): string {
 const csvMin = (sec: number | null) => (sec === null ? '' : (sec / 60).toFixed(1))
 
 export const DRIVE_LOG_CSV_HEADER =
-  'started,corridor,hour,outcome,route_source,predicted_min,actual_min,error_min,other_app_min,other_app_error_min,distance_km,lights,switches_kept,switches_declined,claimed_saving_min,realised_saving_min,off_route,requests'
+  'started,corridor,hour,outcome,route_source,predicted_min,actual_min,error_min,other_app_min,other_app_error_min,distance_km,lights,switches_kept,switches_declined,claimed_saving_min,realised_saving_min,off_route,requests,jam_min'
 
 /**
  * The log as CSV, oldest first, for the share sheet or the clipboard. The
  * start time is UTC (ISO 8601) and the hour is the device's local hour.
  * Corridors are their letters; lights are blank when unknown and "≥N" when partial.
+ * jam_min (minutes crawled in jams on main roads) is blank unless it is known in full.
  */
 export function driveLogCsv(log: DriveLog): string {
   const labels = corridorLabels(log)
@@ -539,6 +549,7 @@ export function driveLogCsv(log: DriveLog): string {
       csvMin(sum(realised)),
       String(d.offRouteEvents),
       String(d.requests),
+      csvMin(knownJamSec(d.jams)),
     ].join(',')
   })
   return [DRIVE_LOG_CSV_HEADER, ...rows].join('\n')

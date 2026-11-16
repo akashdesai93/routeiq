@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   corridorLabels,
   driveLogCsv,
@@ -15,6 +15,7 @@ import {
   type RouteSource,
 } from './core/index.ts'
 import { canShare, copyText, shareText } from './device/share.ts'
+import { CorridorJamLine, JamLine } from './JamLine.tsx'
 
 interface Props {
   log: DriveLog
@@ -59,6 +60,7 @@ function DriveItem({ drive, label }: { drive: DriveRecord; label: string }) {
         Predicted {minutes(drive.predictedSec)} · Took {minutes(drive.actualSec)}
         {error !== null && ` (${errorWords(error)})`}
       </p>
+      <JamLine drive={drive} />
       {drive.otherAppSec !== null && (
         <p>
           Other app {minutes(drive.otherAppSec)}
@@ -95,13 +97,14 @@ function sourceLine(group: ErrorGroup<RouteSource>): string {
   return `${SOURCE[group.key]}: ${how} (median of ${group.drives})`
 }
 
-function CorridorBlock({ summary }: { summary: CorridorSummary }) {
+function CorridorBlock({ summary, children }: { summary: CorridorSummary; children?: ReactNode }) {
   return (
     <section className="corridor" aria-label={`Corridor ${summary.label}`}>
       <h3>Corridor {summary.label}</h3>
       <p className="hint">
         {summary.drives === 1 ? '1 drive' : `${summary.drives} drives`}, {summary.arrived} arrived
       </p>
+      {children}
       {summary.medianErrorSec === null ? (
         <p>No arrived drives yet: only arrived drives are compared.</p>
       ) : (
@@ -216,7 +219,9 @@ export function DrivesPanel({ log, storageNote, onClear, onClose }: Props) {
           </ol>
           <h2>By corridor</h2>
           {summaries.map((s) => (
-            <CorridorBlock key={s.corridor} summary={s} />
+            <CorridorBlock key={s.corridor} summary={s}>
+              <CorridorJamLine drives={log.drives} corridor={s.corridor} />
+            </CorridorBlock>
           ))}
           <div className="plan-row">
             {confirmClear ? (

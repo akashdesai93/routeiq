@@ -10,6 +10,8 @@ export type {
   Maneuver,
   Place,
   RankedRoute,
+  RoadKind,
+  RoadKindSpan,
   RouteCandidate,
   RouteSource,
   RouteIntersection,
@@ -268,3 +270,21 @@ export {
   type OtherAppEta,
   type RecorderStep,
 } from './driveLog.ts'
+export {
+  corridorJams,
+  corridorJamWords,
+  DEFAULT_JAM_OPTIONS,
+  driveJams,
+  jamWords,
+  knownJamSec,
+  meterJamFix,
+  parseDriveJams,
+  roadKindAt,
+  startJamMeter,
+  type CorridorJams,
+  type DriveJams,
+  type JamMeter,
+  type JamOptions,
+  type LoggedJam,
+} from './jams.ts'
+export { endJams, JAM_RECORDER_IDLE, observeJams, type JamRecorder, type JamRecorderStep } from './jamLog.ts'

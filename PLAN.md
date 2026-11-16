@@ -322,6 +322,14 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     the share sheet or Copy; Clear asks once. Versioned shape `routeiq.drives.v1`,
     contract version 2. Tests: `tests/driveLog.test.ts`; e2e: "after a drive, it shows
     how long it really took against what it predicted" (`e2e/drivelog.spec.ts`).
+    **Jam minutes** (#227, `src/core/jams.ts`, the test of the jam-bypass direction in
+    `docs/jam-bypass.md`) are **done**: each drive measures the time crawled under 15 mph
+    for 30 s or more on main roads, keeps it with its record (no position) and shows it per
+    drive, per corridor (the average the kill line is read from), in the CSV (`jam_min`)
+    and in the drive diagnostics. Unknown road kind is unknown, never 0. Tests:
+    `tests/jams.test.ts`; e2e: "after a drive, it shows how long I crawled in jams on the
+    main road" (`e2e/jams.spec.ts`). Open for later: tell a long red light from a jam;
+    jam time by hour; the road kind in the Swift adapter.
     Open for later: the ranking correction factor per corridor and route source,
     behind a setting (never loosening the reroute thresholds), #115;
     editing the other app's ETA after the drive; naming corridors; a drive the app is

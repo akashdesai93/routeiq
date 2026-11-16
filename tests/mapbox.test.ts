@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PROBE_OPTIONS, routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE } from '../src/core/index.ts'
+import { DEFAULT_PROBE_OPTIONS, routeIdFromGeometry, SOUTHPARK, UPTOWN_CHARLOTTE, type RouteCandidate } from '../src/core/index.ts'
 import { parseDirections, type DirectionsResult } from '../src/providers/mapbox/adapter.ts'
 import { buildDirectionsUrl, fetchDirections, fetchProbeRoute, MAX_VIA_POINTS } from '../src/providers/mapbox/client.ts'
 import { fixture } from './helpers/fixtures.ts'
@@ -255,6 +255,38 @@ describe('parseDirections', () => {
     expect(surface!.limitedAccessSpansM).toEqual([])
     // The signal flags are still counted as before.
     expect(freeway!.providerSignalCount).toBe(2)
+  })
+
+  it('says which stretches are main road and which are side street, and leaves a road of unknown class out', () => {
+    const [freeway, surface] = routesOf(parseDirections(FREEWAY))
+    // Points of the first route are 111.19 m apart; the second route's three are four times that.
+    const m = 111.19
+    const near = (spans: RouteCandidate['roadKindSpansM']) => spans!.map((s) => [Math.round(s.startM / m), Math.round(s.endM / m), s.kind])
+    // primary, motorway_link, motorway, classes: ["motorway"] alone, tertiary_link, tertiary: all main road, one span.
+    expect(near(freeway!.roadKindSpansM)).toEqual([[0, 8, 'main']])
+    // A local street (class street), then a trunk road.
+    expect(near(surface!.roadKindSpansM)).toEqual([
+      [0, 4, 'side'],
+      [4, 8, 'main'],
+    ])
+
+    // A class that is neither (a path), and a missing one: that stretch is in no span. Unknown, not a side street.
+    const route = structuredClone(FREEWAY.routes[1]!) as { legs: { steps: { intersections: Record<string, unknown>[] }[] }[] }
+    const all = route.legs.flatMap((l) => l.steps.flatMap((s) => s.intersections))
+    all[0]!.mapbox_streets_v8 = { class: 'path' }
+    expect(near(routesOf(parseDirections({ code: 'Ok', routes: [route] }))[0]!.roadKindSpansM)).toEqual([[4, 8, 'main']])
+    delete all[1]!.mapbox_streets_v8
+    expect(routesOf(parseDirections({ code: 'Ok', routes: [route] }))[0]!.roadKindSpansM).toEqual([])
+
+    // Intersections that cannot be placed on the line: nothing is known (null), as for the freeway spans.
+    delete all[1]!.geometry_index
+    expect(routesOf(parseDirections({ code: 'Ok', routes: [route] }))[0]!.roadKindSpansM).toBeNull()
+    // No intersection data at all.
+    expect(routesOf(parseDirections(OK)).map((r) => r.roadKindSpansM)).toEqual([null, null, null])
+    // A point of the line that is not a coordinate is dropped, and every index after it would be off by one: nothing is known.
+    const bent = structuredClone(FREEWAY.routes[0]!) as { geometry: { coordinates: unknown[] } }
+    bent.geometry.coordinates[8] = 'not a point'
+    expect(routesOf(parseDirections({ code: 'Ok', routes: [bent] }))[0]!.roadKindSpansM).toBeNull()
   })
 
   it('leaves the freeway spans unknown unless the intersection data is exactly as expected', () => {

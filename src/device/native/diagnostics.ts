@@ -10,6 +10,7 @@
  * mistake (tests/shellHttp.test.ts checks the output by pattern).
  */
 
+import { jamWords } from '../../core/index.ts'
 
 /** How many events are kept; older ones are dropped and counted. */
 export const DIAGNOSTICS_EVENT_LIMIT = 200
@@ -56,6 +57,9 @@ export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
 /** A route count above this is logged as this: the log needs "a few", not an exact number. */
 export const CHECK_ROUTES_CAP = 9
 
+/** A jam total (seconds, or a count) above this is logged as this: a day of seconds is more than any drive has. */
+export const JAM_TOTAL_CAP = 86_400
+
 export interface DriveDiagnostics {
   /** When this log began, milliseconds since 1970. */
   readonly startedAtMs: number
@@ -84,6 +88,12 @@ export interface DriveDiagnostics {
    * tallies the outcomes, keeps the largest saving seen and notes when the outcome changes.
    */
   checked(code: unknown, routes: number | null, savingSec: number | null): void
+  /**
+   * A drive's record was written to the drive log, with the jams measured on it so far
+   * (core/jams.ts): seconds in jams, how many jams, and seconds of slow driving on roads of
+   * unknown kind. Null: not measured. The log shows the latest in one line.
+   */
+  jams(totals: { readonly jamSec: number; readonly count: number; readonly unknownSec: number } | null): void
   speechStarted(): void
   /** `finished` false: the line was cut off or failed. */
   speechEnded(finished: boolean): void
@@ -126,6 +136,8 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   const tagOf = new Map<number, string>()
   const speech = { started: 0, finished: 0, cutOff: 0 }
   let simulatedDrives = 0
+  /** The jam line of the last record written. Null before the first. */
+  let jamLine: string | null = null
   const checks = { count: 0, tally: new Map<string, number>(), last: null as string | null, mostFasterSec: null as number | null }
 
   const log = (what: string) => {
@@ -208,6 +220,11 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${answer}${by !== null && by > 0 ? `, the best other saves ${by} s` : ''})`)
       }
     },
+    jams(totals) {
+      // Three whole numbers, each with a cap, and words from jamWords: nothing else of the record gets into the text.
+      const capped = (v: unknown) => Math.min(whole(v), JAM_TOTAL_CAP)
+      jamLine = jamWords(totals === null ? null : { list: [], jamSec: capped(totals.jamSec), count: capped(totals.count), unknownSec: capped(totals.unknownSec) })
+    },
     speechStarted() {
       speech.started++
     },
@@ -243,6 +260,7 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
                 .join(', ')}`,
               `best saving another route offered: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
             ]),
+        ...(jamLine === null ? [] : [`in jams on main roads (latest drive): ${jamLine}`]),
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
         ...(simulatedDrives > 0
           ? [`SIMULATED GPS: ${simulatedDrives} test ${simulatedDrives === 1 ? 'drive' : 'drives'} (positions made up, requests and speech real)`]

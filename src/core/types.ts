@@ -71,6 +71,15 @@ export interface RouteCandidate {
    * kind of road the route is on; an empty list means it says there is none.
    */
   readonly limitedAccessSpansM: readonly DistanceSpanM[] | null
+  /**
+   * What kind of road each stretch of the route is: a main road or a side
+   * street (see RoadKind). In driving order, not overlapping, measured along
+   * `geometry` like limitedAccessSpansM. A stretch no span covers is of
+   * unknown kind, and so is the whole route when this is null or left out
+   * (the provider did not say). Never guessed. Used to tell a jam on a main
+   * road from slow driving on a side street (see jams.ts).
+   */
+  readonly roadKindSpansM?: readonly RoadKindSpan[] | null
   /** Upcoming maneuvers, used later to block impractical late switches. */
   readonly maneuvers: readonly Maneuver[]
   /**
@@ -176,6 +185,20 @@ export interface RouteIntersection {
 
 /** A stretch of a route: meters from the route start to where it begins and ends. */
 export type DistanceSpanM = readonly [startM: number, endM: number]
+
+/**
+ * The two kinds of road the jam meter tells apart (jams.ts):
+ * - 'main': a road through traffic is meant to use, from a collector up to a freeway.
+ * - 'side': a local street (residential, service). A bypass runs on these.
+ */
+export type RoadKind = 'main' | 'side'
+
+/** A stretch of a route of one kind of road: meters from the route start to where it begins and ends. */
+export interface RoadKindSpan {
+  readonly startM: number
+  readonly endM: number
+  readonly kind: RoadKind
+}
 
 export interface Maneuver {
   /** Distance from the route start to this maneuver, in meters. */
