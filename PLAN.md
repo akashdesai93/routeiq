@@ -330,6 +330,15 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
     destination) is not logged; the realised saving is measured for the last kept
     switch only.
 
+14. **Proposed: jam bypass** (owner direction 2026-11-16, `docs/jam-bypass.md`). The one
+    thing to drive at: get around jams on the main road through side streets, priced by
+    an own model (length, limit, stop signs, turns, getting back on), decided at the
+    turnoff, tuned from the owner's drives. Goal: 10 minutes a week saved on the commute.
+    - **First, measure** (#227): jam minutes per drive (under 15 mph on main roads) for
+      two weeks. **Kill line:** under about 5 jam minutes per drive, the direction is scrapped.
+    - **Then build** (#228, blocked until the numbers are in): the bypass cost model in
+      `src/core`, the turnoff decision, and the learned costs.
+
 ## Native iPhone + CarPlay (later)
 
 - Swift app on Mapbox Navigation SDK for iOS v3 (current 3.34.2: Swift 5.9+,
