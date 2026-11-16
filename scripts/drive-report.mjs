@@ -428,7 +428,7 @@ export function analyse(text, options = {}) {
         // The log dropped what came before: this gap began then or earlier, and lasted at least this long.
         find(
           'check-gap',
-          `At least ${lengthOf(len)} with no check for faster routes, from the start of what the log kept (${clockOf(g.fromSec)}) to ${clockOf(g.toSec)}; the drive's start was dropped, so the gap may be longer.`,
+          `At least ${lengthOf(len)} with no check for faster routes, from the start of what the log kept (${clockOf(g.fromSec)}) to ${clockOf(g.toSec)}${away > 0 ? `; the app was not active for at least ${lengthOf(away)} of it` : ''}; the drive's start was dropped, so the gap may be longer.`,
           lines,
         )
       } else {

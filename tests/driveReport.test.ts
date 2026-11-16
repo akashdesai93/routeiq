@@ -136,6 +136,22 @@ describe('drive report: the format it reads (#202)', () => {
     expect(reportText(r)).toContain('not active unknown')
   })
 
+  it('a first gap is exact when the start is in the log, and a later gap is exact after a dropped start', () => {
+    const whole = analyse(text([], ['09:00:00 gps on [active]', ...checks(4, 2), '09:06:00 gps off [active]']))
+    expect(finding(whole, 'check-gap')?.says).toContain('No check for faster routes from 09:00:00 to 09:04:00 (4 min) while the GPS was on')
+
+    const events = ['09:51:00 request 40 sent [active]', '09:52:00 app background [background]', '09:55:00 app active [active]', '09:56:00 request 41 sent [active]', '09:57:00 gps off [active]']
+    const dropped = analyse(text([], events).replace('events (oldest first):', 'events (oldest first, 100 earlier ones dropped):'))
+    const gap = dropped.findings.filter((f) => f.id === 'check-gap').map((f) => f.says)
+    expect(gap).toEqual([expect.stringContaining('No check for faster routes from 09:51:00 to 09:56:00 (5 min) while the GPS was on; the app was not active for 3 min of it')])
+  })
+
+  it('the lower-bound first gap after a dropped start says the time away, as a lower bound too', () => {
+    const events = ['09:50:00 app background [background]', '09:53:00 app active [active]', '09:54:00 request 40 sent [active]', '09:55:30 gps off [active]']
+    const r = analyse(text([], events).replace('events (oldest first):', 'events (oldest first, 100 earlier ones dropped):'))
+    expect(finding(r, 'check-gap')?.says).toContain('the app was not active for at least 3 min of it')
+  })
+
   it('a blind stretch of exactly three minutes counts', () => {
     const r = analyse(text([], ['09:00:00 gps on [active]', ...checks(1, 2), '09:05:00 gps off [active]']))
     expect(r.requests.blindStretchSec).toBe(180)
