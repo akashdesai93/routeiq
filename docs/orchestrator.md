@@ -75,6 +75,11 @@ stopped one is restarted by its next firing; nobody has to notice.
 | `status-board` | #17 | the board | — |
 | `orch-alert` | one issue | the fleet alert (below) | `board.yml` only |
 
+**Proposed, not on (#203, waiting for the owner):** a `sim-verified` label that CI adds
+itself when the iOS Simulator flows pass on a PR's head commit, and a narrower `needs-phone`
+kept for the phone-only list in `docs/phone-lab.md` ("What needs the phone"). Until the owner
+approves it, the labels and the gate are as in the table above.
+
 ## Formats
 
 Everything below is parsed by `scripts/orch/state.mjs`. Lines it cannot parse still count as

@@ -18,6 +18,41 @@ node scripts/phone/lab/run.mjs --scenario locked-wrong-turn
 > **The phone speaks during a drive scenario**, at its media volume: "RouteIQ started", turns, "New
 > route". Turn the volume down before a night run if that matters.
 
+## What needs the phone, and what does not (#203)
+
+The phone answers only what only a phone can. Nine PRs queued behind one phone on the night of
+2026-11-12, and two of them (#199's "Take it", #198's Drives screen) could not be tested there:
+the lab has no way to tap a button or to make a faster route turn up. Both are proven
+without it now.
+
+**Phone only.** Ask the phone lab (`needs-phone`) when a change touches one of these:
+
+| What | Why nothing else proves it |
+| --- | --- |
+| Running while locked or in the background (wake lock, background location, the app being suspended or ended) | The simulator does not suspend or end apps the way iOS does on a device, and a browser has no background at all. |
+| Real GPS and its timing (fix rate, accuracy, the first fix, a fix after sleep) | The simulator replays positions on a schedule; only the device's GPS has the real gaps and jumps. |
+| The map actually drawing (Mapbox GL, WebGL, the black screen of #136) | The simulator in CI has no GPU; the e2e map is a blank style drawn in software. The WebKit pixel guard (#141) catches a blank map, not a slow or wrong one. |
+| Audio and voice with other apps (ducking music, a call, CarPlay, the silent switch) | Only the device has the audio session and other apps. |
+| Battery, heat and memory over a drive | Only the device; the lab's numbers already say what they cannot (see "Limits"). |
+| Install and first launch (signing, permissions prompts, the black first launch of #210) | Only a real install on the device. |
+
+**Proven without the phone.** These are covered by e2e in Chromium and WebKit at iPhone size,
+including the tap scenarios and the controls guard (#203 part 1). Part 2 adds the iOS
+Simulator flows, which tap the real app in its web view:
+
+| What | Proven by |
+| --- | --- |
+| Layout and spacing at iPhone sizes, nothing covered or off screen | e2e (`design.spec.ts`, the `webkit-iphone` project), `npm run design:shots`, the tap review set |
+| Copy: every word on screen and every spoken line | e2e (the spoken lines are recorded in order) |
+| Controls: every button, link, toggle and field does what it says | the tap scenarios and the controls guard (`e2e/controls.spec.ts`, `e2e/controls-guard.mjs`) |
+| The switch moment (offer, Take it, Keep my route, an offer withdrawn) | e2e (`switch.spec.ts`), with a forced offer from the made-up road world |
+| Diagnostics text, the drive log, the Drives screen, settings | e2e (`shell.spec.ts`, `drivelog.spec.ts`, `controls.spec.ts`) |
+
+**Proposed, waiting for the owner (#203):** a PR that changes only things in the second table
+would not get `needs-phone`; one that changes both would, and its `## Phone check` would ask
+only about the first table. Until the owner approves, `needs-phone` is used as before. A
+`## Phone check` can already leave out what the second table proves.
+
 ## Preflight and hard rules
 
 The phone is the owner's. The first night the lab used its real position once, locked it with
