@@ -47,10 +47,13 @@ describe('controls guard', () => {
     expect(result.report).toContain(`| ${PLANTED} | **no** |`)
   })
 
-  it('a click that only reached the control in code does not count: activated is what the page saw as trusted', () => {
-    // The recorder (e2e/controls.ts) never puts an untrusted click in `activated`, so seen-only is untapped.
-    const result = guard([{ title: 'plan', seen: [PLANTED], activated: [] }])
-    expect(result.status).toBe(1)
+  it('fails when there is nothing to judge: no scenario wrote its controls', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'controls-guard-'))
+    mkdirSync(join(dir, 'results'))
+    writeFileSync(join(dir, 'untested.json'), JSON.stringify({ untested: {} }))
+    const result = spawnSync(process.execPath, [GUARD, '--untested', join(dir, 'untested.json'), join(dir, 'results')], { cwd: dir, encoding: 'utf8' })
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('no controls.json')
   })
 
   it('passes on an untapped control that the list gives a reason for', () => {

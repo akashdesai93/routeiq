@@ -1,6 +1,7 @@
 import { EMPTY_PLACE_BOOK, serializePlaceBook, setLastTrip, type Place } from '../src/core/index.ts'
 import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
 import type { Locator } from '@playwright/test'
+import type { E2EWindow } from './browserStubs.ts'
 import { expect, test, type App } from './harness.ts'
 import { NO_TOKEN_PORT } from './ports.ts'
 import { World, type LngLat } from './world/roads.ts'
@@ -37,11 +38,12 @@ async function tapLink(app: App, name: string | RegExp, within = app.page.locato
   const opened = app.page.context().waitForEvent('page')
   await within.getByRole('link', { name }).tap()
   await expect.poll(() => app.opened.length).toBe(before + 1)
+  const url = app.claimOpened()
   // In a new window: the app is still on screen, where it was.
   expect(new URL(app.page.url()).hostname, `after tapping ${String(name)}, the app's page is at ${app.page.url()}`).toBe('localhost')
   await expect(app.page.getByRole('region', { name: 'Plan a trip' })).toBeVisible()
   await (await opened).close()
-  return app.opened.at(-1)!
+  return url
 }
 
 test('@tap on the plan screen, each button does what its label says', async ({ app, page }) => {
@@ -260,7 +262,13 @@ test('@tap the Drives screen: Close goes back, Copy copies the log, and Cancel k
 
   await screen.getByRole('button', { name: 'Export' }).tap()
   await screen.getByRole('button', { name: 'Copy' }).tap()
-  await expect(screen.getByRole('status')).toHaveText(/^(Copied\. Paste it into a message or a spreadsheet\.|Could not copy\. Press and hold the text, Select All, then Copy\.)$/)
+  await expect(screen.getByRole('status')).toHaveText('Copied. Paste it into a message or a spreadsheet.')
+  // What went to the clipboard is the log as CSV: the header and the one drive.
+  const copied = await page.evaluate(() => (window as unknown as E2EWindow).__e2e.copied)
+  expect(copied).toHaveLength(1)
+  expect(copied[0]!.split('\n')).toHaveLength(2)
+  expect(copied[0]).toMatch(/^started,corridor,hour,outcome,/)
+  expect(copied[0]!.split('\n')[1]).toMatch(/,ended,/)
   await app.snap('Drives: the log copied')
 
   // Clear asks first; Cancel keeps the drive.

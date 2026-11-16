@@ -168,6 +168,13 @@ export class App {
    * leaves this PC and the scenario can check where the link would have taken the driver.
    */
   readonly opened: string[] = []
+
+  /** Takes the page a tapped link opened off the list, so the end of the scenario does not fail on it. */
+  claimOpened(): string {
+    const url = this.opened.shift()
+    if (url === undefined) throw new Error('no page was opened by a link')
+    return url
+  }
   outside: Outside = {}
   /** Real milliseconds lost between reading the page clock and pausing it at drive start: the #71 race, on purpose. */
   slowMomentAtStartMs = 0
@@ -530,15 +537,30 @@ export class App {
       const answer = overpass?.(query) ?? { status: 504 }
       return route.fulfill({ status: answer.status, json: answer.body ?? { remark: 'busy' } })
     }
-    // A link the driver tapped, opening another page: kept, and answered with an empty one.
-    // (Chromium can file a no-opener window's first request under the page that opened it: a
-    // scenario that taps a link checks that the app's own page is still there afterwards.)
-    if (request.isNavigationRequest() && request.resourceType() === 'document') {
+    // A link the driver tapped, opening another page (a new tab or window, never the app's own
+    // page) at one of the places the app links to: kept, and answered with an empty page. Each
+    // must be claimed by the scenario (claimOpened) or the scenario fails at the end. The app's
+    // own page going anywhere off localhost is unexpected, like any other request (#215).
+    if (request.isNavigationRequest() && LINK_HOSTS.has(url.hostname) && !isAppPage(request, this.page)) {
       this.opened.push(request.url())
       return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>stand-in</title>' })
     }
     this.unexpected.push(`${request.method()} ${url.origin}${url.pathname}`)
     return route.abort('blockedbyclient')
+  }
+}
+
+/** Where the app's links go: Google Maps and Waze (the hand-off), and the data credits. */
+const LINK_HOSTS = new Set(['www.google.com', 'waze.com', 'www.waze.com', 'www.openstreetmap.org', 'www.mapbox.com', 'mapbox.com'])
+
+/** Whether a navigation is the app's own page (its main frame) going somewhere, not a new tab or window. */
+function isAppPage(request: Request, page: Page): boolean {
+  try {
+    const frame = request.frame()
+    return frame.page() === page && frame.parentFrame() === null
+  } catch {
+    // A new window's first navigation can come before its frame exists: it is not the app's page.
+    return false
   }
 }
 
@@ -627,5 +649,6 @@ export const test = base.extend<{ app: App }>({
     writeFileSync(info.outputPath('controls.json'), JSON.stringify(controls, null, 1))
     expect(app.unexpected, 'requests that would have left this PC').toEqual([])
     expect(app.unrouted, 'requests that went round the harness, to the real network').toEqual([])
+    expect(app.opened, 'pages a link opened that no scenario checked').toEqual([])
   },
 })
