@@ -1,0 +1,47 @@
+RouteIQ drive diagnostics
+log started 07:58:40, now 08:13:10, app active, gps off
+fixes: 724 (0 while not active), longest gap 3 s
+ticks: 731 (0 while not active), longest gap 2 s
+requests: 15 sent (0 while not active), 15 answered, 0 failed, 0 cancelled, 0 waiting
+request time: average 702 ms, longest 1402 ms
+of those: 2 side-street probes (no road or no route is a normal answer for one), 1 path checks
+checks: 11: yours was the fastest 11
+best saving another route offered: 0 s
+probes skipped: 11: your route was not held up 9, no request to spare (kept for the checks until arrival, or the cap reached) 2
+speech: 9 lines started, 9 finished, 0 cut off or failed
+events (oldest first):
+07:59:20 request 1 sent [active]
+07:59:21 request 1 answered, HTTP 200, 802 ms, native 760 ms [active]
+07:59:21 request 2 (probe) sent [active]
+07:59:22 request 2 (probe) answered, HTTP 200, 1402 ms [active]
+07:59:22 request 3 (probe) sent [active]
+07:59:23 request 3 (probe) answered, HTTP 200, 990 ms [active]
+07:59:23 request 4 (path check) sent [active]
+07:59:24 request 4 (path check) answered, HTTP 200, 640 ms [active]
+08:00:00 gps on [active]
+08:01:00 request 5 sent [active]
+08:01:01 request 5 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:01:01 check: yours was the fastest (2 routes) [active]
+08:01:01 probe skipped: your route was not held up [active]
+08:02:00 request 6 sent [active]
+08:02:01 request 6 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:03:00 request 7 sent [active]
+08:03:01 request 7 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:04:00 request 8 sent [active]
+08:04:01 request 8 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:05:00 request 9 sent [active]
+08:05:01 request 9 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:06:00 request 10 sent [active]
+08:06:01 request 10 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:07:00 request 11 sent [active]
+08:07:01 request 11 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:08:00 request 12 sent [active]
+08:08:01 request 12 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:09:00 request 13 sent [active]
+08:09:01 request 13 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:09:01 probe skipped: no request to spare (kept for the checks until arrival, or the cap reached) [active]
+08:10:00 request 14 sent [active]
+08:10:01 request 15 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:11:00 request 15 sent [active]
+08:11:01 request 15 answered, HTTP 200, 600 ms, native 560 ms [active]
+08:12:00 gps off [active]
