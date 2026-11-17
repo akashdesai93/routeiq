@@ -92,9 +92,11 @@ drive, a side street found mid-drive takes me round it", "after a drive, it show
 it really took against what it predicted".
 
 ```powershell
-npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone smoke set
-npm run e2e                                    # builds, runs every scenario, about 1 minute
+npx playwright install --only-shell chromium webkit   # once per machine: headless Chromium (about 290 MB) and WebKit for the iPhone sets
+npm run e2e                                    # builds, runs every scenario and the controls guard
 start e2e-report\index.html                    # the one-page report
+npm run e2e:webkit                             # only the WebKit project: the smoke set and the tap scenarios
+npm run review:taps                            # before/after screenshots of every tap, as one page
 ```
 
 - **What runs:** the production build (`vite build` with a dummy `pk.test` token, plus a
@@ -133,6 +135,24 @@ start e2e-report\index.html                    # the one-page report
   spoken lines with their drive time, what the made-up traffic server answered to each
   route request, and a video. `npm run e2e:report` opens Playwright's own report, with a
   trace of any failure.
+- **Every control is tapped (#203).** The harness records, in each scenario, every control
+  on screen (buttons, links, toggles, inputs, sheet handles, list rows, map pins, read from
+  the rendered DOM as it changes) and every control that got a trusted tap, click or typing
+  (`e2e/controls.ts`; a click made in code does not count). After the run,
+  `e2e/controls-guard.mjs` fails when a control was on screen and no scenario tapped it,
+  unless `e2e/controls-untested.json` gives the reason (with its issue), and fails on a line
+  there that is no longer needed. `npm run e2e` runs it; in CI it is the job "every control is
+  tapped by a scenario" of `e2e.yml`, over all shards. Its table is `e2e-report/controls.md`.
+  Disabled and read-only controls are left out (they cannot be tapped); a control whose
+  words are data (a route row, a suggestion, a saved place) is one control for all of them.
+  The tap scenarios are `e2e/controls.spec.ts`, tagged `@tap`, at 390 × 844 with touch.
+- **The tap scenarios in WebKit too.** `e2e/controls.spec.ts` also runs in the
+  `webkit-iphone` project (beside the smoke set of #136), the engine of the iPhone's web view.
+  `npm run e2e:webkit` runs that project alone.
+- **Tap review set.** `npm run review:taps` runs the `@tap` scenarios with a screenshot before
+  and 0.4 s after every tap, click and typing, and writes the contact sheet
+  `e2e-report/taps/index.html` (`-- --webkit` for the WebKit project). It asserts nothing: it is the input
+  of a design and function review (`docs/tap-review.md`).
 
 ## Planning a trip
 
@@ -1339,6 +1359,31 @@ plugin `RouteIQNative` is present, `src/device/native`):
   and timings only (`src/device/native/diagnostics.ts`). Its text is written to the app's
   storage when a drive ends and every 30 s during one, and shown as "Last drive" after
   the app was closed (`src/device/native/lastDrive.ts`).
+- **Drive report** (`node scripts/drive-report.mjs drive.txt`, or `--json`; a tool for
+  whoever reads the pasted diagnostics, not part of the app, #202): reads that text, any
+  version since the first shell build, and says what happened: the drive window (GPS on to
+  off), fixes and ticks per second (unknown when the log dropped the drive's start), time not active; requests sent, answered, failed and
+  the slowest; when the minute-by-minute checks stopped and how long the drive went on
+  after that (the blind stretch); probes and path checks during the drive against while
+  planning; off-cycle requests (re-plans) and switches; each switch offer with how it
+  ended, when the log records offers; the check outcomes and the best saving; speech. Then a list of things to look at, each with the log lines that show it.
+  Its thresholds are `DEFAULT_REPORT_OPTIONS` in the script (the first three are the app's
+  own and a test keeps them equal):
+
+  | Setting | Default | Meaning |
+  | --- | --- | --- |
+  | `pollIntervalSec` | 60 | the app's check interval (`DEFAULT_LIVE_OPTIONS`) |
+  | `requestBudget` | 60 | the app's request budget (`maxRequests`) |
+  | `minSavingSec` | 120 | the app's minimum saving (`DEFAULT_REROUTE_OPTIONS`) |
+  | `budgetSlack` | 2 | checks that stop this close to the budget read as "about the whole budget" |
+  | `blindAfterSec` | 180 | no plain check this long with the GPS on is a blind stretch or a gap |
+  | `offCycleBelowSec` | 45 | a plain request this soon after the last is off the cycle |
+  | `slowRequestMs` | 8000 | an answer this slow is listed |
+  | `longGapSec` | 30 | a gap in fixes or ticks this long is listed |
+
+  Privacy: the report shows only lines it recognises, all of them whole numbers and words
+  from the app's fixed lists. A line it does not know is counted, never shown, and one
+  that looks as if it held a position, a token or a link is left out and reported as such.
 - **Test drive (simulated GPS)** (under Start drive, shell only): a made-up car drives the
   selected route in place of the GPS, so a drive can be tried at home with the phone
   locked. Presets: follow the route, a wrong turn after 1 min (a made-up side street

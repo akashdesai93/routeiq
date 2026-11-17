@@ -13,9 +13,10 @@
 // Evidence: `app.snap('...')` attaches a screenshot to the report and every
 // scenario attaches what was said out loud, in order.
 
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { test as base, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test'
 import { installBrowserStubs, installShellStubs, type E2EWindow } from './browserStubs.ts'
+import { installControlRecorder, type ControlEvent } from './controls.ts'
 import { along, alongOf, FREE_FLOW, NO_CLOSURES, sideStep, World, type Closure, type FramePoint, type LngLat, type RoadName, type Traffic } from './world/roads.ts'
 
 export { expect }
@@ -163,15 +164,33 @@ export class App {
    */
   readonly unrouted: string[] = []
   private readonly routed = new WeakSet<Request>()
+  /**
+   * Pages a tapped link opened in a new tab or window (Google Maps, Waze, the OpenStreetMap
+   * copyright page): their address, in order. Each gets an empty stand-in page, so nothing
+   * leaves this PC and the scenario can check where the link would have taken the driver.
+   */
+  readonly opened: string[] = []
+
+  /** Takes the page a tapped link opened off the list, so the end of the scenario does not fail on it. */
+  claimOpened(): string {
+    const url = this.opened.shift()
+    if (url === undefined) throw new Error('no page was opened by a link')
+    return url
+  }
   outside: Outside = {}
   /** Real milliseconds lost between reading the page clock and pausing it at drive start: the #71 race, on purpose. */
   slowMomentAtStartMs = 0
   private shot = 0
+  /** The controls that were on screen, and those a trusted tap, click or typing reached (controls.ts, #203). */
+  readonly controls = { seen: new Set<string>(), activated: new Set<string>(), activatedLog: [] as string[] }
 
   constructor(page: Page, info: TestInfo) {
     this.page = page
     this.info = info
   }
+
+  /** Where the latest Directions request went. */
+  lastDestination: LngLat | null = null
 
   /** Every destination Directions was asked about, in order. */
   destinations(): LngLat[] {
@@ -200,6 +219,11 @@ export class App {
       if (index !== undefined) this.abortedProbes.push(index)
       if (this.hanging.delete(request)) this.cancelledHanging.push(this.hangingN.get(request)!)
     })
+    await page.exposeBinding('__controlsRecord', (_source, event: ControlEvent) => {
+      if (event.kind === 'tapped') this.controls.activatedLog.push(event.key)
+      else this.controls[event.kind].add(event.key)
+    })
+    await page.addInitScript(installControlRecorder)
     await page.addInitScript(installBrowserStubs)
     if (options.shell === true) await page.addInitScript(installShellStubs)
     if (options.storage !== undefined) {
@@ -447,6 +471,7 @@ export class App {
         const to = points.at(-1)
         if (from === undefined || to === undefined || points.length < 2) return route.fulfill({ status: 422, json: { code: 'InvalidInput' } })
         const key = to.join(',')
+        this.lastDestination = to
         let world = this.worlds.get(key)
         if (world === undefined) {
           world = new World(from, to, { sideStreet, freeway })
@@ -514,8 +539,30 @@ export class App {
       const answer = overpass?.(query) ?? { status: 504 }
       return route.fulfill({ status: answer.status, json: answer.body ?? { remark: 'busy' } })
     }
+    // A link the driver tapped, opening another page (a new tab or window, never the app's own
+    // page) at one of the places the app links to: kept, and answered with an empty page. Each
+    // must be claimed by the scenario (claimOpened) or the scenario fails at the end. The app's
+    // own page going anywhere off localhost is unexpected, like any other request (#215).
+    if (request.isNavigationRequest() && LINK_HOSTS.has(url.hostname) && !isAppPage(request, this.page)) {
+      this.opened.push(request.url())
+      return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>stand-in</title>' })
+    }
     this.unexpected.push(`${request.method()} ${url.origin}${url.pathname}`)
     return route.abort('blockedbyclient')
+  }
+}
+
+/** Where the app's links go: Google Maps and Waze (the hand-off), and the data credits. */
+const LINK_HOSTS = new Set(['www.google.com', 'waze.com', 'www.waze.com', 'www.openstreetmap.org', 'www.mapbox.com', 'mapbox.com'])
+
+/** Whether a navigation is the app's own page (its main frame) going somewhere, not a new tab or window. */
+function isAppPage(request: Request, page: Page): boolean {
+  try {
+    const frame = request.frame()
+    return frame.page() === page && frame.parentFrame() === null
+  } catch {
+    // A new window's first navigation can come before its frame exists: it is not the app's page.
+    return false
   }
 }
 
@@ -543,14 +590,67 @@ function clock(sec: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 }
 
+/**
+ * Screenshots before and after every tap, click and typing of a scenario, for the tap review
+ * (e2e/tap-review.mjs, #203): only with E2E_TAP_SHOTS=1, never in CI. Playwright has no hook on
+ * a locator action, so the actions themselves are wrapped, once per worker.
+ */
+interface TapShot {
+  n: number
+  action: string
+  target: string
+  before: string
+  after: string
+  /** The controls the page saw activated during the action (controls.ts). */
+  activated: string[]
+}
+let shooting: { app: App; info: TestInfo; shots: TapShot[] } | null = null
+const ACTIONS = ['tap', 'click', 'dblclick', 'fill', 'check', 'uncheck', 'pressSequentially', 'selectOption'] as const
+let wrapped = false
+function wrapActions(page: Page) {
+  if (wrapped) return
+  wrapped = true
+  const proto = Object.getPrototypeOf(page.locator('body')) as Record<string, (...args: unknown[]) => Promise<unknown>>
+  for (const action of ACTIONS) {
+    const original = proto[action]!
+    proto[action] = async function (this: { page(): Page; toString(): string }, ...args: unknown[]) {
+      const now = shooting
+      if (now === null || this.page() !== now.app.page) return original.apply(this, args)
+      const n = now.shots.length + 1
+      const name = (side: string) => `taps/${String(n).padStart(3, '0')}-${side}.png`
+      mkdirSync(now.info.outputPath('taps'), { recursive: true })
+      await now.app.page.screenshot({ path: now.info.outputPath(name('before')) }).catch(() => {})
+      const logged = now.app.controls.activatedLog.length
+      const result = await original.apply(this, args)
+      await now.app.page.waitForTimeout(400)
+      await now.app.page.screenshot({ path: now.info.outputPath(name('after')) }).catch(() => {})
+      const activated = [...new Set(now.app.controls.activatedLog.slice(logged))]
+      now.shots.push({ n, action, target: this.toString(), before: name('before'), after: name('after'), activated })
+      return result
+    }
+  }
+}
+
 export const test = base.extend<{ app: App }>({
   // The second argument is Playwright's "use"; named otherwise so the React hooks lint rule leaves it alone.
   app: async ({ page }, provide, info) => {
     const app = new App(page, info)
+    if (process.env.E2E_TAP_SHOTS === '1') {
+      wrapActions(page)
+      shooting = { app, info, shots: [] }
+    }
     await provide(app)
+    if (shooting !== null && shooting.app === app) {
+      writeFileSync(info.outputPath('taps.json'), JSON.stringify({ title: info.titlePath.join(' › '), project: info.project.name, shots: shooting.shots }, null, 1))
+      shooting = null
+    }
     await app.attachSpoken().catch(() => {})
     await app.attachAnswers()
+    // For the controls guard (e2e/controls-guard.mjs), which reads every scenario's file after the run.
+    const controls = { title: info.titlePath.join(' › '), project: info.project.name, seen: [...app.controls.seen].sort(), activated: [...app.controls.activated].sort() }
+    writeFileSync(info.outputPath('controls.json'), JSON.stringify(controls, null, 1))
     expect(app.unexpected, 'requests that would have left this PC').toEqual([])
     expect(app.unrouted, 'requests that went round the harness, to the real network').toEqual([])
+    expect(app.opened, 'pages a link opened that no scenario checked').toEqual([])
   },
 })
