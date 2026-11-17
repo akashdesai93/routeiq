@@ -169,9 +169,27 @@ test('a wrong turn: it says I am off the route, finds a new one and gets me ther
   // Noticed within half a minute of the wrong turn.
   expect(log.banners[0]!.atSec).toBeLessThan(150)
   const spoken = await app.spoken()
-  expect(spoken.slice(0, 3)).toEqual([STARTED, OFF_ROUTE, expect.stringMatching(/^New route\. \d+ minutes to your destination\.$/)])
+  expect(spoken.slice(0, 3)).toEqual([STARTED, OFF_ROUTE, expect.stringMatching(/^New route\. \d+ minutes to your destination\. In [\d.]+ miles?, continue onto Main Corridor\.$/)])
   expect(spoken.filter((line) => line === OFF_ROUTE)).toHaveLength(1)
   expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+})
+
+test('after a wrong turn and a new route, it tells me the next turn straight away', async ({ app }) => {
+  // The desk drive of #183: "New route. 28 minutes to your destination." and then nothing for
+  // 16 minutes. Here the new route's next turn (back onto Main Corridor) is several hundred
+  // meters off, and its own prompt comes only 80 m before it.
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const log = await app.drive({ wrongTurnAtSec: 120, snapAtSec: [130] })
+  const spoken = await app.spoken()
+  const NEW_ROUTE = /^New route\. \d+ minutes to your destination\. In [\d.]+ miles?, continue onto Main Corridor\.$/
+  // The new-route line goes on to the turn ahead, with how far it is; the banner shows it word for word.
+  expect(spoken.slice(0, 3)).toEqual([STARTED, OFF_ROUTE, expect.stringMatching(NEW_ROUTE)])
+  expect(log.banners[0]!.text).toContain(spoken[2]!)
+  // And that turn's own prompt still comes when it is near, once.
+  expect(spoken[3]).toBe('Continue onto Main Corridor.')
+  expect(spoken.filter((l) => l === 'Continue onto Main Corridor.')).toHaveLength(1)
+  expect(log.arrived).toBe(true)
 })
 
 test('right after Start, "checked" says how old the plan is, not 0 s', async ({ app, page }) => {

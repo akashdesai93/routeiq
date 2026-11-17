@@ -162,6 +162,55 @@ export function dueAnnouncement(
   }
 }
 
+/**
+ * After a new route that the spoken line gave no turn for, the next maneuver is
+ * announced at once (nextManeuverLine), unless it, or its next announcement
+ * still ahead of the car, is within this many meters: then that comes in a
+ * moment anyway (or the maneuver is already under way).
+ */
+export const NEXT_TURN_SOON_M = 300
+
+/**
+ * What to say about the way ahead right after the route changed under the car
+ * (#183): a new route found off the route, or one taken because the road ahead
+ * closed, whose spoken line ("New route. 28 minutes to your destination.")
+ * names no turn. The cursor after a switch skips every announcement due where
+ * the car is (the route's opening line among them), so on a long stretch the
+ * driver would hear nothing until half a mile before the next turn, which on
+ * a freeway can be many minutes away.
+ *
+ * The line is the next maneuver's own last announcement (the instruction
+ * itself: "Turn left onto Cross Street."), with the distance to it in front:
+ * "In 2.1 miles, turn left onto Cross Street." Null when that maneuver is
+ * within `soonM` of the car (or behind it), when its next announcement still
+ * ahead is due within `soonM` (it is said in a moment), when its last line is
+ * not a bare instruction (it already names a distance, or opens with "Then,"),
+ * when it
+ * is the arrival (the new-route line has just said how far that is), or when
+ * nothing is left.
+ */
+export function nextManeuverLine(
+  guidance: readonly GuidanceStep[] | undefined,
+  alongM: number,
+  soonM: number = NEXT_TURN_SOON_M,
+): DueAnnouncement | null {
+  if (!Number.isFinite(alongM)) return null
+  const step = (guidance ?? []).find((g) => g.type !== 'depart' && g.atDistanceM >= alongM - MANEUVER_PASSED_M)
+  if (step === undefined || step.type === 'arrive') return null
+  const lines = step.announcements.filter((a) => Number.isFinite(a.atDistanceM) && a.text.trim() !== '')
+  const last = lines.at(-1)?.text.trim()
+  // Only the bare instruction takes a distance in front: a line with one of its own ("In a
+  // quarter mile, ...") or an opening line ("Drive north on A Road. Then, ...") would read twice.
+  if (last === undefined || /^In\b/.test(last) || /\bThen,/.test(last)) return null
+  // A maneuver this near (or just behind) is said by its own prompt, or is already done.
+  const distanceToManeuverM = step.atDistanceM - alongM
+  if (!(distanceToManeuverM > soonM)) return null
+  // Its next line still ahead of the car is near: that comes in a moment.
+  const ahead = lines.map((a) => a.atDistanceM).filter((m) => m > alongM)
+  if (ahead.length > 0 && Math.min(...ahead) - alongM <= soonM) return null
+  return { text: `In ${spokenDistance(distanceToManeuverM)}, ${lowerFirst(last)}`, distanceToManeuverM }
+}
+
 /** How far before a maneuver the first made-up announcement comes, at most, in meters (half a mile). */
 export const SYNTH_FAR_M = 800
 /** How far before a maneuver the last made-up announcement comes, in meters. */

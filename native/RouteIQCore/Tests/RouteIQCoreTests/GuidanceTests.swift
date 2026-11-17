@@ -181,6 +181,38 @@ final class GuidanceTests: XCTestCase {
         XCTAssertEqual(Guidance.arrowKind("something new", "sideways"), .straight)
     }
 
+    // MARK: - describe('the next turn, right after a new route (#183)')
+
+    // it('names the next maneuver with the distance to it, from its own instruction')
+    func testNextTurnAfterANewRoute_namesTheNextManeuverWithTheDistanceToIt() {
+        XCTAssertEqual(Guidance.nextManeuverLine(Self.STEPS, 100).map { [$0.text, JS.string($0.distanceToManeuverM)] }, ["In 0.5 miles, turn left onto Second Road.", "900"])
+        XCTAssertEqual(Guidance.nextManeuverLine(Self.STEPS, 1100).map { [$0.text, JS.string($0.distanceToManeuverM)] }, ["In 1.1 miles, turn right onto Third Road.", "1900"])
+    }
+
+    // it('says nothing when the next maneuver speaks for itself in a moment, or is the arrival')
+    func testNextTurnAfterANewRoute_saysNothingWhenTheNextManeuverSpeaksForItselfInAMoment() {
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, 2200 - Guidance.nextTurnSoonM))
+        XCTAssertEqual(Guidance.nextManeuverLine(Self.STEPS, 2200 - Guidance.nextTurnSoonM - 1).map { [$0.text, JS.string($0.distanceToManeuverM)] }, ["In 0.6 miles, turn right onto Third Road.", "1101"])
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, 700))
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, 3100))
+        XCTAssertNil(Guidance.nextManeuverLine(nil, 0))
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, .nan))
+    }
+
+    // it('never names a maneuver beside or behind the car, and never puts a distance in front of one')
+    func testNextTurnAfterANewRoute_neverNamesAManeuverBesideOrBehindTheCar() {
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, 995))
+        XCTAssertNil(Guidance.nextManeuverLine(Self.STEPS, 1010))
+        func only(_ text: String) -> [GuidanceStep] {
+            var second = Self.STEPS[1]
+            second.announcements = [GuidanceAnnouncement(atDistanceM: 0, text: text)]
+            return [Self.STEPS[0], second, Self.STEPS[3]]
+        }
+        XCTAssertNil(Guidance.nextManeuverLine(only("In a quarter mile, turn left onto Second Road."), 100))
+        XCTAssertNil(Guidance.nextManeuverLine(only("Drive east on First Road. Then, in half a mile, turn left onto Second Road."), 100))
+        XCTAssertEqual(Guidance.nextManeuverLine(only("Turn left onto Second Road."), 100)?.text, "In 0.5 miles, turn left onto Second Road.")
+    }
+
     // MARK: - describe('what to say')
 
     // it('says each announcement once, where it becomes due')
