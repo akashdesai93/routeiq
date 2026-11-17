@@ -29,7 +29,7 @@ const SIMULATED_KINDS: readonly string[] = ['follow', 'wrong-turn', 'turn-around
 
 /**
  * What a drive check concluded (RerouteCode in src/core/reroute.ts, plus the live drive's
- * 'kept-previous'), in the words the log uses. A code not listed is kept as 'other'.
+ * 'kept-previous' and 'taken-offer'), in the words the log uses. A code not listed is kept as 'other'.
  */
 export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'current-best': 'yours was the fastest',
@@ -51,6 +51,7 @@ export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'no-routes': 'no routes',
   'poll-failed': 'the check failed',
   'kept-previous': 'kept the previous answer',
+  'taken-offer': 'took the faster route on offer',
 })
 
 /** A route count above this is logged as this: the log needs "a few", not an exact number. */

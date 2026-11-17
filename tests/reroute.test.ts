@@ -16,6 +16,8 @@ import {
   pointAtDistance,
   pointToSegment,
   rememberCheckProbes,
+  requiredLead,
+  takeRoute,
   type CheckProbeMemory,
   type LngLat,
   type MatchMeter,
@@ -927,6 +929,35 @@ describe('minimum saving', () => {
     // And a real gain near the end is no use when the turn is 300 m away.
     const close = pollOnA({ xM: 18200, etas: { A: 400, E: 250 }, options: NO_CONFIRM })
     expect(close).toMatchObject({ action: 'stay', code: 'too-late' })
+  })
+})
+
+describe('the lead a turn-off needs, and a switch the driver takes (#197)', () => {
+  it('requiredLead: 400 m, or 20 s of driving, or 1200 m on a freeway, whichever is most', () => {
+    expect(requiredLead(10, false)).toBe(400)
+    expect(requiredLead(35, false)).toBe(700)
+    expect(requiredLead(35, true)).toBe(1200)
+    expect(requiredLead(70, true)).toBe(1400)
+    // No speed known: the distance floor.
+    expect(requiredLead(Number.NaN, false)).toBe(400)
+  })
+
+  it('takeRoute: the state after a switch the driver took is the state after one the engine made', () => {
+    const left = lineFrom(lineOf('A'), 900)
+    const confirming: RerouteState = { ...INITIAL_REROUTE_STATE, pending: { geometry: lineOf('B'), polls: 1 }, failedPolls: 1 }
+    expect(takeRoute(confirming, left, 61)).toEqual({
+      pending: null,
+      lastSwitchAtSec: 61,
+      abandoned: [{ geometry: left, atSec: 61 }],
+      failedPolls: 0,
+      lostPolls: 0,
+      lostAtSec: [],
+      declined: confirming.declined,
+    })
+    // So the rules against flapping hold after it: within the cooldown, a faster route waits.
+    const after = takeRoute(INITIAL_REROUTE_STATE, left, 0)
+    const next = pollOnA({ xM: 1000, etas: { A: 2000, C: 1500 }, state: after, nowSec: 60, options: NO_CONFIRM })
+    expect(next).toMatchObject({ action: 'stay', code: 'cooldown' })
   })
 })
 

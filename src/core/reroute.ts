@@ -948,6 +948,16 @@ interface Measured {
 }
 
 /**
+ * The lead distance a turn-off needs, in meters (rules 10 and 10a): the larger of
+ * minLeadDistanceM and minLeadTimeSec of driving at `speedMps`, and at least
+ * freewayLeadDistanceM on a freeway. A turn-off nearer than this is too late to take safely.
+ */
+export function requiredLead(speedMps: number, onFreeway: boolean, options: RerouteOptions = DEFAULT_REROUTE_OPTIONS): number {
+  const speed = Number.isFinite(speedMps) && speedMps > 0 ? speedMps : 0
+  return Math.max(options.minLeadDistanceM, speed * options.minLeadTimeSec, onFreeway ? options.freewayLeadDistanceM : 0)
+}
+
+/**
  * Where and how soon the driver would have to act to take `candidate`, and
  * the lead the rules ask for there. Null when the candidate never leaves the
  * current route (it is the current route, or part of it).
@@ -979,12 +989,7 @@ function measure(
   // own record, or else on the current route's. Unknown road class is not freeway:
   // the speed rule (minLeadTimeSec) still stretches the lead at freeway speeds.
   const onFreeway = insideSpan(candidate.limitedAccessSpansM ?? currentSpans, askedTurnInM)
-  const speed = Number.isFinite(speedMps) && speedMps > 0 ? speedMps : 0
-  const requiredLeadM = Math.max(
-    options.minLeadDistanceM,
-    speed * options.minLeadTimeSec,
-    onFreeway ? options.freewayLeadDistanceM : 0,
-  )
+  const requiredLeadM = requiredLead(speedMps, onFreeway, options)
   return {
     candidate,
     xy,
@@ -1155,15 +1160,7 @@ export function decideReroute(
     code,
     considered,
     current: null,
-    nextState: {
-      pending: null,
-      lastSwitchAtSec: nowSec,
-      abandoned: [...base.abandoned, { geometry: lineFrom(observation.route.geometry, observation.positionAlongM), atSec: nowSec }],
-      failedPolls: 0,
-      lostPolls: 0,
-      lostAtSec: [],
-      declined: base.declined,
-    },
+    nextState: switchedState(base, lineFrom(observation.route.geometry, observation.positionAlongM), nowSec),
   })
 
   // Rule 3. Measured against the whole route, the part already driven included:
@@ -1373,6 +1370,32 @@ export function decideReroute(
     return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a, known)
   }
   return switchTo('faster-route', `${saves}, ${turnPhrase(a)}`, winner.candidate, a)
+}
+
+/**
+ * What the engine remembers after a switch made at `nowSec`: nothing pending, the cooldown
+ * started, and `leftAhead` (the route left, from the driver on) added to the abandoned list.
+ */
+function switchedState(state: RerouteState, leftAhead: readonly LngLat[], nowSec: number): RerouteState {
+  return {
+    pending: null,
+    lastSwitchAtSec: nowSec,
+    abandoned: [...state.abandoned, { geometry: leftAhead, atSec: nowSec }],
+    failedPolls: 0,
+    lostPolls: 0,
+    lostAtSec: [],
+    declined: state.declined,
+  }
+}
+
+/**
+ * The driver took the faster route being confirmed ("Take it", #197): the state to carry on
+ * with, exactly as after a switch the engine made itself at `nowSec`. The cooldown starts, and
+ * `leftAhead` (the route left, from the driver on) counts as abandoned, so the rules against
+ * flapping hold after a switch the driver chose as after any other.
+ */
+export function takeRoute(state: RerouteState, leftAhead: readonly LngLat[], nowSec: number): RerouteState {
+  return switchedState(state, leftAhead, nowSec)
 }
 
 /**

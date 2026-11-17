@@ -80,6 +80,7 @@ export interface LiveDrive {
   readonly start: () => void
   readonly end: () => void
   readonly keepPrevious: () => void
+  readonly takeOffer: () => void
   readonly setMuted: (muted: boolean) => void
 }
 
@@ -232,6 +233,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     setState(LIVE_IDLE)
   }, [])
   const keepPrevious = useCallback(() => runnerRef.current?.runner.keepPrevious(), [])
+  const takeOffer = useCallback(() => runnerRef.current?.runner.takeOffer(), [])
   const setMuted = useCallback((muted: boolean) => runnerRef.current?.runner.setMuted(muted), [])
 
   // "Checked N s ago" moves on between events.
@@ -274,6 +276,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     start,
     end,
     keepPrevious,
+    takeOffer,
     setMuted,
   }
 }

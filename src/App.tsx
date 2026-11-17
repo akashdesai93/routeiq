@@ -260,6 +260,7 @@ export default function App({ status = tokenStatus, placeStore = deviceStore, dr
                   : null
               }
               onKeepPrevious={live.keepPrevious}
+              onTakeOffer={live.takeOffer}
               onMute={live.setMuted}
               onEnd={live.end}
               onRestart={startLive}
