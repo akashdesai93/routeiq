@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_LIVE_OPTIONS,
+  INITIAL_OFFER_LIFE,
   isValidLngLat,
   LIVE_IDLE,
   liveView,
+  offerLife,
   type LiveOptions,
   type LiveState,
   type LiveView,
@@ -154,6 +156,9 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     let seenSwitches = 0
     // Each decided check once, for the drive diagnostics: what it saw, never where.
     let seenCheckAtMs: number | null = null
+    // Each offer's life for the diagnostics (#202): the state before each change, and when the offer on screen was shown.
+    let lastState: LiveState = LIVE_IDLE
+    let offerMemory = INITIAL_OFFER_LIFE
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
     const runner: LiveRunner = createLiveRunner({
       source,
@@ -183,6 +188,11 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           seenCheckAtMs = decided.atMs
           native.checked(decided.code, decided.routes, decided.savingSec)
         }
+        // Both moved on before anything is told, so a callback that throws cannot have an offer logged twice.
+        const life = offerLife(offerMemory, lastState, next, now(), optionsOf(multiplier()))
+        offerMemory = life.memory
+        lastState = next
+        if (native !== null) life.events.forEach(native.offer)
         const spent = next.switches.length > seenSwitches && whatIfInPlay.current
         seenSwitches = next.switches.length
         if (spent) {

@@ -54,6 +54,32 @@ export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'taken-offer': 'took the faster route on offer',
 })
 
+/** How an offer ended (OfferEnding in src/core/offerLife.ts), in the words the log uses (#202). */
+export const OFFER_ENDINGS: Readonly<Record<string, string>> = Object.freeze({
+  taken: 'taken by the driver',
+  kept: 'kept by the driver',
+  confirmed: 'confirmed by the app',
+  withdrawn: 'withdrawn',
+  expired: 'expired',
+})
+
+/** Why an offer was withdrawn or expired (OfferEndReason), in the words the log uses. */
+export const OFFER_END_REASONS: Readonly<Record<string, string>> = Object.freeze({
+  'not-faster': 'no longer faster',
+  unconfirmed: 'could not be confirmed',
+  replaced: 'a different one took its place',
+  'too-late': 'its turn came too close',
+  'off-route': 'off the route',
+  'drive-ended': 'the drive ended',
+})
+
+/** After a taken or confirmed switch, whether the next turn shown changed (OfferDirections). */
+export const OFFER_DIRECTIONS: Readonly<Record<string, string>> = Object.freeze({
+  changed: 'directions changed',
+  unchanged: 'directions unchanged',
+  none: 'no directions on the new route',
+})
+
 /** A route count above this is logged as this: the log needs "a few", not an exact number. */
 export const CHECK_ROUTES_CAP = 9
 
@@ -85,6 +111,17 @@ export interface DriveDiagnostics {
    * tallies the outcomes, keeps the largest saving seen and notes when the outcome changes.
    */
   checked(code: unknown, routes: number | null, savingSec: number | null): void
+  /**
+   * A switch offer was put on screen (#202). `why`: the check outcome that offered it, a word
+   * from CHECK_OUTCOMES. `savingSec`: what it saves, null when unknown.
+   */
+  offerShown(why: unknown, savingSec: number | null): void
+  /**
+   * The offer on screen ended. `how`, `reason` and `directions`: words from OFFER_ENDINGS,
+   * OFFER_END_REASONS and OFFER_DIRECTIONS. A reason or directions word not listed is left out;
+   * an ending not listed is kept as 'withdrawn', with no reason, so every offer still has one. `afterSec`: since it was shown.
+   */
+  offerEnded(how: unknown, reason: unknown, afterSec: number, directions: unknown): void
   speechStarted(): void
   /** `finished` false: the line was cut off or failed. */
   speechEnded(finished: boolean): void
@@ -128,6 +165,7 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   const speech = { started: 0, finished: 0, cutOff: 0 }
   let simulatedDrives = 0
   const checks = { count: 0, tally: new Map<string, number>(), last: null as string | null, mostFasterSec: null as number | null }
+  const offers = { shown: 0, ended: new Map<string, number>(), directionsUnchanged: 0 }
 
   const log = (what: string) => {
     events.push({ atMs: now(), what: `${what} [${state}]` })
@@ -209,6 +247,20 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${answer}${by !== null && by > 0 ? `, the best other saves ${by} s` : ''})`)
       }
     },
+    offerShown(why, saving) {
+      const known = typeof why === 'string' && Object.hasOwn(CHECK_OUTCOMES, why) ? why : 'other'
+      offers.shown++
+      const by = typeof saving === 'number' && Number.isFinite(saving) ? `saves ${whole(saving)} s` : 'saving unknown'
+      log(`offer shown: ${CHECK_OUTCOMES[known] ?? 'other'} (${by})`)
+    },
+    offerEnded(how, reason, afterSec, directions) {
+      const ending = typeof how === 'string' && Object.hasOwn(OFFER_ENDINGS, how) ? how : 'withdrawn'
+      offers.ended.set(ending, (offers.ended.get(ending) ?? 0) + 1)
+      const because = typeof reason === 'string' && Object.hasOwn(OFFER_END_REASONS, reason) ? `: ${OFFER_END_REASONS[reason]}` : ''
+      const turned = typeof directions === 'string' && Object.hasOwn(OFFER_DIRECTIONS, directions) ? `, ${OFFER_DIRECTIONS[directions]}` : ''
+      if (directions === 'unchanged') offers.directionsUnchanged++
+      log(`offer ${OFFER_ENDINGS[ending]} after ${whole(afterSec)} s${because}${turned}`)
+    },
     speechStarted() {
       speech.started++
     },
@@ -243,6 +295,13 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
                 .map(([code, n]) => `${CHECK_OUTCOMES[code] ?? 'other'} ${n}`)
                 .join(', ')}`,
               `best saving another route offered: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
+            ]),
+        ...(offers.shown === 0 && offers.ended.size === 0
+          ? []
+          : [
+              `offers: ${offers.shown} shown: ${Object.keys(OFFER_ENDINGS)
+                .map((how) => `${how} ${offers.ended.get(how) ?? 0}`)
+                .join(', ')}, directions unchanged ${offers.directionsUnchanged}`,
             ]),
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
         ...(simulatedDrives > 0

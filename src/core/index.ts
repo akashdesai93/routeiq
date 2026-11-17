@@ -164,6 +164,8 @@ export {
   type SwitchMoment,
   type WakeLockStatus,
 } from './live.ts'
+export { INITIAL_OFFER_LIFE, offerLife } from './offerLife.ts'
+export type { OfferDirections, OfferEnding, OfferEndReason, OfferLifeEvent, OfferLifeMemory } from './offerLife.ts'
 export {
   EMPTY_SPEECH_QUEUE,
   enqueueSpeech,

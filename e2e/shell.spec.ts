@@ -1,6 +1,6 @@
 import type { ShellWindow } from './browserStubs.ts'
 import { amberOutside, smallText } from './design.ts'
-import { expect, test } from './harness.ts'
+import { expect, test, type App } from './harness.ts'
 import { NO_TOKEN_PORT } from './ports.ts'
 import { JAM_ON_A_FROM_SECOND_CHECK } from './world/traffic.ts'
 
@@ -96,11 +96,64 @@ test('in the iPhone app, I paste my token once, and the drive keeps talking and 
   expect(checks).toContain('a faster one, waiting for the next check to confirm it 1')
   expect(checks).toContain('switched to a faster one 1')
   expect(diagnostics).toMatch(/best saving another route offered: [1-9]\d* s/)
+  // What became of the offer (#202): shown, then confirmed by the app's next check, and the turns moved with it.
+  expect(diagnostics).toMatch(/offer shown: a faster one, waiting for the next check to confirm it \(saves [1-9]\d* s\)/)
+  expect(diagnostics).toMatch(/offer confirmed by the app after [1-9]\d* s, directions changed/)
+  expect(diagnostics).toContain('offers: 1 shown: taken 0, kept 0, confirmed 1, withdrawn 0, expired 0, directions unchanged 0')
   expect(diagnostics).not.toMatch(/\d\.\d|pk\.|https?:/)
   await page.getByRole('button', { name: 'Copy' }).click()
   await expect(page.getByText('Copied. Paste it into a message.')).toBeVisible()
   await page.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByLabel('Diagnostics text')).toHaveCount(0)
+})
+
+/** The iPhone app with a token saved, on the trip screen, with `traffic` on the roads. */
+async function shellReady(app: App, traffic: typeof JAM_ON_A_FROM_SECOND_CHECK) {
+  app.outside.traffic = traffic
+  await app.open({ fakeClock: true, shell: true, path: SHELL })
+  await app.page.getByLabel('Paste your Mapbox public token').fill('pk.test')
+  await app.page.getByRole('button', { name: 'Save token' }).click()
+  await app.routesReady()
+}
+
+/** The Drive diagnostics text, after the drive. */
+async function diagnosticsAfter(app: App) {
+  const page = app.page
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('button', { name: 'Drive diagnostics' }).click()
+  return page.getByLabel('Diagnostics text').inputValue()
+}
+
+test('in the iPhone app, when I take a faster route on offer, the diagnostics say I took it, how soon, and that the directions changed', async ({ app }) => {
+  await shellReady(app, JAM_ON_A_FROM_SECOND_CHECK)
+  const log = await app.drive({ takeIt: true })
+  expect(log.arrived).toBe(true)
+  expect(log.moments.map((m) => m.stage).slice(0, 2)).toEqual(['pending', 'confirmed'])
+  const diagnostics = await diagnosticsAfter(app)
+  await app.snap('diagnostics after taking the offer: shown, then taken by the driver, directions changed')
+  const offerLines = diagnostics.split('\n').filter((l) => / offer (shown|taken|kept|confirmed|withdrawn|expired)/.test(l))
+  expect(offerLines).toHaveLength(2)
+  expect(offerLines[0]).toMatch(/offer shown: a faster one, waiting for the next check to confirm it \(saves [1-9]\d* s\)/)
+  expect(offerLines[1]).toMatch(/offer taken by the driver after \d+ s, directions changed/)
+  expect(diagnostics).toContain('offers: 1 shown: taken 1, kept 0, confirmed 0, withdrawn 0, expired 0, directions unchanged 0')
+  expect(diagnostics).not.toMatch(/\d\.\d|pk\.|https?:/)
+})
+
+test('in the iPhone app, when I keep my route while a faster one is on offer, the diagnostics say I kept it', async ({ app }) => {
+  await shellReady(app, JAM_ON_A_FROM_SECOND_CHECK)
+  const log = await app.drive({ keepMyRoute: 'pending' })
+  expect(log.arrived).toBe(true)
+  const diagnostics = await diagnosticsAfter(app)
+  await app.snap('diagnostics after keeping my route: shown, then kept by the driver')
+  const offerLines = diagnostics.split('\n').filter((l) => / offer (shown|taken|kept|confirmed|withdrawn|expired)/.test(l))
+  expect(offerLines[0]).toMatch(/offer shown: /)
+  // Kept is the whole story of that offer: its one ending, with no switch logged for it.
+  expect(offerLines[1]).toMatch(/offer kept by the driver after \d+ s \[/)
+  // Ten minutes on, the same route is still faster: offered again as a new offer, which the app confirms.
+  expect(offerLines).toHaveLength(4)
+  expect(offerLines[2]).toMatch(/offer shown: /)
+  expect(offerLines[3]).toMatch(/offer confirmed by the app after [1-9]\d* s, directions changed/)
+  expect(diagnostics).toContain('offers: 2 shown: taken 0, kept 1, confirmed 1, withdrawn 0, expired 0, directions unchanged 0')
 })
 
 test('at home, a test drive with a wrong turn says I am off the route and finds a new one with the phone locked, and its diagnostics are still there after the app was closed', async ({ app, page }) => {
