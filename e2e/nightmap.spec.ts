@@ -80,7 +80,8 @@ test.describe('at night', () => {
     app.outside.mapStyle = busyMapStyle('night')
     await app.open({ fakeClock: true })
     await app.routesReady()
-    expect(asked.at(-1)).toMatch(/navigation-night-v1/)
+    // The map's code comes after the routes (#97), so its style request can follow routesReady.
+    await expect.poll(() => asked.at(-1)).toMatch(/navigation-night-v1/)
     // On the trip screen the base map is whole: points of interest help when choosing where to go.
     await lookWhileDriving(app, async () => {
       await page.clock.runFor(50)
@@ -109,7 +110,8 @@ test.describe('by day', () => {
     app.outside.mapStyle = busyMapStyle('day')
     await app.open({ fakeClock: true })
     await app.routesReady()
-    expect(asked.at(-1)).toMatch(/streets-v12/)
+    // The map's code comes after the routes (#97), so its style request can follow routesReady.
+    await expect.poll(() => asked.at(-1)).toMatch(/streets-v12/)
     await lookWhileDriving(app, async () => {
       await page.clock.runFor(50)
       await app.snap('day: driving over a day map')
