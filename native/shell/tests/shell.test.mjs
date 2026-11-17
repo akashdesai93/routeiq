@@ -77,12 +77,13 @@ test('the Swift files follow the rule the Capacitor CLI relies on', () => {
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8')), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQLab.swift', dir), 'utf8')), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQSimulation.swift', dir), 'utf8')), false);
+  assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQStillness.swift', dir), 'utf8')), false);
 });
 
 test('positions and request addresses are never logged or stored by the native code', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
   const names = readdirSync(dir).filter((name) => name.endsWith('.swift'));
-  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQLab.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
+  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQLab.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift', 'RouteIQStillness.swift']);
   // RouteIQLab.swift writes the phone lab's report file; the tests below hold it to its launch argument.
   for (const name of names.filter((n) => n !== 'RouteIQLab.swift')) {
     const swift = readFileSync(new URL(name, dir), 'utf8');
@@ -202,4 +203,22 @@ test('sharing hands the text to the share sheet and nowhere else', () => {
   const plugin = readFileSync(new URL('RouteIQNativePlugin.swift', dir), 'utf8');
   assert.match(plugin, /UIActivityViewController\(activityItems: \[text\], applicationActivities: nil\)/);
   assert.equal(plugin.includes('UIPasteboard'), false);
+});
+
+test('battery work never lowers the GPS: the drive keeps BestForNavigation, no distance filter, never paused (#98)', () => {
+  const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
+  const engine = readFileSync(new URL('RouteIQEngine.swift', dir), 'utf8');
+  // The owner's decision on #98: the accuracy stays, and so does what keeps the app running when locked.
+  assert.match(engine, /manager\.desiredAccuracy = kCLLocationAccuracyBestForNavigation/);
+  assert.equal(engine.match(/\.distanceFilter = /g)?.length, 1);
+  assert.match(engine, /manager\.distanceFilter = kCLDistanceFilterNone/);
+  assert.equal(engine.match(/\.pausesLocationUpdatesAutomatically = /g)?.length, 1);
+  assert.match(engine, /manager\.pausesLocationUpdatesAutomatically = false/);
+  assert.match(engine, /manager\.activityType = \.automotiveNavigation/);
+  // Only the drive's stream asks for BestForNavigation; one-shot "Use my location" asks for Best. Nothing asks for less.
+  assert.equal(/kCLLocationAccuracy(HundredMeters|Kilometer|ThreeKilometers|NearestTenMeters|Reduced)/.test(engine), false);
+  // A fix and a tick reach the web app only through the standing-still rule (RouteIQStillness).
+  assert.match(engine, /guard stillness\.fix\(/);
+  assert.match(engine, /guard self\.stillness\.tick\(/);
+  assert.equal(engine.match(/onFix\?\(fix\)/g)?.length, 2, 'onFix only inside forward()');
 });

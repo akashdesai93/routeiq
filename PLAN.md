@@ -158,6 +158,11 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    three device wrappers (position source -> Core Location with background updates,
    speech -> AVSpeechSynthesizer with an audio session that ducks music, wake lock
    -> isIdleTimerDisabled) and the visibility wrapper falls away.
+   Battery while standing still (#98, Nov 12, 2026): GPS accuracy stays at
+   BestForNavigation (owner's decision); after 10 s still the shell passes on one fix
+   every 3 s instead of every second (`RouteIQStillness.swift`). Open for later: not
+   measured on a phone yet, and whether iOS lets the web view sleep between those events
+   while locked is to be seen there (docs/performance.md, Battery).
 7. **Done: synthetic tests.** `tests/reroute.test.ts` runs scripted drives through the
    engine on a made-up road network with a fake clock, no network: oscillating ETAs
    (no switch), a steady 3 minute gain (one switch after two polls), a gain inside

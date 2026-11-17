@@ -31,6 +31,9 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     private var pendingOnce: [(_ fix: [String: Any]?, _ error: String?) -> Void] = []
     private var onceRequested = false
     private var heartbeat: Timer?
+    /// Which fixes and ticks reach the web app while the car stands still (battery, #98).
+    /// Core Location itself is never changed by it.
+    private var stillness = RouteIQStillness()
 
     // The "Test drive": a made-up car in place of the GPS (RouteIQSimulation).
     // While it is set, positions from the GPS are discarded.
@@ -116,6 +119,11 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
             onceRequested = false
         }
         updating = true
+        stillness.reset()
+        // Battery (#98): these four stay exactly so for the whole drive. Fixes are held back
+        // while parked after they arrive (RouteIQStillness), never by asking Core Location for
+        // fewer: a distance filter or automatic pausing could stop the updates that keep the
+        // app running in the background, and iOS would then suspend it.
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = kCLDistanceFilterNone
         manager.activityType = .automotiveNavigation
@@ -144,6 +152,8 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         heartbeat?.invalidate()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self, self.updating else { return }
+            // Parked: one event every few seconds is the web app's clock (RouteIQStillness.tick).
+            guard self.stillness.tick(nowSec: ProcessInfo.processInfo.systemUptime) else { return }
             self.onTick?()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -166,6 +176,8 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         // A route that replaces another carries on in the same rhythm: the
         // next tick of the timer moves the car along the new one.
         if wasRunning { return true }
+        // A test drive starts with nothing held from the GPS's own stillness.
+        stillness.reset()
         simulationLastStep = nil
         simulationTimer?.invalidate()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -195,6 +207,19 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         simulationLastStep = now
         let fix = current.advance(bySec: elapsed, timestampMs: now.timeIntervalSince1970 * 1000)
         simulation = current
+        forward(fix)
+    }
+
+    /// Passes a fix on to the web app, unless the car has stood still for a while and one
+    /// went a moment ago (RouteIQStillness). The made-up car of a test drive goes through
+    /// the same rule, so a stop in its script tries the hold and the resume at home.
+    private func forward(_ fix: [String: Any]) {
+        guard let lat = fix["lat"] as? Double, let lng = fix["lng"] as? Double else {
+            onFix?(fix)
+            return
+        }
+        let speed = fix["speed"] as? Double
+        guard stillness.fix(lat: lat, lng: lng, speedMps: speed, nowSec: ProcessInfo.processInfo.systemUptime) else { return }
         onFix?(fix)
     }
 
@@ -280,7 +305,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         // During a test drive the GPS's position is discarded here: the
         // stream is only on to keep the app running.
         if updating && simulation == nil && location.timestamp.timeIntervalSinceNow > -Self.maxFixAgeSec {
-            onFix?(fix)
+            forward(fix)
         }
     }
 

@@ -58,6 +58,9 @@ jobs:
       - name: Unit tests (Info.plist patch, bridge script, token search)
         run: npm test
 
+      - name: Swift rules of the plugin (RouteIQStillness, battery #98)
+        run: bash scripts/test-swift-logic.sh
+
       - name: Build the web app into www/ (no token) and add the bridge script
         run: npm run build
 
