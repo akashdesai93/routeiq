@@ -1,14 +1,11 @@
-import { EMPTY_PLACE_BOOK, serializePlaceBook, setLastTrip, type Place } from '../src/core/index.ts'
+import { EMPTY_PLACE_BOOK, serializePlaceBook, setLastTrip } from '../src/core/index.ts'
 import { PLACE_BOOK_KEY } from '../src/storage/placeBook.ts'
 import { expect, test, type App } from './harness.ts'
+import { CAPITOL, STONE_MOUNTAIN } from './world/places.ts'
 import { World, type LngLat } from './world/roads.ts'
 
 // Light counts outside North and South Carolina, where no signal data ships
 // with the app and every tile has to come from Overpass.
-
-// Public landmarks in Georgia, well outside the bundled NC/SC tiles.
-const STONE_MOUNTAIN: Place = { id: 'e2e:stone-mountain', label: 'Stone Mountain Park', position: [-84.1455, 33.8053] }
-const CAPITOL: Place = { id: 'e2e:ga-capitol', label: 'Georgia State Capitol', position: [-84.388, 33.749] }
 
 /** The device's last trip was in Georgia, and Overpass knows only part of it: what to open the app with. */
 function georgiaTrip(app: App): Record<string, string> {

@@ -42,6 +42,7 @@ export {
   formatDuration,
   formatLatLng,
   formatSignalCount,
+  formatWait,
   signalCountNote,
 } from './format.ts'
 export { geometryHash, routeIdFromGeometry } from './hash.ts'
@@ -268,3 +269,24 @@ export {
   type OtherAppEta,
   type RecorderStep,
 } from './driveLog.ts'
+export {
+  DEFAULT_STOP_OPTIONS,
+  driveStops,
+  hasFreeway,
+  lightTotals,
+  meterFix,
+  movingSec,
+  predictedParts,
+  startStopMeter,
+  stopPlace,
+  worstLights,
+  type DriveStops,
+  type LightsOf,
+  type LoggedStop,
+  type PartTime,
+  type RoadPart,
+  type RouteLights,
+  type StopMeter,
+  type StopOptions,
+  type StopPlace,
+} from './stops.ts'

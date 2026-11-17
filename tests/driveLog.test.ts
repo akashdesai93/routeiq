@@ -137,7 +137,7 @@ describe('the recorder', () => {
     expect(observeDrive(RECORDER_IDLE, driving(r), T0, context()).recorder.draft!.signals).toBeNull()
   })
 
-  it('on a tick answers the very same recorder: no work, no write', () => {
+  it('on a tick answers the very same recorder, and on a fix writes nothing and asks for nothing', () => {
     const state = driving(route('route-aaaa', 1170))
     const started = observeDrive(RECORDER_IDLE, state, T0, context()).recorder
     let asked = 0
@@ -145,9 +145,14 @@ describe('the recorder', () => {
       asked++
       return context()()
     }
-    const tick = observeDrive(started, { ...state, lastFix: fixAt(UPTOWN, T0 + 1000) }, T0 + 1000, counting)
+    // A tick: the same state, a later clock.
+    const tick = observeDrive(started, state, T0 + 1000, counting)
     expect(tick.recorder).toBe(started)
     expect(tick.write).toBeNull()
+    // A fix: only the stop meter moves on (stops.ts); still no write, and the context is not asked.
+    const fix = observeDrive(started, { ...state, lastFix: fixAt(UPTOWN, T0 + 1000) }, T0 + 1000, counting)
+    expect(fix.write).toBeNull()
+    expect(fix.recorder.draft).toBe(started.draft)
     expect(asked).toBe(0)
   })
 
@@ -251,6 +256,7 @@ function record(id: number, extra: Partial<DriveRecord> = {}): DriveRecord {
     offRouteEvents: 0,
     requests: 17,
     outcome: 'arrived',
+    stops: null,
     ...extra,
   }
 }
@@ -363,8 +369,8 @@ describe('summaries', () => {
     ].reduce((l, r) => recordDrive(l, r), EMPTY_DRIVE_LOG)
     expect(driveLogCsv(log).split('\n')).toEqual([
       DRIVE_LOG_CSV_HEADER,
-      '2027-01-15T08:00:00.000Z,A,8,arrived,provider,20.0,21.0,1.0,20.0,1.0,25.0,≥3,0,0,,,0,17',
-      '2027-01-15T08:01:40.000Z,A,8,ended,provider,20.0,21.0,,,,25.0,,0,1,,,0,17',
+      '2027-01-15T08:00:00.000Z,A,8,arrived,provider,20.0,21.0,1.0,20.0,1.0,25.0,≥3,0,0,,,0,17,,,',
+      '2027-01-15T08:01:40.000Z,A,8,ended,provider,20.0,21.0,,,,25.0,,0,1,,,0,17,,,',
     ])
   })
 })

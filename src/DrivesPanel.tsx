@@ -4,14 +4,21 @@ import {
   driveLogCsv,
   errorWords,
   formatDistance,
+  formatWait,
   hourLabel,
   otherAppErrorSec,
   predictionErrorSec,
   summarizeDriveLog,
+  hasFreeway,
+  lightTotals,
+  movingSec,
+  worstLights,
   type CorridorSummary,
   type DriveLog,
   type DriveRecord,
+  type DriveStops,
   type ErrorGroup,
+  type PartTime,
   type RouteSource,
 } from './core/index.ts'
 import { canShare, copyText, shareText } from './device/share.ts'
@@ -43,6 +50,51 @@ function lights(drive: DriveRecord): string {
   return drive.signals.partial ? `≥ ${drive.signals.count} lights (partial)` : `${drive.signals.count} lights`
 }
 
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+function partLine(name: string, part: PartTime): string {
+  return `${name}: predicted ${part.predictedSec === null ? 'unknown' : minutes(part.predictedSec)} · took ${minutes(part.actualSec)}`
+}
+
+/** Where the car stood still (#196): moving against stopped, the lights, the worst ones, street against freeway. */
+function StopsBlock({ stops, actualSec }: { stops: DriveStops; actualSec: number }) {
+  const worst = worstLights(stops)
+  const parts = stops.parts
+  const lights = lightTotals(stops)
+  const at = lights?.partial === true ? '≥ ' : ''
+  return (
+    <div className="drive-stops" aria-label="Stops">
+      <p>
+        Moving {formatWait(movingSec(actualSec, stops))} · Stopped {formatWait(stops.stoppedSec)}
+        {stops.count > 0 ? ` (${plural(stops.count, 'stop', 'stops')})` : ' (no stops)'}
+      </p>
+      {stops.count > 0 && (
+        <p>
+          At lights:{' '}
+          {lights === null
+            ? 'unknown'
+            : lights.stops === 0
+              ? 'none'
+              : `${at}${formatWait(lights.sec)} at ${at}${plural(lights.stops, 'light', 'lights')}`}
+          {stops.unknownStops > 0 && ` · ${plural(stops.unknownStops, 'stop', 'stops')} where lights are unknown`}
+        </p>
+      )}
+      {worst.length > 0 && (
+        <p>
+          Worst {worst.length === 1 ? 'light' : 'lights'}:{' '}
+          {worst.map((s) => `${formatWait(s.durationSec)}, ${s.drivenM === null ? `${minutes(s.atSec)}` : formatDistance(s.drivenM)} in`).join(' · ')}
+        </p>
+      )}
+      {parts !== null && (
+        <p className="hint">
+          {partLine('Streets', parts.surface)}
+          {hasFreeway(stops) && ` · ${partLine('Freeway', parts.freeway)}`}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function DriveItem({ drive, label }: { drive: DriveRecord; label: string }) {
   const error = predictionErrorSec(drive)
   const otherError = otherAppErrorSec(drive)
@@ -65,6 +117,7 @@ function DriveItem({ drive, label }: { drive: DriveRecord; label: string }) {
           {otherError !== null && ` (${errorWords(otherError).replace('predicted', 'it said')})`}
         </p>
       )}
+      {drive.stops !== null && <StopsBlock stops={drive.stops} actualSec={drive.actualSec} />}
       {drive.switches.length > 0 && (
         <p>
           {kept.length === 1 ? '1 switch' : `${kept.length} switches`}
