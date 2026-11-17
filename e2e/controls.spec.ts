@@ -379,12 +379,27 @@ test('@tap the map: zoom in, zoom out, back to north, and a tapped pin says what
   await app.routesReady()
   const canvas = page.locator('canvas.mapboxgl-canvas')
   const look = () => canvas.screenshot()
-  const before = await look()
+  // The map's code comes after the routes (#97) and then eases to the trip, so wait for it to
+  // stand still before each look: a look taken mid-animation lets a tap land on a moving map.
+  const still = async () => {
+    let last = await look()
+    await expect
+      .poll(async () => {
+        const next = await look()
+        const same = Buffer.compare(next, last) === 0
+        last = next
+        return same
+      })
+      .toBe(true)
+    return last
+  }
+  const before = await still()
   await page.getByRole('button', { name: 'Zoom in' }).tap()
   await expect.poll(async () => Buffer.compare(await look(), before) !== 0).toBe(true)
-  const zoomedIn = await look()
+  const zoomedIn = await still()
   await page.getByRole('button', { name: 'Zoom out' }).tap()
   await expect.poll(async () => Buffer.compare(await look(), zoomedIn) !== 0).toBe(true)
+  await still()
   // Back to north: already north, so the map stays as it is and nothing breaks.
   await page.getByRole('button', { name: 'Reset bearing to north' }).tap()
   await expect(page.locator('ol.routes > li')).toHaveCount(3)
