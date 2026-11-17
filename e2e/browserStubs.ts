@@ -18,6 +18,8 @@ export interface E2EWindow {
     inflight: number
     /** Every URL the page handed to fetch, in order, including calls cancelled before they left. */
     fetched: string[]
+    /** Every text written to the clipboard, in order. */
+    copied: string[]
     fix: (lng: number, lat: number, headingDeg: number, speedMps: number) => void
     /** Location permission is taken away: every position watch gets a "denied" error. */
     deny: () => void
@@ -41,6 +43,7 @@ export function installBrowserStubs(): void {
     spoken: [],
     inflight: 0,
     fetched: [],
+    copied: [],
     here: [-80.8431, 35.2271],
     fix(lng, lat, headingDeg, speedMps) {
       for (const watcher of watchers.values()) watcher.ok(position(lng, lat, speedMps > 0.5 ? headingDeg : null, speedMps))
@@ -49,6 +52,17 @@ export function installBrowserStubs(): void {
       for (const watcher of watchers.values()) watcher.fail?.({ code: 1, PERMISSION_DENIED: 1, message: 'denied' } as GeolocationPositionError)
     },
   }
+
+  // The clipboard: what the app copies is recorded, the same in every browser (Chromium asks for
+  // a permission, WebKit has none to grant), so a scenario can check the text that was copied.
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        w.__e2e.copied.push(text)
+      },
+    },
+  })
 
   const geolocation = {
     getCurrentPosition(ok: (p: GeolocationPosition) => void, fail?: (e: GeolocationPositionError) => void) {

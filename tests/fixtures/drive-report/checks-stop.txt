@@ -1,0 +1,48 @@
+RouteIQ drive diagnostics
+log started 07:38:12, now 08:16:40, app active, gps off
+fixes: 2094 (0 while not active), longest gap 4 s
+ticks: 2101 (0 while not active), longest gap 2 s
+requests: 16 sent (0 while not active), 16 answered, 0 failed, 0 cancelled, 0 waiting
+request time: average 640 ms, longest 1910 ms
+of those: 0 side-street probes (no road or no route is a normal answer for one), 0 path checks
+checks: 15: yours was the fastest 13, another was faster, by less than the minimum saving 2
+best saving another route offered: 48 s
+speech: 22 lines started, 22 finished, 0 cut off or failed
+events (oldest first):
+07:39:02 request 1 sent [active]
+07:39:03 request 1 answered, HTTP 200, 702 ms, native 655 ms [active]
+07:40:00 gps on [active]
+07:41:00 request 2 sent [active]
+07:41:01 request 2 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:41:01 check: yours was the fastest (2 routes) [active]
+07:42:00 request 3 sent [active]
+07:42:01 request 3 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:43:00 request 4 sent [active]
+07:43:01 request 4 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:44:00 request 5 sent [active]
+07:44:01 request 5 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:45:00 request 6 sent [active]
+07:45:01 request 6 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:46:00 request 7 sent [active]
+07:46:01 request 7 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:47:00 request 8 sent [active]
+07:47:01 request 8 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:48:00 request 9 sent [active]
+07:48:01 request 9 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:48:01 check: another was faster, by less than the minimum saving (3 routes, the best other saves 48 s) [active]
+07:49:00 request 10 sent [active]
+07:49:01 request 10 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:50:00 request 11 sent [active]
+07:50:01 request 11 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:50:01 check: yours was the fastest (2 routes) [active]
+07:51:00 request 12 sent [active]
+07:51:01 request 12 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:52:00 request 13 sent [active]
+07:52:01 request 13 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:53:00 request 14 sent [active]
+07:53:01 request 14 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:54:00 request 15 sent [active]
+07:54:01 request 15 answered, HTTP 200, 610 ms, native 570 ms [active]
+07:55:00 request 16 sent [active]
+07:55:01 request 16 answered, HTTP 200, 610 ms, native 570 ms [active]
+08:15:00 gps off [active]
