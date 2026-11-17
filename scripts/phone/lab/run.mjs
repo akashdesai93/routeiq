@@ -14,7 +14,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { buildTrack, pathFrom } from '../make-gpx.mjs'
 import { PRESETS } from '../presets.mjs'
-import { checkLockedWrongTurn, checkPlanShowsRoutes, checkScreenDrawn, checkSoak, notRun, parseLabReport, planFromCaptions, redact, runMetrics } from './assertions.mjs'
+import { checkDrawnWithin, checkLockedWrongTurn, checkPlanShowsRoutes, checkScreenDrawn, DEFAULT_LAB_CHECKS, firstDrawn, checkSoak, notRun, parseLabReport, planFromCaptions, redact, runMetrics } from './assertions.mjs'
 import { BACKGROUND_APP, connectPhone, sleep } from './phone.mjs'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -23,7 +23,7 @@ export const SCENARIOS = Object.freeze({
   'starts-and-plans': 'Starts the app and checks that the plan screen lists routes.',
   'locked-wrong-turn': 'Starts a drive, puts the app in the background (and the phone to sleep with --lock), replays a drive with a wrong turn, and checks what the app did meanwhile.',
   'background-soak': 'The same with a drive that stays on the route, for --minutes (default 10), with CPU and battery samples.',
-  'drive-screen': 'Starts the in-app test drive, leaves the app in front and takes screenshots for 30 s: is the driving screen drawn? With --fix <name>, tries that on the page 12 s in.',
+  'drive-screen': 'Starts the in-app test drive, leaves the app in front and takes screenshots one after another for 40 s: is the driving screen drawn within 2 s of Start drive and does it stay drawn? With --fix <name>, tries that on the page 12 s in.',
 })
 
 export const USAGE = [
@@ -233,25 +233,41 @@ async function main(argv) {
       const name = options.fix === null ? 'testdrive' : `testdrive-fix-${options.fix}`
       if ((await phone.launch(bundle, { args: labArgs(name) })) === null) throw new Error('the app did not start')
       say(`app started in lab mode (${name}): it switches the in-app test drive on and presses Start drive; the phone's position is not used`)
+      // The app writes its report the moment it presses Start drive, so a pull once a second
+      // finds the start within about a second. The drive's clock starts halfway between the
+      // last pull that did not see it and the first that did.
       let lab = null
-      for (let waited = 0; waited < 60_000 && !(lab !== null && lab.screen === 'drive'); waited += 3000) {
-        await pause(3000)
+      let lastMiss = Date.now()
+      for (let waited = 0; waited < 90_000 && !(lab !== null && lab.screen === 'drive'); waited += 1000) {
+        await pause(1000)
+        const before = Date.now()
         lab = report()
+        if (lab === null || lab.screen !== 'drive') lastMiss = before
       }
       if (lab === null || lab.screen !== 'drive') {
         await shot('no-drive.png')
         checks = [notRun('the driving screen', lab === null ? 'this build has no lab hook' : `the drive did not start: screen ${lab.screen}, ${lab.routes} routes`)]
       } else {
-        say('driving')
-        const began = Date.now()
-        const looks = []
-        // 12 s in, a --fix is tried by the app; the screenshots on both sides of it show what it did.
-        for (const atSec of [3, 9, 18, 30]) {
-          await pause(Math.max(0, began + atSec * 1000 - Date.now()))
-          looks.push([atSec, await shot(`drive-${String(atSec).padStart(2, '0')}s.png`)])
+        const began = (lastMiss + Date.now()) / 2
+        say(`driving (Start drive pressed at ${lab.startPressedAt ?? '?'} on the phone's clock; seen by the PC within ${Math.round((Date.now() - lastMiss) / 100) / 10} s)`)
+        // Screenshots one after another, each with its seconds since Start drive (#136: one run
+        // drew by itself at 18 s, so fixed moments are not enough). With a --fix the watch goes
+        // on past it (12 s) so that its effect is seen.
+        const samples = []
+        let n = 0
+        while (Date.now() - began < DEFAULT_LAB_CHECKS.drawWatchSec * 1000) {
+          const sec = (Date.now() - began) / 1000
+          samples.push({ sec, look: await shot(`drive-${String(++n).padStart(2, '0')}-${sec.toFixed(1)}s.png`) })
+          const seen = firstDrawn(samples)
+          // Drawn from the limit on, for 8 s, and past the fix when there is one: enough seen.
+          if (seen.drawnSec !== null && (seen.lastFlatSec === null || seen.lastFlatSec < DEFAULT_LAB_CHECKS.maxDrawnSec) && sec >= DEFAULT_LAB_CHECKS.maxDrawnSec + 8 && (options.fix === null || sec > 20)) break
         }
+        const seen = firstDrawn(samples)
+        say(seen.drawnSec === null ? `never drawn in ${Math.round(seen.watchedSec ?? 0)} s` : `first drawn ${seen.drawnSec.toFixed(1)} s after Start drive${seen.lastFlatSec !== null && seen.lastFlatSec > seen.drawnSec ? `, flat again until ${seen.lastFlatSec.toFixed(1)} s` : ''}`)
+        writeFileSync(path.join(dir, 'drawn.json'), JSON.stringify({ samples: samples.map((s) => ({ sec: Math.round(s.sec * 10) / 10, flat: s.look?.flat ?? null, shade: s.look?.shade ?? null })), ...seen }, null, 1))
+        files.push('drawn.json')
         finalReport = report('lab-report.txt')
-        checks = looks.map(([atSec, look]) => checkScreenDrawn(look, `${atSec} s after the drive started${options.fix !== null && atSec > 12 ? ` (after trying "${options.fix}")` : ''}`))
+        checks = [checkDrawnWithin(samples)]
       }
     } else {
       const soak = scenario === 'background-soak'

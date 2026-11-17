@@ -332,6 +332,13 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
   const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-')
   const fix = scenario.startsWith('testdrive-fix-') ? probe?.fixes[scenario.slice('testdrive-fix-'.length)] : undefined
   let drivingSince: number | null = null
+  const writeReport = () => void plugin.labReport?.({ text: lab.report() }).catch(() => {})
+  /** Presses Start drive; on success the report goes out at once, so the PC can time the screen from it (#136). */
+  const pressStart = (): boolean => {
+    if (!lab.startDrive()) return false
+    writeReport()
+    return true
+  }
   let autopilot: 'waiting' | 'asking' | 'done' = start !== null || testDrive ? 'waiting' : 'done'
   let lastAsked = -Infinity
   /** Asks the phone where it is and starts the drive only at the simulated start. Says yes or no, never where. */
@@ -345,7 +352,7 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
         if (!near) {
           lab.note('the phone is not at the simulated start: not starting the drive')
           autopilot = 'waiting'
-        } else if (lab.startDrive()) autopilot = 'done'
+        } else if (pressStart()) autopilot = 'done'
         else autopilot = 'waiting'
       },
       () => {
@@ -369,7 +376,7 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
           if (testDrive) {
             // Two beats: switch it on, and start only after the page shows it on.
             if (!lab.testDriveOn()) lab.startTestDrive()
-            else if (lab.startDrive()) autopilot = 'done'
+            else if (pressStart()) autopilot = 'done'
           } else if (at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
         }
       }
@@ -383,7 +390,7 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
       }
       if (at - lastReport >= LAB_REPORT_MS) {
         lastReport = at
-        void plugin.labReport?.({ text: lab.report() }).catch(() => {})
+        writeReport()
       }
     } catch {
       // The lab must never break the app it is watching.

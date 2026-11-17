@@ -14,6 +14,12 @@ export const DEFAULT_LAB_CHECKS = Object.freeze({
   minBeatsPerAwayMinute: 30,
   /** A screenshot with this share of its pixels in one flat colour, or more, is a screen that was not drawn. */
   maxFlatShare: 0.97,
+  /** drive-screen: from this many seconds after Start drive on, every screenshot must be drawn (#136). */
+  maxDrawnSec: 2,
+  /** drive-screen: how long the screen is watched after Start drive, in seconds. */
+  drawWatchSec: 40,
+  /** drive-screen: a first screenshot later than this after Start drive cannot judge the start, in seconds. */
+  maxFirstShotSec: 5,
   /** The longest the drive may stand still (no tick) while the app is away, in seconds. The app logs waits from 5 s up. */
   maxStallSec: 5,
 })
@@ -64,6 +70,7 @@ export function parseLabReport(text) {
   const history = []
   for (const m of text.slice(0, split).matchAll(/^(\d\d:\d\d:\d\d) (.+)$/gm)) history.push({ time: m[1], what: m[2] })
   return {
+    startPressedAt: history.find((h) => h.what === 'pressed "Start drive"')?.time ?? null,
     scenario: head[1],
     writtenAt: head[2],
     number: Number(head[3]),
@@ -293,4 +300,39 @@ export function redact(line) {
     .replace(/\b[ps]k\.[A-Za-z0-9_-]{10,}(\.[A-Za-z0-9_-]+)?/g, '<token>')
     .replace(/(?<![:\d])-?\d{1,3}\.\d{4,}/g, '<number>')
     .replace(/(dev\.routeiq\.shell)\.[A-Z0-9]{6,}/g, '$1.<team>')
+}
+
+/**
+ * The screenshots of a drive-screen run (#136): `samples` are `{ sec, look }`, `sec` the seconds
+ * since Start drive. `drawnSec`: the first drawn one (null: none). `lastFlatSec`: the last flat
+ * one (null: none). `firstSec`/`watchedSec`: the first and last screenshot.
+ */
+export function firstDrawn(samples, max = DEFAULT_LAB_CHECKS.maxFlatShare) {
+  const list = (Array.isArray(samples) ? samples : []).filter((s) => typeof s?.sec === 'number' && s.look != null).sort((a, b) => a.sec - b.sec)
+  const drawn = list.find((s) => s.look.flat < max)
+  const flat = list.filter((s) => s.look.flat >= max)
+  return {
+    drawnSec: drawn?.sec ?? null,
+    lastFlatSec: flat.length === 0 ? null : flat[flat.length - 1].sec,
+    firstSec: list[0]?.sec ?? null,
+    watchedSec: list.length === 0 ? null : list[list.length - 1].sec,
+    measured: list.length,
+  }
+}
+
+/**
+ * The driving screen is drawn within `limitSec` of Start drive and stays drawn: every screenshot
+ * from `limitSec` on is drawn. A screen drawn in the first screenshot passes even though that
+ * screenshot comes about 2.5 s after the press (the PC sees the start through a file it pulls).
+ */
+export function checkDrawnWithin(samples, limitSec = DEFAULT_LAB_CHECKS.maxDrawnSec, max = DEFAULT_LAB_CHECKS.maxFlatShare, firstShotSec = DEFAULT_LAB_CHECKS.maxFirstShotSec) {
+  const name = `the driving screen is drawn within ${limitSec} s of Start drive and stays drawn`
+  const seen = firstDrawn(samples, max)
+  if (seen.measured === 0) return notRun(name, 'no screenshot could be taken or measured')
+  if (seen.firstSec > firstShotSec) return notRun(name, `the first screenshot came ${seen.firstSec.toFixed(1)} s after Start drive, too late to judge the start`)
+  const late = (Array.isArray(samples) ? samples : []).filter((s) => s?.look != null && s.sec >= limitSec && s.look.flat >= max)
+  const shots = `${seen.measured} screenshots from ${seen.firstSec.toFixed(1)} to ${seen.watchedSec.toFixed(1)} s`
+  if (seen.drawnSec === null) return verdict(name, false, `never drawn (${shots})`)
+  if (late.length > 0) return verdict(name, false, `first drawn ${seen.drawnSec.toFixed(1)} s after Start drive, flat at ${late.length} screenshot(s) from ${limitSec} s on, the last at ${seen.lastFlatSec.toFixed(1)} s (${shots})`)
+  return verdict(name, true, `drawn in every screenshot from ${limitSec} s on, first drawn ${seen.drawnSec.toFixed(1)} s (${shots})`)
 }

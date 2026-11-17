@@ -27,7 +27,7 @@ CAPTION_LIMIT = 400
 
 def look(png: bytes):
     """
-    How much of the screen below the status bar is one flat colour: the share of pixels within
+    How much of the screen below the status bar and a banner's height is one flat colour: the share of pixels within
     a few shades of the commonest brightness, and that brightness (0 black, 255 white). A screen
     that was never painted is all one colour. None when Pillow is not installed.
     """
@@ -39,7 +39,9 @@ def look(png: bytes):
         return None
     image = Image.open(io.BytesIO(png)).convert("L")
     width, height = image.size
-    body = image.crop((0, int(height * 0.07), width, height)).resize((90, 180))
+    # From 20 % down: below the status bar and below a notification banner, which would
+    # otherwise count a black screen with a banner over it as drawn (#136).
+    body = image.crop((0, int(height * 0.2), width, height)).resize((90, 180))
     histogram = body.histogram()
     commonest = max(range(256), key=lambda shade: histogram[shade])
     near = sum(histogram[max(0, commonest - 6) : commonest + 7])
