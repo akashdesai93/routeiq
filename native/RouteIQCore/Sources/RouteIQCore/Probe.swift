@@ -116,17 +116,24 @@ public struct DriveProbeBudget: Hashable, Sendable {
     public var minDelaySec: Double
     /// How long a check's probes (and their path check) may take in all, in seconds.
     public var timeoutSec: Double
+    /// Back-off (#183): after this many probing checks in a row in which no probed route held up, the checks stop probing.
+    public var losingChecks: Double
+    /// The back-off ends when the route's slowdown (fresh time over typical) changes by at least this much (or on a switch, or a probe that holds up).
+    public var rearmSlowdownChange: Double
+
     /// Before a probe, one request per poll interval until the expected arrival, times this
     /// factor, is kept back for the plain checks, so the drive never goes blind (#183).
     public var arrivalReserve: Double
     /// Requests kept back on top of the plain checks: for the odd plain check that needs its path check.
     public var reserveMargin: Double
 
-    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8, arrivalReserve: Double = 1, reserveMargin: Double = 3) {
+    public init(requestsPerCheck: Double = 1, requestsPerDrive: Double = 20, minDelaySec: Double = 120, timeoutSec: Double = 8, losingChecks: Double = 3, rearmSlowdownChange: Double = 0.1, arrivalReserve: Double = 1, reserveMargin: Double = 3) {
         self.requestsPerCheck = requestsPerCheck
         self.requestsPerDrive = requestsPerDrive
         self.minDelaySec = minDelaySec
         self.timeoutSec = timeoutSec
+        self.losingChecks = losingChecks
+        self.rearmSlowdownChange = rearmSlowdownChange
         self.arrivalReserve = arrivalReserve
         self.reserveMargin = reserveMargin
     }
@@ -142,6 +149,8 @@ public struct DriveProbeBudget: Hashable, Sendable {
             requestsPerDrive: requestsPerDrive,
             minDelaySec: n(minDelaySec, d.minDelaySec),
             timeoutSec: n(timeoutSec, d.timeoutSec),
+            losingChecks: n(losingChecks, d.losingChecks),
+            rearmSlowdownChange: n(rearmSlowdownChange, d.rearmSlowdownChange),
             arrivalReserve: n(arrivalReserve, d.arrivalReserve),
             reserveMargin: n(reserveMargin, d.reserveMargin)
         )
@@ -156,14 +165,36 @@ public struct CheckProbeMemory: Hashable, Sendable {
     public var round: Int
     /// The via point of the probed route the reroute engine is confirming. Nil when there is none.
     public var keep: LngLat?
+    /// Probing checks in a row whose side street came back, was compared like for like and did
+    /// not hold up: the back-off counts these. A probe that found no road, failed or timed out is not counted.
+    public var losing: Int
+    /// The route's slowdown (fresh time over typical) at the last loss; nil when not known.
+    public var losingSlowdown: Double?
 
-    public init(used: Int = 0, round: Int = 0, keep: LngLat? = nil) {
+    public init(used: Int = 0, round: Int = 0, keep: LngLat? = nil, losing: Int = 0, losingSlowdown: Double? = nil) {
         self.used = used
         self.round = round
         self.keep = keep
+        self.losing = losing
+        self.losingSlowdown = losingSlowdown
     }
 
     public static let initial = CheckProbeMemory()
+}
+
+/// Why a check sent no side-street probe (#183), for the drive diagnostics.
+public enum ProbeSkip: String, Hashable, Sendable {
+    case budget
+    case routeNotFound = "route-not-found"
+    case notHeldUp = "not-held-up"
+    case nothingToProbe = "nothing-to-probe"
+    case backingOff = "backing-off"
+}
+
+/// What one check probes, or why it probes nothing.
+public struct CheckProbePlan: Hashable, Sendable {
+    public var points: [LngLat]
+    public var skipped: ProbeSkip?
 }
 
 public struct CheckProbeInput: Sendable {
@@ -494,27 +525,58 @@ public enum Probe {
         return allowed >= Double(Int.max) ? Int.max : Int(allowed)
     }
 
+    /// A route's fresh travel time divided by its typical one; nil when either is not known.
+    static func slowdownOf(_ route: RouteCandidate?) -> Double? {
+        guard let route, let typical = route.typicalDurationSec, typical > 0 else { return nil }
+        let slowdown = route.durationSec / typical
+        return slowdown.isFinite && slowdown > 0 ? slowdown : nil
+    }
+
+    /// True while the back-off holds: `losingChecks` losses in a row, and the slowdown ahead
+    /// within rearmSlowdownChange of the one at the last of them. An unknown slowdown re-arms nothing.
+    public static func probeBackoffHolds(_ memory: CheckProbeMemory, slowdownNow: Double?, budget: DriveProbeBudget = .default) -> Bool {
+        let b = budget.resolved()
+        if !(Double(max(0, memory.losing)) >= b.losingChecks) { return false }
+        // A hold with no slowdown of its own never holds: nothing could ever end it.
+        guard let was = memory.losingSlowdown, was.isFinite else { return false }
+        guard let slowdownNow else { return true }
+        return abs(slowdownNow - was) < b.rearmSlowdownChange
+    }
+
     /// The via points to probe on one check of a drive, at most `allowed`:
     /// selectViaPoints' from the car, beside the route being driven as this
     /// check found it. The kept via of a side street being confirmed comes
     /// first while it is still beside the road ahead; the others take turns,
     /// check by check. Empty when the route is not held up, nothing may be
-    /// asked, the current route was not found, or there is nothing to probe.
+    /// asked, the current route was not found, or there is nothing to probe,
+    /// or the back-off holds (checkProbePlan says which).
     public static func checkProbes(_ input: CheckProbeInput, options: ProbeOptions = .default) -> [LngLat] {
+        checkProbePlan(input, options: options).points
+    }
+
+    /// checkProbes, with the reason when it is empty.
+    public static func checkProbePlan(_ input: CheckProbeInput, options: ProbeOptions = .default) -> CheckProbePlan {
+        func skip(_ r: ProbeSkip) -> CheckProbePlan { CheckProbePlan(points: [], skipped: r) }
         let allowed = whole(input.allowed)
-        if allowed <= 0 { return [] }
+        if allowed <= 0 { return skip(.budget) }
         let known = (input.fresh + (input.baseline ?? [])).filter(usable)
-        if known.isEmpty { return [] }
+        if known.isEmpty { return skip(.routeNotFound) }
         // Without the current route's own fresh line the engine compares nothing this check
         // (route-unconfirmed), and a probe could snap back onto the current path. So no probe then.
-        guard let baseIndex = Reroute.findCurrentRouteIndex(input.route, positionAlongM: input.alongM, candidates: known, options: input.rerouteOptions) else { return [] }
+        guard let baseIndex = Reroute.findCurrentRouteIndex(input.route, positionAlongM: input.alongM, candidates: known, options: input.rerouteOptions) else { return skip(.routeNotFound) }
         let base = known[baseIndex]
         let selected = selectViaPoints(known, options, baseIndex: baseIndex, external: base)
         // Only a route that is held up is worth a probe: a jam ahead on it, or a real delay over its typical time.
         let minDelaySec = input.budget.resolved().minDelaySec
         let delaySec = base.typicalDurationSec.map { base.durationSec - $0 }
         let heldUp = selected.contains { $0.congestedSpanM != nil } || (delaySec.map { $0.isFinite && $0 >= minDelaySec } ?? false)
-        if !heldUp { return [] }
+        if !heldUp { return skip(.notHeldUp) }
+        // The kept via of a probed route being confirmed is never held back, even with nothing new to probe beside.
+        let confirming = input.memory.keep != nil
+        if selected.isEmpty && !confirming { return skip(.nothingToProbe) }
+        if !confirming && probeBackoffHolds(input.memory, slowdownNow: slowdownOf(base), budget: input.budget) {
+            return skip(.backingOff)
+        }
         let points = selected.map(\.position)
 
         var out: [LngLat] = []
@@ -534,7 +596,7 @@ public enum Probe {
         let others = points.filter { p in kept.map { Geo.distanceM(p, $0) >= options.clearOfRoutesM } ?? true }
         let start = others.isEmpty ? 0 : max(0, input.memory.round) % others.count
         let turn = Array(others[start...] + others[..<start])
-        return Array((out + turn).prefix(allowed >= Double(Int.max) ? Int.max : Int(allowed)))
+        return CheckProbePlan(points: Array((out + turn).prefix(allowed >= Double(Int.max) ? Int.max : Int(allowed))), skipped: nil)
     }
 
     /// The check's fresh routes with its probed routes added, each new
@@ -557,7 +619,8 @@ public enum Probe {
         _ asked: Int,
         _ decision: RerouteDecision,
         _ routes: [RouteCandidate]?,
-        alreadyCounted: Int = 0
+        alreadyCounted: Int = 0,
+        driven: (route: [LngLat], alongM: Double, baseline: [RouteCandidate]?, rerouteOptions: RerouteOptions)? = nil
     ) -> CheckProbeMemory {
         let made = max(0, asked)
         let uncounted = max(0, made - max(0, alreadyCounted))
@@ -572,6 +635,20 @@ public enum Probe {
         } else {
             counted.keep = nil
         }
+        // The back-off (#183): a switch or a probed route that holds up starts the count again.
+        if decision.action == .switchRoute || counted.keep != nil {
+            counted.losing = 0
+            counted.losingSlowdown = nil
+            return counted
+        }
+        // A loss is a side street that came back and was compared like for like, and did not hold up.
+        // Only a probed route the engine compared like for like (probeCompared), with a known slowdown ahead.
+        guard made > 0, decision.probeCompared, let driven else { return counted }
+        let known = (routes.filter { $0.source != .probe } + (driven.baseline ?? [])).filter(usable)
+        let index = Reroute.findCurrentRouteIndex(driven.route, positionAlongM: driven.alongM, candidates: known, options: driven.rerouteOptions)
+        guard let slowdown = slowdownOf(index.map { known[$0] }) else { return counted }
+        counted.losing = max(0, memory.losing) + 1
+        counted.losingSlowdown = slowdown
         return counted
     }
 }

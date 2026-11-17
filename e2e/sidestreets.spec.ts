@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect, INDIAN_LAND, test, UPTOWN } from './harness.ts'
-import { everyRoadSlow, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
+import { FREE_FLOW, type Traffic } from './world/roads.ts'
+import { everyRoadSlow, freewayJam, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
 
 // Side-street probing on the plan screen (PLAN step 11b). Mapbox offers three
 // routes at most; the made-up network here also has Parallel Street (S), which
@@ -429,6 +430,39 @@ test('when I pick a slower route on purpose, it drives that route', async ({ app
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })
 
+test('when the side streets keep losing, it stops asking after three losses', async ({ app }) => {
+  // Every road 1.6 times slower from the drive's first check to the end: every check is on a route
+  // well over its typical time and may probe, and every probe finds Parallel Street slower than
+  // staying (the desk drive of #183: 18 probes, all 4 to 6 minutes slower). The traffic ahead
+  // stays 1.6 times its usual time all the way, so nothing re-arms the probes.
+  const slow: Traffic = (route, at, n) => FREE_FLOW(route, at, n) * (n >= 2 ? 1.6 : 1)
+  app.outside.sideStreet = true
+  app.outside.traffic = slow
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const probesBefore = app.probes.length
+  const before = app.directionsRequests
+
+  const log = await app.drive({ road: 'A', snapAtSec: [600] })
+  await app.snap('arrived on Main Corridor after three losing probes')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const checks = app.answers.filter((a) => a.n > before && !app.pathChecks.some((c) => c.n === a.n)).map((a) => a.n)
+  // A loss is Parallel Street found and slower than staying; a probe that found no road there tells nothing.
+  const losses = driveProbes.filter((p) => p.road === 'S')
+  expect(losses).toHaveLength(3)
+  for (const l of losses) expect(l.durationSec).toBeGreaterThan(app.answers.find((a) => a.n === l.forRequest)!.routes.find((r) => r.name === 'A')!.durationSec)
+  // After the third loss no probe goes out for the rest of the drive, while the checks go on.
+  const thirdAt = losses[2]!.forRequest
+  expect(driveProbes.filter((p) => p.forRequest > thirdAt)).toEqual([])
+  expect(checks.filter((n) => n > thirdAt).length).toBeGreaterThanOrEqual(5)
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
 test('when the side streets keep losing, they never use up the checks before I arrive', async ({ app, page }) => {
   // Every road is slow from the drive's first check to the end, so every check is on a route
   // well over its typical time and may probe, and every probe finds Parallel Street slower than
@@ -466,6 +500,124 @@ test('when the side streets keep losing, they never use up the checks before I a
   const spoken = await app.spoken()
   expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
+// Probes beside a freeway jam (#183, items 3 and 6), behind the "Probe beside freeway jams"
+// setting (core ProbeOptions.freewayJams), off by default until a phone drive. In the world with
+// a freeway, Main Corridor's middle is a freeway and Service Road (F) runs 800 m beside it;
+// Mapbox never offers Service Road. freewayJam: the freeway jams (4x) from 27 % to 40 % of the
+// trip, where Mapbox's three routes all run, from the drive's first check on.
+
+/** In the jam's stretch of the trip, and off the freeway's line: a via aimed beside the freeway jam. */
+const besideTheJam = (via: { f: number; side: number }) => via.f > 0.27 && via.f < 0.4 && Math.abs(via.side - 300) >= 500
+
+async function freewayJamsSetting(page: Page, on: boolean) {
+  await page.locator('details.drive-settings > summary').click()
+  const box = page.getByLabel('Probe beside freeway jams (off until a phone drive)')
+  await expect(box).not.toBeChecked()
+  if (on) await box.check()
+  await page.locator('details.drive-settings > summary').click()
+}
+
+test('when the freeway jams, it takes me off onto the road beside it and back on after', async ({ app, page }) => {
+  app.outside.freeway = true
+  app.outside.traffic = freewayJam()
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await freewayJamsSetting(page, true)
+  await app.snap('planned in free flow on the freeway, freeway-jam probes switched on')
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A', snapAtSec: [600] })
+  await app.snap('arrived by Service Road: the summary lists the switch')
+
+  expect(log.arrived).toBe(true)
+  // Mapbox never offered Service Road; only the drive's probes beside the freeway jam found it.
+  const offered = app.answers.filter((a) => !app.pathChecks.some((c) => c.n === a.n))
+  expect(offered.every((a) => a.routes.every((r) => r.name !== 'F'))).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const finds = driveProbes.filter((p) => p.road === 'F')
+  expect(finds.length).toBeGreaterThanOrEqual(2)
+  // Each find came from a via beside the jam on the freeway, and beat staying on the freeway by over 3 minutes.
+  for (const p of finds) {
+    expect(besideTheJam(p.via)).toBe(true)
+    const mainSec = app.answers.find((a) => a.n === p.forRequest)!.routes.find((r) => r.name === 'A')!.durationSec
+    expect(mainSec - p.durationSec!).toBeGreaterThan(180)
+  }
+  // One probe per check at most.
+  const perCheck = new Map<number, number>()
+  for (const p of driveProbes) perCheck.set(p.forRequest, (perCheck.get(p.forRequest) ?? 0) + 1)
+  expect(Math.max(...perCheck.values())).toBe(1)
+
+  // One switch, onto the road beside the freeway, after two checks in a row.
+  expect(log.statusLines.some((l) => /^Staying: faster route saves [\d.]+ minutes, confirming, check 1 of 2$/.test(l.text))).toBe(true)
+  expect(log.banners).toHaveLength(1)
+  expect(log.banners[0]!.text).toContain('Switching to a faster route via side streets')
+  const spoken = await app.spoken()
+  const switches = spoken.filter((line) => line.startsWith('Switching'))
+  expect(switches).toHaveLength(1)
+  expect(switches[0]).toMatch(/^Switching to a faster route via side streets\. Saves [\d.]+ minutes\. Turn in [\d.]+ miles\.$/)
+  expect(Number(/Saves ([\d.]+) minutes/.exec(switches[0]!)![1])).toBeGreaterThanOrEqual(3)
+  // Off the freeway onto Service Road, and back onto Main Corridor after the jam.
+  const after = spoken.slice(spoken.indexOf(switches[0]!) + 1)
+  const ontoService = after.findIndex((line) => /^Turn (left|right) onto Service Road\.$/.test(line))
+  expect(ontoService).toBeGreaterThanOrEqual(0)
+  expect(after.slice(ontoService + 1).some((line) => /^Turn (left|right) onto Main Corridor\.$/.test(line))).toBe(true)
+  expect(spoken).not.toContain(OFF_ROUTE)
+  expect(spoken.at(-1)).toMatch(/RouteIQ changed route once\.$/)
+})
+
+test('with the freeway-jam probes off, a freeway jam sends no probe beside the freeway', async ({ app, page }) => {
+  // The same jam, the setting left at its default (off): the drive is as before #183's items 3 and 6.
+  app.outside.freeway = true
+  app.outside.traffic = freewayJam()
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  await freewayJamsSetting(page, false)
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A', snapAtSec: [300] })
+  await app.snap('arrived on Main Corridor: no probe beside the freeway')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  // The delay over the typical time still opened the gate, so probes went out, as on the desk
+  // drive of #183: at the surface stretches, where no road is, never beside the freeway jam.
+  expect(driveProbes.length).toBeGreaterThanOrEqual(1)
+  expect(driveProbes.filter((p) => besideTheJam(p.via))).toEqual([])
+  expect(driveProbes.filter((p) => p.road === 'F')).toEqual([])
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.some((line) => line.includes('Service Road'))).toBe(false)
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
+test('after it stops asking, a jam that gets worse makes it try the side streets again', async ({ app }) => {
+  // As above, every road 1.6 times slower, until the drive's later checks (request 15 on), when
+  // every road gets 2.2 times slower: the slowdown ahead moves by 0.6, far past the 0.1 that
+  // ends the back-off, so the side streets are worth another look.
+  const CHANGE_AT = 15
+  const worse: Traffic = (route, at, n) => FREE_FLOW(route, at, n) * (n >= CHANGE_AT ? 2.2 : n >= 2 ? 1.6 : 1)
+  app.outside.sideStreet = true
+  app.outside.traffic = worse
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A' })
+  await app.snap('arrived: the probes stopped, then came back once the jam got worse')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const losses = driveProbes.filter((p) => p.road === 'S')
+  expect(losses.length).toBeGreaterThanOrEqual(3)
+  const thirdAt = losses[2]!.forRequest
+  expect(thirdAt).toBeLessThan(CHANGE_AT)
+  // Nothing between the third loss and the change; a probe again after it.
+  expect(driveProbes.filter((p) => p.forRequest > thirdAt && p.forRequest < CHANGE_AT)).toEqual([])
+  expect(driveProbes.filter((p) => p.forRequest >= CHANGE_AT).length).toBeGreaterThanOrEqual(1)
+  expect(log.banners).toEqual([])
 })
 
 test('on a 40-minute drive that is slow from the start, the side streets are tried early and the checks still last to the end', async ({ app }) => {

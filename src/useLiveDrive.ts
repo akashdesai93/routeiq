@@ -19,7 +19,7 @@ import { pageVisibility } from './device/visibility.ts'
 import { createWakeLock } from './device/wakeLock.ts'
 import { fetchFreshRoutes } from './drive/freshRoutes.ts'
 import { createReplaySource, type ReplayMultiplier, type ReplayPlan } from './drive/replay.ts'
-import { MIN_REQUEST_GAP_MS, type DriveSettings } from './drive/simulation.ts'
+import { driveProbeOptions, MIN_REQUEST_GAP_MS, type DriveSettings } from './drive/simulation.ts'
 import type { TestDrivePreset } from './drive/testDrive.ts'
 import { createLiveRunner, type LiveRunner } from './live/runner.ts'
 import type { DriveObserver } from './useDriveLog.ts'
@@ -190,7 +190,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         }
       },
       routes: async (query) => {
-        const { token, whatIfDelaySec, rerouteOptions } = latest.current
+        const { token, whatIfDelaySec, rerouteOptions, settings } = latest.current
         if (token === null) return { routes: null, message: 'No Mapbox token.' }
         const result = await fetchFreshRoutes({
           token,
@@ -200,8 +200,10 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           signal: query.signal,
           whatIf: query.driving !== null && whatIfDelaySec > 0 ? { ...query.driving, delaySec: whatIfDelaySec } : null,
           baseline: query.driving !== null && query.baseline ? { ...query.driving, rerouteOptions } : null,
+          // A check of the route being driven (a poll) asks the probe rules, even with nothing to
+          // spend, so that it can say why it sent no probe; a search for a new route never probes.
           probes:
-            query.driving !== null && query.probes.allowed > 0
+            query.driving !== null && query.purpose === 'poll'
               ? {
                   ...query.driving,
                   allowed: query.probes.allowed,
@@ -209,11 +211,15 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
                   rerouteOptions,
                   timeoutMs: query.probes.budget.timeoutSec * 1000,
                   minDelaySec: query.probes.budget.minDelaySec,
+                  budget: query.probes.budget,
+                  options: driveProbeOptions(settings),
                 }
               : null,
           onRequest: query.onRequest,
         })
         if (!result.ok) return { routes: null, message: result.message }
+        // A check of the route being driven that sent no probe says why, in the diagnostics (#183).
+        if (native !== null && result.probeSkipped !== null) native.probeSkipped(result.probeSkipped)
         whatIfInPlay.current = result.simulated
         return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },

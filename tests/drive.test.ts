@@ -93,7 +93,7 @@ describe('simulated clock', () => {
 
 describe('request budget', () => {
   it('has the documented defaults: a check every 60 simulated seconds, 60 requests a drive, 5 real seconds apart', () => {
-    expect(DEFAULT_DRIVE_SETTINGS).toEqual({ pollIntervalSec: 60, maxRequests: 60 })
+    expect(DEFAULT_DRIVE_SETTINGS).toEqual({ pollIntervalSec: 60, maxRequests: 60, freewayJams: false })
     expect(MIN_REQUEST_GAP_MS).toBe(5000)
   })
 

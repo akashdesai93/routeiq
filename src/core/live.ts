@@ -820,7 +820,7 @@ function checked(
     ...state,
     request: null,
     engine: decision.nextState,
-    probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted),
+    probes: rememberCheckProbes(state.probes, probes, decision, routes, probesCounted, { route, alongM: sent.alongM, baseline, rerouteOptions: opts.reroute }),
     lastDecision: { action: decision.action, code: decision.code, reason, atMs: nowMs, routes: routes === null ? null : routes.length, savingSec: decision.considered?.savingSec ?? (decision.code === 'current-best' ? 0 : null) },
   }
   if (routes === null) return { state: next, effects: [] }

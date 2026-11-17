@@ -332,6 +332,15 @@ export interface RerouteDecision {
    * it is unknown, and on a switch (the route is another one from now on).
    */
   readonly current: { readonly durationSec: number; readonly distanceM: number; readonly asked: boolean } | null
+  /**
+   * True when a side street found by a probe (`source: 'probe'`) was among the routes this
+   * poll compared, and the current path had a time asked the same way to compare it with (like
+   * for like, #183). The probe may still lose to a faster provider route ranked above it: that
+   * is a loss for it too. Left out or false: no probed route could be compared (none came back,
+   * no like-for-like time, or the poll stopped before the comparison: no ETA, no traffic data,
+   * the route not found, off it).
+   */
+  readonly probeCompared?: boolean
   /** Pass this back with the next observation. */
   readonly nextState: RerouteState
 }
@@ -1349,12 +1358,14 @@ export function decideReroute(
     break
   }
 
+  // Whether a probed route was measured against the current path asked the same way (#183).
+  const probeCompared = viaCurrent !== null && comparable.some(isProbe)
   if (winner === null) {
     // TypeScript cannot see the assignments made inside the loop's closure.
     const refused = refusal as { code: RerouteCode; reason: string; considered: RerouteAlternative } | null
     return refused === null
-      ? stay('current-best', 'current route is still the fastest', foundNoWinner, null, known)
-      : stay(refused.code, refused.reason, foundNoWinner, refused.considered, known)
+      ? { ...stay('current-best', 'current route is still the fastest', foundNoWinner, null, known), probeCompared }
+      : { ...stay(refused.code, refused.reason, foundNoWinner, refused.considered, known), probeCompared }
   }
 
   // Rule 11.
@@ -1366,11 +1377,11 @@ export function decideReroute(
   const polls = sameAsPending ? found.pending!.polls + 1 : 1
   const confirmed: RerouteState = { ...found, pending: { geometry: winner.candidate.geometry, polls } }
   if (polls < opts.confirmPolls) {
-    return stay('confirming', `faster route ${saves}, confirming, check ${polls} of ${opts.confirmPolls}`, confirmed, a, known)
+    return { ...stay('confirming', `faster route ${saves}, confirming, check ${polls} of ${opts.confirmPolls}`, confirmed, a, known), probeCompared }
   }
   // Rule 12.
   if (coolingDown) {
-    return stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a, known)
+    return { ...stay('cooldown', `faster route ${saves}, but we switched routes ${spokenDuration(sinceSwitchSec)} ago`, confirmed, a, known), probeCompared }
   }
   return switchTo('faster-route', `${saves}, ${turnPhrase(a)}`, winner.candidate, a)
 }

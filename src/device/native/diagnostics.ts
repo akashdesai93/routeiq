@@ -53,6 +53,15 @@ export const CHECK_OUTCOMES: Readonly<Record<string, string>> = Object.freeze({
   'kept-previous': 'kept the previous answer',
 })
 
+/** Why a check sent no side-street probe (ProbeSkip in src/core/probe.ts), in the words the log uses (#183). */
+export const PROBE_SKIPS: Readonly<Record<string, string>> = Object.freeze({
+  budget: 'no request to spare (kept for the checks until arrival, or the cap reached)',
+  'route-not-found': 'your route was not among the answers',
+  'not-held-up': 'your route was not held up',
+  'nothing-to-probe': 'no side street to try (freeway only, or near the end)',
+  'backing-off': 'backing off: the last probes all lost and the traffic has not changed',
+})
+
 /** A route count above this is logged as this: the log needs "a few", not an exact number. */
 export const CHECK_ROUTES_CAP = 9
 
@@ -84,6 +93,8 @@ export interface DriveDiagnostics {
    * tallies the outcomes, keeps the largest saving seen and notes when the outcome changes.
    */
   checked(code: unknown, routes: number | null, savingSec: number | null): void
+  /** A drive check sent no side-street probe. `reason`: a word from PROBE_SKIPS; anything else is kept as 'other'. */
+  probeSkipped(reason: unknown): void
   speechStarted(): void
   /** `finished` false: the line was cut off or failed. */
   speechEnded(finished: boolean): void
@@ -127,6 +138,7 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
   const speech = { started: 0, finished: 0, cutOff: 0 }
   let simulatedDrives = 0
   const checks = { count: 0, tally: new Map<string, number>(), last: null as string | null, mostFasterSec: null as number | null }
+  const skips = { count: 0, tally: new Map<string, number>(), last: null as string | null }
 
   const log = (what: string) => {
     events.push({ atMs: now(), what: `${what} [${state}]` })
@@ -208,6 +220,16 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
         log(`check: ${CHECK_OUTCOMES[known] ?? 'other'} (${answer}${by !== null && by > 0 ? `, the best other saves ${by} s` : ''})`)
       }
     },
+    probeSkipped(reason) {
+      const known = typeof reason === 'string' && Object.hasOwn(PROBE_SKIPS, reason) ? reason : 'other'
+      skips.count++
+      skips.tally.set(known, (skips.tally.get(known) ?? 0) + 1)
+      // Noted in the events only when the reason changes, as the check outcomes are.
+      if (known !== skips.last) {
+        skips.last = known
+        log(`probe skipped: ${PROBE_SKIPS[known] ?? 'other'}`)
+      }
+    },
     speechStarted() {
       speech.started++
     },
@@ -242,6 +264,14 @@ export function createDriveDiagnostics(now: () => number = Date.now, limit: numb
                 .map(([code, n]) => `${CHECK_OUTCOMES[code] ?? 'other'} ${n}`)
                 .join(', ')}`,
               `best saving another route offered: ${checks.mostFasterSec === null ? 'unknown' : `${checks.mostFasterSec} s`}`,
+            ]),
+        ...(skips.count === 0
+          ? []
+          : [
+              `probes skipped: ${skips.count}: ${[...skips.tally.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([code, n]) => `${PROBE_SKIPS[code] ?? 'other'} ${n}`)
+                .join(', ')}`,
             ]),
         `speech: ${speech.started} lines started, ${speech.finished} finished, ${speech.cutOff} cut off or failed`,
         ...(simulatedDrives > 0

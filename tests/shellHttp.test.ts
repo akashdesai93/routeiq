@@ -412,6 +412,23 @@ describe('what each drive check concluded, in the diagnostics (so "was there a f
     expect(text).toContain('best saving another route offered: 150 s')
   })
 
+  it('says why a check sent no side-street probe, tallied most first, from a fixed list (#183)', () => {
+    const log = createDriveDiagnostics(() => 0)
+    expect(log.text()).not.toContain('probes skipped')
+    for (let i = 0; i < 4; i++) log.probeSkipped('backing-off')
+    log.probeSkipped('not-held-up')
+    log.probeSkipped('budget')
+    log.probeSkipped('budget')
+    log.probeSkipped('somewhere at 35.2,-80.8')
+    const text = log.text()
+    expect(text).toContain(
+      'probes skipped: 8: backing off: the last probes all lost and the traffic has not changed 4, no request to spare (kept for the checks until arrival, or the cap reached) 2, your route was not held up 1, other 1',
+    )
+    // Free text is never kept; an event only when the reason changes.
+    expect(text).not.toContain('35.2')
+    expect(text.split('\n').filter((l) => l.includes(' probe skipped: '))).toHaveLength(4)
+  })
+
   it('notes a check in the events only when its outcome changes, so a long drive keeps its other events', () => {
     const log = createDriveDiagnostics(() => 0)
     for (let i = 0; i < 30; i++) log.checked('current-best', 3, -12)
@@ -445,6 +462,14 @@ describe('what each drive check concluded, in the diagnostics (so "was there a f
     for (const code of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) log.checked(code, 1, null)
     const text = log.text()
     expect(text).toContain('checks: 4: other 4')
+    expect(text).not.toMatch(/function|native code|toString|constructor|__proto__/)
+  })
+
+  it('a probe-skip reason too: a name from the object prototype is "other" (#183)', () => {
+    const log = createDriveDiagnostics(() => 0)
+    for (const reason of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) log.probeSkipped(reason)
+    const text = log.text()
+    expect(text).toContain('probes skipped: 4: other 4')
     expect(text).not.toMatch(/function|native code|toString|constructor|__proto__/)
   })
 
