@@ -15,7 +15,7 @@ import { sessionClock, sessionNow } from './device/clock.ts'
 import { geolocationSource, type PositionSource } from './device/geolocation.ts'
 import { nativeDevice } from './device/native/index.ts'
 import { createSpeaker, type Speaker } from './device/speech.ts'
-import { pageVisibility } from './device/visibility.ts'
+import { pageVisibility, type PageVisibility } from './device/visibility.ts'
 import { createWakeLock } from './device/wakeLock.ts'
 import { fetchFreshRoutes } from './drive/freshRoutes.ts'
 import { createReplaySource, type ReplayMultiplier, type ReplayPlan } from './drive/replay.ts'
@@ -112,7 +112,13 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
   const [replaying, setReplaying] = useState(false)
   const [simulated, setSimulated] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(true)
-  const runnerRef = useRef<{ runner: LiveRunner; now: () => number } | null>(null)
+  const runnerRef = useRef<{
+    runner: LiveRunner
+    now: () => number
+    /** Whether the screen can be seen; nothing is drawn while it cannot. */
+    screen: PageVisibility
+    stopScreen: () => void
+  } | null>(null)
   const speakerRef = useRef<Speaker | null>(null)
   const latest = useRef(config)
   const whatIfInPlay = useRef(false)
@@ -135,6 +141,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     if (token === null) return
     // "Try again" after a failure ends the drive that was under way: the log keeps it as ended.
     runnerRef.current?.runner.dispose()
+    runnerRef.current?.stopScreen()
     // Inside the iPhone shell the GPS, the voice, the screen lock and the clock's ticks are native,
     // and go on with the phone locked (src/device/native). In a browser: the browser's own.
     // A test drive swaps the GPS for a made-up car that the native side moves; the clock stays real.
@@ -151,6 +158,12 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     const now = replaySource === null ? sessionNow : replaySource.now
     const multiplier = () => (replaySource === null ? null : (latest.current.replay?.multiplier ?? replay!.multiplier))
     let seenSwitches = 0
+    // Nothing is drawn while nobody can see the screen (locked, or another app in front): the
+    // drive goes on exactly the same (GPS, checks, voice, the drive log), but its changes are
+    // not handed to React, so neither the drive view nor the map does any work. The newest
+    // state waits here and is drawn in one update when the screen is back.
+    const screen = replaySource === null && native !== null ? native.screen : pageVisibility()
+    let unseen: LiveState | null = null
     // Each decided check once, for the drive diagnostics: what it saw, never where.
     let seenCheckAtMs: number | null = null
     const wakeLock = native?.wakeLock ?? createWakeLock({ onReleased: () => runner.wakeLockReleased() })
@@ -175,8 +188,14 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
       onChange: (next) => {
         if (runnerRef.current?.runner !== runner) return
         // The state first: whatever the callbacks below do, the screen shows the drive.
-        setState(next)
-        setNowMs(now())
+        if (screen.isHidden()) {
+          unseen = next
+        } else {
+          unseen = null
+          setState(next)
+          setNowMs(now())
+        }
+        // The drive diagnostics go on while the screen is hidden, like the drive log.
         const decided = next.lastDecision
         if (native !== null && decided !== null && decided.atMs !== seenCheckAtMs) {
           seenCheckAtMs = decided.atMs
@@ -218,7 +237,14 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
         return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },
     })
-    runnerRef.current = { runner, now }
+    const stopScreen = screen.subscribe((hidden) => {
+      if (hidden || runnerRef.current?.runner !== runner) return
+      const caught = unseen
+      unseen = null
+      if (caught !== null) setState(caught)
+      setNowMs(now())
+    })
+    runnerRef.current = { runner, now, screen, stopScreen }
     setReplaying(replaySource !== null)
     setSimulated(replaySource === null && native !== null && native.simulated)
     setSpeechSupported(speaker.supported)
@@ -228,6 +254,7 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
 
   const end = useCallback(() => {
     runnerRef.current?.runner.dispose()
+    runnerRef.current?.stopScreen()
     runnerRef.current = null
     setState(LIVE_IDLE)
   }, [])
@@ -240,14 +267,20 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
     if (!ticking) return
     const id = setInterval(() => {
       const current = runnerRef.current
-      if (current !== null) setNowMs(current.now())
+      if (current !== null && !current.screen.isHidden()) setNowMs(current.now())
     }, 1000)
     return () => clearInterval(id)
   }, [ticking])
 
   // A drive does not outlive the page it was started on.
   // The log is not told: a drive cut off this way is not one that was ended.
-  useEffect(() => () => runnerRef.current?.runner.dispose(false), [])
+  useEffect(
+    () => () => {
+      runnerRef.current?.runner.dispose(false)
+      runnerRef.current?.stopScreen()
+    },
+    [],
+  )
 
   const multiplier = replaying ? (config.replay?.multiplier ?? null) : null
   const { settings, rerouteOptions } = config

@@ -134,7 +134,11 @@ Each step lands with tests before the next starts. Pure logic lives in `src/core
    still shortens the cooldown and no-return by N s, and can time out a check in flight.
    The limit: a web page only runs in front with the screen on. Open: none of it has
    been tried on a real phone in a car (GPS noise, iOS Safari speech and wake lock,
-   audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Settled
+   audio over CarPlay or Bluetooth, battery); hosting over HTTPS comes first. Battery
+   (#98, Nov 12, 2026): nothing is drawn while the screen cannot be seen (phone locked,
+   another app in front); the drive itself is unchanged and the screen catches up in one
+   update (`e2e/battery.spec.ts`). Open for later: the battery gain is not measured on a
+   phone yet (docs/performance.md lists what the phone lab measures). Settled
    (Nov 11, 2026): the switches "current route is no longer offered" near Uptown
    were the 10 m point-by-point match rejecting the same road drawn a little
    differently (measurements in the README); the match is by overlap now and that

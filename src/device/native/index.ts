@@ -11,6 +11,7 @@ import { nativePlugin, type RouteIQNativePlugin } from './plugin.ts'
 import { nativeGeolocation, nativePositionSource } from './position.ts'
 import { nativeEvery, type PulseTimers } from './pulse.ts'
 import { simulatedPositionSource, type SimulatedDrive } from './simulated.ts'
+import { nativeScreen } from './screen.ts'
 import { createNativeSpeaker } from './speech.ts'
 import { ALWAYS_IN_FRONT } from './visibility.ts'
 import { nativeWakeLock } from './wakeLock.ts'
@@ -23,6 +24,8 @@ export interface NativeDevice {
   readonly speaker: Speaker
   readonly wakeLock: ScreenWakeLock
   readonly visibility: PageVisibility
+  /** Whether the screen can be seen (not locked, no other app in front): nothing is drawn while it cannot. */
+  readonly screen: PageVisibility
   readonly every: (ms: number, fn: () => void) => () => void
   /** True when the positions are a test drive's (made up), not the GPS's. */
   readonly simulated: boolean
@@ -72,6 +75,7 @@ export function nativeDeviceFor(plugin: RouteIQNativePlugin, log: DriveDiagnosti
     speaker: createNativeSpeaker(plugin, { log }),
     wakeLock: nativeWakeLock(plugin),
     visibility: ALWAYS_IN_FRONT,
+    screen: nativeScreen(plugin),
     every: (ms, fn) =>
       every(ms, () => {
         log.tick()
