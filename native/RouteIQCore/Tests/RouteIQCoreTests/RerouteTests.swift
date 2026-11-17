@@ -1708,6 +1708,8 @@ final class RerouteSideStreetTests: XCTestCase {
         /// The path check's time for A, when it reads otherwise than etaA x (1 - bias).
         var pathCheckSec: Double? = nil
         var options: RerouteOptions = .default
+        /// The drive's probe budget (the back-off among it).
+        var budget: DriveProbeBudget = .default
     }
 
     private struct ProbedRecord {
@@ -1734,7 +1736,7 @@ final class RerouteSideStreetTests: XCTestCase {
             let alongM = d.startAlongM + Double(poll) * 300
             let here = Geo.pointAtDistance(route.geometry, alongM)!.point
             let fresh = [DriveWorld.candidate(.A, here, d.etaA, heldUp), DriveWorld.candidate(.B, here, d.etaA + 200)].compactMap { $0 }
-            let vias = Probe.checkProbes(CheckProbeInput(route: route.geometry, alongM: alongM, fresh: fresh, memory: memory, allowed: 1))
+            let vias = Probe.checkProbes(CheckProbeInput(route: route.geometry, alongM: alongM, fresh: fresh, memory: memory, allowed: 1, budget: d.budget))
             // Past the point where S leaves A, this network has no road from the car onto S: no route that way.
             let probed: [RouteCandidate] = vias.compactMap { via in
                 if d.probeFailsAt.contains(poll) || distanceToS(via) > 250 { return nil }
@@ -1755,7 +1757,7 @@ final class RerouteSideStreetTests: XCTestCase {
             )
             records.append(ProbedRecord(decision: decision, vias: vias, found: found))
             state = decision.nextState
-            memory = Probe.rememberCheckProbes(memory, vias.count, decision, candidates)
+            memory = Probe.rememberCheckProbes(memory, vias.count, decision, candidates, driven: (route: route.geometry, alongM: alongM, baseline: pathCheck, rerouteOptions: d.options))
             if decision.action == .switchRoute {
                 let to = candidates.first { $0.id == decision.toRouteId }!
                 return ProbedResult(records: records, switchedTo: (poll, to), memory: memory)
@@ -1835,9 +1837,40 @@ final class RerouteSideStreetTests: XCTestCase {
         XCTAssertEqual(Set(codes(never.records.filter(\.found))), Set(["probe-unconfirmed"]))
     }
 
+    // it('probes that keep losing stop after three losses in a row, and the engine still never switches (#183)')
+    func testSideStreetsFoundByProbes_probesThatKeepLosingStopAfterThreeLossesInARow() throws {
+        let r = probedDrive(ProbedDrive(polls: 12, etaA: 2000, etaS: 1940))
+        XCTAssertNil(r.switchedTo)
+        XCTAssertEqual(r.records.map(\.vias.count), [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+        XCTAssertEqual(r.records.filter(\.found).count, 3)
+        XCTAssertEqual(r.memory.round, 5)
+        XCTAssertEqual(r.memory.losing, 3)
+        XCTAssertEqual(r.memory.losingSlowdown, 2000.0 / 1700.0)
+    }
+
+    // it('says whether a side street was compared like for like, for the back-off (#183)')
+    func testSideStreetsFoundByProbes_saysWhetherASideStreetWasComparedLikeForLike() throws {
+        let off = DriveProbeBudget(losingChecks: 1e9)
+        let compared = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1940, budget: off))
+        XCTAssertEqual(compared.records.map(\.decision.probeCompared), compared.records.map(\.found))
+        let unlike = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1500, unlike: true, budget: off))
+        XCTAssertTrue(unlike.records.contains(where: \.found))
+        XCTAssertFalse(unlike.records.contains(where: \.decision.probeCompared))
+        let failed = probedDrive(ProbedDrive(polls: 4, etaA: 2000, etaS: 1940, pathCheckFailsAt: [0], budget: off))
+        XCTAssertTrue(failed.records[0].found)
+        XCTAssertFalse(failed.records[0].decision.probeCompared)
+    }
+
+    // it('probes that failed or found no road are not losses: a side street found later still switches (#183)')
+    func testSideStreetsFoundByProbes_probesThatFailedAreNotLosses() throws {
+        let r = probedDrive(ProbedDrive(polls: 8, etaA: 2000, etaS: 1820, probeFailsAt: [0, 2]))
+        XCTAssertNotNil(r.switchedTo)
+    }
+
     // it('a side street that saves only 60 s never triggers a switch, however often it is found')
     func testSideStreetsFoundByProbes_aSideStreetThatSavesOnly60sNeverTriggersASwitchHoweverOftenItIsFound() throws {
-        let r = probedDrive(ProbedDrive(polls: 12, etaA: 2000, etaS: 1940))
+        // (The back-off after probes that keep losing is off here: this is about the engine. See the next test.)
+        let r = probedDrive(ProbedDrive(polls: 12, etaA: 2000, etaS: 1940, budget: DriveProbeBudget(losingChecks: 1e9)))
         XCTAssertNil(r.switchedTo)
         // Nothing is being confirmed, so the two sides of the road take turns: S is south, found every other check.
         XCTAssertEqual(r.records.map(\.found), (0..<12).map { $0 % 2 == 0 })

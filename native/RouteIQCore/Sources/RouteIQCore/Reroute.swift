@@ -374,6 +374,9 @@ public struct RerouteDecision: Hashable, Sendable {
     /// the destination, when this poll gave one: the like-for-like baseline.
     /// Nil when it is unknown, and on a switch.
     public var current: RerouteCurrentEta?
+    /// True when a side street found by a probe was compared this poll against the current path
+    /// asked the same way (like for like, #183). False: none was compared.
+    public var probeCompared: Bool = false
     /// Pass this back with the next observation.
     public var nextState: RerouteState
 }
@@ -1153,9 +1156,16 @@ public enum Reroute {
             break
         }
 
+        // Whether a probed route was measured against the current path asked the same way (#183).
+        let probeCompared = viaCurrent != nil && comparable.contains(where: isProbe)
+        func compared(_ d: RerouteDecision) -> RerouteDecision {
+            var d = d
+            d.probeCompared = probeCompared
+            return d
+        }
         guard let winner = firstPassing else {
-            guard let refused = refusal else { return stay(.currentBest, "current route is still the fastest", foundNoWinner, nil, known) }
-            return stay(refused.code, refused.reason, foundNoWinner, refused.considered, known)
+            guard let refused = refusal else { return compared(stay(.currentBest, "current route is still the fastest", foundNoWinner, nil, known)) }
+            return compared(stay(refused.code, refused.reason, foundNoWinner, refused.considered, known))
         }
 
         // Rule 11.
@@ -1168,11 +1178,11 @@ public enum Reroute {
         var confirmed = found
         confirmed.pending = RerouteState.Pending(geometry: winner.candidate.geometry, polls: polls)
         if polls < opts.confirmPolls {
-            return stay(.confirming, "faster route \(saves), confirming, check \(polls) of \(opts.confirmPolls)", confirmed, a, known)
+            return compared(stay(.confirming, "faster route \(saves), confirming, check \(polls) of \(opts.confirmPolls)", confirmed, a, known))
         }
         // Rule 12.
         if coolingDown {
-            return stay(.cooldown, "faster route \(saves), but we switched routes \(spokenDuration(sinceSwitchSec)) ago", confirmed, a, known)
+            return compared(stay(.cooldown, "faster route \(saves), but we switched routes \(spokenDuration(sinceSwitchSec)) ago", confirmed, a, known))
         }
         return switchTo(.fasterRoute, "\(saves), \(turnPhrase(a))", winner.candidate, a)
     }

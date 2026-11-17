@@ -200,8 +200,10 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
           signal: query.signal,
           whatIf: query.driving !== null && whatIfDelaySec > 0 ? { ...query.driving, delaySec: whatIfDelaySec } : null,
           baseline: query.driving !== null && query.baseline ? { ...query.driving, rerouteOptions } : null,
+          // A check of the route being driven (a poll) asks the probe rules, even with nothing to
+          // spend, so that it can say why it sent no probe; a search for a new route never probes.
           probes:
-            query.driving !== null && query.probes.allowed > 0
+            query.driving !== null && query.purpose === 'poll'
               ? {
                   ...query.driving,
                   allowed: query.probes.allowed,
@@ -209,11 +211,14 @@ export function useLiveDrive(config: LiveDriveConfig): LiveDrive {
                   rerouteOptions,
                   timeoutMs: query.probes.budget.timeoutSec * 1000,
                   minDelaySec: query.probes.budget.minDelaySec,
+                  budget: query.probes.budget,
                 }
               : null,
           onRequest: query.onRequest,
         })
         if (!result.ok) return { routes: null, message: result.message }
+        // A check of the route being driven that sent no probe says why, in the diagnostics (#183).
+        if (native !== null && result.probeSkipped !== null) native.probeSkipped(result.probeSkipped)
         whatIfInPlay.current = result.simulated
         return { routes: result.candidates, baseline: result.baseline, requests: result.requests, probes: result.probeRequests }
       },

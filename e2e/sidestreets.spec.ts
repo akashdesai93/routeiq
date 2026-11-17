@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, INDIAN_LAND, test, UPTOWN } from './harness.ts'
+import { FREE_FLOW, type Traffic } from './world/roads.ts'
 import { everyRoadSlow, JAM_WHERE_ALL_THREE_SHARE, jamWhereAllThreeShare } from './world/traffic.ts'
 
 // Side-street probing on the plan screen (PLAN step 11b). Mapbox offers three
@@ -429,6 +430,39 @@ test('when I pick a slower route on purpose, it drives that route', async ({ app
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
 })
 
+test('when the side streets keep losing, it stops asking after three losses', async ({ app }) => {
+  // Every road 1.6 times slower from the drive's first check to the end: every check is on a route
+  // well over its typical time and may probe, and every probe finds Parallel Street slower than
+  // staying (the desk drive of #183: 18 probes, all 4 to 6 minutes slower). The traffic ahead
+  // stays 1.6 times its usual time all the way, so nothing re-arms the probes.
+  const slow: Traffic = (route, at, n) => FREE_FLOW(route, at, n) * (n >= 2 ? 1.6 : 1)
+  app.outside.sideStreet = true
+  app.outside.traffic = slow
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const probesBefore = app.probes.length
+  const before = app.directionsRequests
+
+  const log = await app.drive({ road: 'A', snapAtSec: [600] })
+  await app.snap('arrived on Main Corridor after three losing probes')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const checks = app.answers.filter((a) => a.n > before && !app.pathChecks.some((c) => c.n === a.n)).map((a) => a.n)
+  // A loss is Parallel Street found and slower than staying; a probe that found no road there tells nothing.
+  const losses = driveProbes.filter((p) => p.road === 'S')
+  expect(losses).toHaveLength(3)
+  for (const l of losses) expect(l.durationSec).toBeGreaterThan(app.answers.find((a) => a.n === l.forRequest)!.routes.find((r) => r.name === 'A')!.durationSec)
+  // After the third loss no probe goes out for the rest of the drive, while the checks go on.
+  const thirdAt = losses[2]!.forRequest
+  expect(driveProbes.filter((p) => p.forRequest > thirdAt)).toEqual([])
+  expect(checks.filter((n) => n > thirdAt).length).toBeGreaterThanOrEqual(5)
+  expect(log.banners).toEqual([])
+  const spoken = await app.spoken()
+  expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
+  expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
 test('when the side streets keep losing, they never use up the checks before I arrive', async ({ app, page }) => {
   // Every road is slow from the drive's first check to the end, so every check is on a route
   // well over its typical time and may probe, and every probe finds Parallel Street slower than
@@ -466,6 +500,33 @@ test('when the side streets keep losing, they never use up the checks before I a
   const spoken = await app.spoken()
   expect(spoken.filter((line) => line.startsWith('Switching'))).toEqual([])
   expect(spoken.at(-1)).toMatch(/^You have arrived\. Trip time \d+ minutes\.$/)
+})
+
+test('after it stops asking, a jam that gets worse makes it try the side streets again', async ({ app }) => {
+  // As above, every road 1.6 times slower, until the drive's later checks (request 15 on), when
+  // every road gets 2.2 times slower: the slowdown ahead moves by 0.6, far past the 0.1 that
+  // ends the back-off, so the side streets are worth another look.
+  const CHANGE_AT = 15
+  const worse: Traffic = (route, at, n) => FREE_FLOW(route, at, n) * (n >= CHANGE_AT ? 2.2 : n >= 2 ? 1.6 : 1)
+  app.outside.sideStreet = true
+  app.outside.traffic = worse
+  await app.open({ fakeClock: true })
+  await app.routesReady()
+  const probesBefore = app.probes.length
+
+  const log = await app.drive({ road: 'A' })
+  await app.snap('arrived: the probes stopped, then came back once the jam got worse')
+
+  expect(log.arrived).toBe(true)
+  const driveProbes = app.probes.slice(probesBefore).filter((p) => p.duringDrive)
+  const losses = driveProbes.filter((p) => p.road === 'S')
+  expect(losses.length).toBeGreaterThanOrEqual(3)
+  const thirdAt = losses[2]!.forRequest
+  expect(thirdAt).toBeLessThan(CHANGE_AT)
+  // Nothing between the third loss and the change; a probe again after it.
+  expect(driveProbes.filter((p) => p.forRequest > thirdAt && p.forRequest < CHANGE_AT)).toEqual([])
+  expect(driveProbes.filter((p) => p.forRequest >= CHANGE_AT).length).toBeGreaterThanOrEqual(1)
+  expect(log.banners).toEqual([])
 })
 
 test('on a 40-minute drive that is slow from the start, the side streets are tried early and the checks still last to the end', async ({ app }) => {
