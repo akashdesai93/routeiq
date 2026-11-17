@@ -24,6 +24,16 @@ test('after one visit it opens with no signal, says routes need a connection, an
   // The worker has taken over this page and kept the app's own files.
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 15_000 })
   await expect.poll(async () => (await stored(page)).filter((u) => /\/assets\/.+\.js$/.test(u)).length, { timeout: 15_000 }).toBeGreaterThan(0)
+  // Inter came before the worker took over, so it is stored only after the page names it to
+  // the worker (a message, then a fetch): wait for its files before the signal goes.
+  const fonts = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name).filter((u) => /\/inter-[^/]+\.woff2$/.test(u)))
+  expect(fonts.length, 'Inter files the page loaded').toBeGreaterThan(0)
+  await expect
+    .poll(async () => {
+      const kept = await stored(page)
+      return fonts.filter((u) => !kept.includes(u))
+    }, { message: 'Inter files not yet kept', timeout: 15_000 })
+    .toEqual([])
   expect(app.directionsRequests).toBeGreaterThan(0)
 
   const kept = await stored(page)

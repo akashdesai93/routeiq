@@ -107,6 +107,40 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      # What each scenario had on screen and tapped (e2e/controls.ts), for the controls guard below.
+      - name: Upload the shard's control records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-controls-${{ matrix.shard }}
+          path: e2e-report/results/**/controls.json
+          if-no-files-found: error
+          retention-days: 3
+
+  # Every control on screen is tapped by some scenario (#203): the shards' records joined,
+  # against e2e/controls-untested.json. Only after every shard passed: a failed shard's
+  # scenarios may have stopped before their taps, and that failure is reported already.
+  controls:
+    name: every control is tapped by a scenario
+    needs: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: e2e
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: e2e-controls-*
+          path: controls
+      - run: node e2e/controls-guard.mjs controls
+      - if: ${{ always() }}
+        run: cat e2e-report/controls.md >> "$GITHUB_STEP_SUMMARY" || true
+
   # Started by hand, this workflow merges its own report. Called from gate.yml (where
   # github.event_name is the gate's event), gate.yml runs the merge itself, outside `required`.
   report:
