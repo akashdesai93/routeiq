@@ -215,6 +215,9 @@ test('at home, a test drive with a wrong turn says I am off the route and finds 
   // This launch's own log is one tap away, and has no drive in it yet.
   await page.getByRole('button', { name: 'Since the app opened' }).click()
   await expect(page.getByLabel('Diagnostics text')).toHaveValue(/fixes: 0 /)
+  // And back to the last drive with one tap: its text, not this launch's.
+  await page.getByRole('button', { name: /^Last drive/ }).click()
+  await expect(page.getByLabel('Diagnostics text')).toHaveValue(last)
 })
 
 test('in a browser the same lock pauses the checks for a faster route: that rule is unchanged', async ({ app }) => {
