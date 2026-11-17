@@ -25,7 +25,18 @@ export interface LabPlugin {
   labReport?: (options: { text: string }) => Promise<unknown>
   addListener?: (event: 'tick', listener: () => void) => Promise<unknown>
   getCurrentPosition?: () => Promise<{ lng: number; lat: number }>
+  /** #136: the native probe (where the web view is, main-thread stalls, events). Lab builds from #136 on. */
+  labNative?: () => Promise<unknown>
+  /** #136: runs one native kick on the web view now ("layout", "display", "scroll", "frame", "opaque", "readd"). */
+  labKick?: (options: { name: string }) => Promise<{ did?: string }>
+  /** #136: a native snapshot of the web view (how flat it is). */
+  labSnapshot?: () => Promise<unknown>
 }
+
+/** The native kicks a `testdrive-fix-kick-<name>` scenario may ask for (RouteIQLabMonitor.kicks). */
+export const LAB_NATIVE_KICKS = ['layout', 'display', 'scroll', 'frame', 'opaque', 'readd'] as const
+/** The longest native probe line kept in the report, in characters. */
+export const LAB_NATIVE_LIMIT = 8_000
 
 /** How often the screen is looked at, and how often the report is written out, in milliseconds. */
 export const LAB_SAMPLE_MS = 1_000
@@ -36,6 +47,16 @@ export const LAB_ROUTES_WAIT_MS = 90_000
 export const LAB_START_RADIUS_M = 250
 /** A `testdrive-fix-…` scenario tries its fix this long after the driving screen came up, in milliseconds. */
 export const LAB_FIX_AFTER_MS = 12_000
+/** `testdrive-wait-<sec>`: the longest wait it may ask for before Start drive, in seconds. */
+export const LAB_MAX_WAIT_SEC = 120
+
+/** The seconds a `testdrive-wait-<sec>` scenario waits with the plan screen ready before Start drive; 0 for any other scenario. */
+export function startWaitSec(scenario: string): number {
+  const m = /^testdrive-wait-(\d{1,3})$/.exec(scenario)
+  if (m === null) return 0
+  const sec = Number(m[1])
+  return sec >= 1 && sec <= LAB_MAX_WAIT_SEC ? sec : 0
+}
 /** How often the position is asked for while waiting for the simulated one, in milliseconds. */
 export const LAB_POSITION_RETRY_MS = 3_000
 /** How many history lines are kept. */
@@ -162,9 +183,11 @@ export interface LabDeps {
   readonly now?: () => number
   /** How the page is laid out, as one line (probe.ts). Left out of the report when not given. */
   readonly layout?: () => string
+  /** The native probe's last answer, as one line. Left out of the report when not given or null. */
+  readonly native?: () => string | null
 }
 
-export function createLab({ scenario, doc, diagnostics, now = Date.now, layout }: LabDeps): RouteIQLab & { sample(): void; note(what: string): void } {
+export function createLab({ scenario, doc, diagnostics, now = Date.now, layout, native }: LabDeps): RouteIQLab & { sample(): void; note(what: string): void } {
   const history: string[] = []
   let dropped = 0
   let lastWord: string | null = null
@@ -276,6 +299,7 @@ export function createLab({ scenario, doc, diagnostics, now = Date.now, layout }
         `scenario ${scenario}, written ${clock(now())}, number ${++reports}`,
         `screen ${screen.screen}, status ${statusWord(screen)}, routes ${screen.routes}, turn card ${screen.turn !== null ? 'shown' : 'none'}, arrival time ${screen.eta !== null ? 'shown' : 'none'}, warnings ${screen.warnings.length}`,
         ...(layout === undefined ? [] : [`layout ${layout()}`]),
+        ...(native?.() == null ? [] : [`native ${native()}`]),
         `history (oldest first${dropped > 0 ? `, ${dropped} earlier ones dropped` : ''}):`,
         ...history,
         '--- diagnostics ---',
@@ -291,7 +315,7 @@ export interface StartLabOptions {
   /** Where the hook is put: `window`. */
   readonly target: { __routeiqLab?: RouteIQLab; document?: LabDocument }
   /** The page's layout as one line, and things to try on a screen that will not paint (probe.ts). */
-  readonly probe?: { layout: () => string; fixes: Readonly<Record<string, () => string>> }
+  readonly probe?: { layout: () => string; fixes: Readonly<Record<string, () => string>>; early?: Readonly<Record<string, () => string>> }
   readonly now?: () => number
   readonly every?: (ms: number, fn: () => void) => unknown
 }
@@ -315,12 +339,24 @@ export interface StartLabOptions {
  * - `testdrive-fix-<name>`: the same, and 12 s into the drive it tries one
  *   thing on the page (a resize event, a reflow …: `LAYOUT_FIXES` in
  *   probe.ts) and notes it, for finding out why a screen does not paint.
+ *   `testdrive-fix-kick-<kick>` asks the native side for that kick instead
+ *   (LAB_NATIVE_KICKS), and `testdrive-fix-snapshot` for a native snapshot.
+ * - `testdrive-wait-<sec>`: the test drive, pressed only `sec` seconds after
+ *   the plan screen is ready (#136: is a start soon after launch the trigger?).
+ * - `testdrive-early-<name>`: the test drive with one thing changed on the
+ *   page from before Start drive is pressed (`EARLY_FIXES` in probe.ts: no
+ *   map, a red ground), for #136.
+ *
+ * In every scenario the native probe (`labNative`, where the plugin has it)
+ * is read before each report, and the report is written at once when Start
+ * drive is pressed, so the PC knows within a second when the drive began.
  */
 export async function startLab({ plugin, diagnostics, target, probe, now = Date.now, every = (ms, fn) => setInterval(fn, ms) }: StartLabOptions): Promise<RouteIQLab | null> {
   const scenario = await labScenario(plugin)
   const doc = target.document
   if (scenario === null || plugin === null || doc === undefined) return null
-  const lab = createLab({ scenario, doc, diagnostics, now, layout: probe?.layout })
+  let nativeLine: string | null = null
+  const lab = createLab({ scenario, doc, diagnostics, now, layout: probe?.layout, native: () => nativeLine })
   target.__routeiqLab = lab
   lab.note(`lab started, scenario ${scenario}`)
 
@@ -329,8 +365,30 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
   let lastReport = -Infinity
   const start = driveStart(scenario)
   // `testdrive-fix-<name>`: the same drive, and LAB_FIX_AFTER_MS into it one thing is tried on the page (probe.ts).
-  const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-')
-  const fix = scenario.startsWith('testdrive-fix-') ? probe?.fixes[scenario.slice('testdrive-fix-'.length)] : undefined
+  const waitMs = startWaitSec(scenario) * 1000
+  const testDrive = scenario === 'testdrive' || scenario.startsWith('testdrive-fix-') || scenario.startsWith('testdrive-early-') || waitMs > 0
+  /** When the plan screen was first ready to start (routes listed, test drive on); `testdrive-wait-<sec>` counts from there. */
+  let readySince: number | null = null
+  const fix = scenario.startsWith('testdrive-fix-') ? labFix(scenario.slice('testdrive-fix-'.length), plugin, probe?.fixes ?? {}, (what) => lab.note(what)) : undefined
+  const early = scenario.startsWith('testdrive-early-') ? probe?.early?.[scenario.slice('testdrive-early-'.length)] : undefined
+  let earlyDone = early === undefined
+  const writeReport = () => void plugin.labReport?.({ text: lab.report() }).catch(() => {})
+  const readNative = () => {
+    if (typeof plugin.labNative !== 'function') return
+    plugin.labNative().then(
+      (answer) => {
+        const line = JSON.stringify(answer)
+        nativeLine = line.length > LAB_NATIVE_LIMIT ? `${line.slice(0, LAB_NATIVE_LIMIT)}…` : line
+      },
+      () => {},
+    )
+  }
+  /** Presses Start drive; on success the report goes out at once, so the PC can time the screen from it. */
+  const pressStart = (): boolean => {
+    if (!lab.startDrive()) return false
+    writeReport()
+    return true
+  }
   let drivingSince: number | null = null
   let autopilot: 'waiting' | 'asking' | 'done' = start !== null || testDrive ? 'waiting' : 'done'
   let lastAsked = -Infinity
@@ -345,7 +403,7 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
         if (!near) {
           lab.note('the phone is not at the simulated start: not starting the drive')
           autopilot = 'waiting'
-        } else if (lab.startDrive()) autopilot = 'done'
+        } else if (pressStart()) autopilot = 'done'
         else autopilot = 'waiting'
       },
       () => {
@@ -369,7 +427,15 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
           if (testDrive) {
             // Two beats: switch it on, and start only after the page shows it on.
             if (!lab.testDriveOn()) lab.startTestDrive()
-            else if (lab.startDrive()) autopilot = 'done'
+            else if (readySince === null && waitMs > 0) {
+              readySince = at
+              lab.note(`plan screen ready: waiting ${waitMs / 1000} s before Start drive`)
+            } else if (readySince !== null && at - readySince < waitMs) {
+              // A person reading the routes before tapping (#136: a finger start after several seconds drew).
+            } else if (!earlyDone) {
+              lab.note(`early: ${early?.() ?? 'nothing'}`)
+              earlyDone = true
+            } else if (pressStart()) autopilot = 'done'
           } else if (at - lastAsked >= LAB_POSITION_RETRY_MS) startAtSimulatedPosition(at)
         }
       }
@@ -383,7 +449,8 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
       }
       if (at - lastReport >= LAB_REPORT_MS) {
         lastReport = at
-        void plugin.labReport?.({ text: lab.report() }).catch(() => {})
+        writeReport()
+        readNative()
       }
     } catch {
       // The lab must never break the app it is watching.
@@ -397,4 +464,37 @@ export async function startLab({ plugin, diagnostics, target, probe, now = Date.
     // Timers only, then.
   }
   return lab
+}
+
+/**
+ * The thing a `testdrive-fix-<name>` scenario tries: a page fix from `fixes`,
+ * or `kick-<kick>` (a native kick, LAB_NATIVE_KICKS) or `snapshot` (a native
+ * snapshot) through the plugin. The native ones answer later; what they did
+ * is noted then. Undefined: no such fix.
+ */
+export function labFix(name: string, plugin: LabPlugin, fixes: Readonly<Record<string, () => string>>, note: (what: string) => void): (() => string) | undefined {
+  if (name.startsWith('kick-')) {
+    const kick = name.slice('kick-'.length)
+    if (!(LAB_NATIVE_KICKS as readonly string[]).includes(kick) || typeof plugin.labKick !== 'function') return undefined
+    const labKick = plugin.labKick
+    return () => {
+      labKick({ name: kick }).then(
+        (answer) => note(`native kick ${kick}: ${typeof answer?.did === 'string' ? answer.did.slice(0, 120) : 'done'}`),
+        () => note(`native kick ${kick} refused`),
+      )
+      return `asked for the native kick ${kick}`
+    }
+  }
+  if (name === 'snapshot') {
+    if (typeof plugin.labSnapshot !== 'function') return undefined
+    const labSnapshot = plugin.labSnapshot
+    return () => {
+      labSnapshot().then(
+        (answer) => note(`native snapshot ${JSON.stringify(answer).slice(0, 200)}`),
+        () => note('native snapshot refused'),
+      )
+      return 'asked for a native snapshot'
+    }
+  }
+  return fixes[name]
 }

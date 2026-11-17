@@ -76,13 +76,14 @@ test('the Swift files follow the rule the Capacitor CLI relies on', () => {
   assert.equal(/@objc\(/.test(engine), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQHttp.swift', dir), 'utf8')), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQLab.swift', dir), 'utf8')), false);
+  assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQLabView.swift', dir), 'utf8')), false);
   assert.equal(/@objc\(/.test(readFileSync(new URL('RouteIQSimulation.swift', dir), 'utf8')), false);
 });
 
 test('positions and request addresses are never logged or stored by the native code', () => {
   const dir = new URL('../shell-native/ios/Sources/RouteIQNativePlugin/', import.meta.url);
   const names = readdirSync(dir).filter((name) => name.endsWith('.swift'));
-  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQLab.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
+  assert.deepEqual(names.sort(), ['RouteIQEngine.swift', 'RouteIQHttp.swift', 'RouteIQLab.swift', 'RouteIQLabView.swift', 'RouteIQNativePlugin.swift', 'RouteIQSimulation.swift']);
   // RouteIQLab.swift writes the phone lab's report file; the tests below hold it to its launch argument.
   for (const name of names.filter((n) => n !== 'RouteIQLab.swift')) {
     const swift = readFileSync(new URL(name, dir), 'utf8');
@@ -157,10 +158,14 @@ test('the lab is off without its launch argument: every lab entry point checks i
   assert.equal(plugin.includes('FileManager'), false);
 });
 
-test('the lab writes one file in the temporary folder and makes no network request', () => {
+test('the lab writes two files (its report and, for #136, a snapshot) in the temporary folder and makes no network request', () => {
   const lab = swiftSource('RouteIQLab.swift');
   assert.equal([...lab.matchAll(/FileManager\.default\.(\w+)/g)].every((m) => ['temporaryDirectory', 'fileExists'].includes(m[1])), true);
-  assert.equal([...lab.matchAll(/\.write\(to: (\w+)/g)].map((m) => m[1]).join(), 'file');
+  assert.equal([...lab.matchAll(/\.write\(to: (\w+)/g)].map((m) => m[1]).join(), 'file,file');
+  for (const name of ['writeReport', 'writeSnapshot']) {
+    const body = swiftFunction(lab, name);
+    assert.ok(body.indexOf('guard scenario(arguments: arguments) != nil') !== -1 && body.indexOf('guard scenario(arguments: arguments) != nil') < body.indexOf('FileManager'), `${name} touches files before checking the launch argument`);
+  }
   for (const banned of ['URLSession', 'http://', 'https://', 'print(', 'NSLog(', 'os_log', 'Logger(']) {
     assert.equal(lab.includes(banned), false, `RouteIQLab.swift uses ${banned}`);
   }

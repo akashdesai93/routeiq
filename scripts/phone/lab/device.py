@@ -37,13 +37,18 @@ def look(png: bytes):
         from PIL import Image
     except ImportError:
         return None
-    image = Image.open(io.BytesIO(png)).convert("L")
-    width, height = image.size
-    body = image.crop((0, int(height * 0.07), width, height)).resize((90, 180))
+    colour = Image.open(io.BytesIO(png)).convert("RGB")
+    width, height = colour.size
+    body_rgb = colour.crop((0, int(height * 0.07), width, height)).resize((90, 180))
+    body = body_rgb.convert("L")
     histogram = body.histogram()
     commonest = max(range(256), key=lambda shade: histogram[shade])
     near = sum(histogram[max(0, commonest - 6) : commonest + 7])
-    return {"flat": round(near / (90 * 180), 4), "shade": commonest}
+    # The commonest colour too (#136: the lab's "marks" paint each native layer its own colour,
+    # so the colour says which layer is on the glass where the page should be).
+    counts = body_rgb.getcolors(90 * 180) or []
+    rgb = list(max(counts, key=lambda c: c[0])[1]) if counts else None
+    return {"flat": round(near / (90 * 180), 4), "shade": commonest, "rgb": rgb}
 
 
 async def captions(rsd) -> list[str]:

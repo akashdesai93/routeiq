@@ -24,6 +24,10 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
 
     private let manager = CLLocationManager()
     private let synth = AVSpeechSynthesizer()
+    /// The phone lab's switches for #136 (RouteIQLab.Switch). Always empty outside lab mode.
+    private let lab: Set<RouteIQLab.Switch>
+    /// Where the audio session is set up with the lab's "audio-offmain" switch.
+    private let audioQueue = DispatchQueue(label: "routeiq.audio")
 
     // Location
     private var updating = false
@@ -50,7 +54,8 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     /// About once a second while the location stream is on.
     var onTick: (() -> Void)?
 
-    override init() {
+    init(lab: Set<RouteIQLab.Switch> = RouteIQLab.active) {
+        self.lab = lab
         super.init()
         manager.delegate = self
         synth.delegate = self
@@ -123,18 +128,20 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         // Setting allowsBackgroundLocationUpdates without the background mode
         // in Info.plist is a crash, so check first.
         let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
-        if modes.contains("location") {
+        if modes.contains("location") && !lab.contains(.noBgLocation) {
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
         }
-        manager.startUpdatingLocation()
+        if !lab.contains(.noLocation) {
+            manager.startUpdatingLocation()
+        }
 
         // "While Using" is enough to keep going in the background once a
         // drive was started with the app in front (the blue indicator shows).
         // "Always" is asked for once, as the probe did: iOS then also lets
         // the stream be started from the background.
         let defaults = UserDefaults.standard
-        if manager.authorizationStatus == .authorizedWhenInUse && !defaults.bool(forKey: Self.askedAlwaysKey) {
+        if manager.authorizationStatus == .authorizedWhenInUse && !defaults.bool(forKey: Self.askedAlwaysKey) && !lab.contains(.noAlways) {
             defaults.set(true, forKey: Self.askedAlwaysKey)
             manager.requestAlwaysAuthorization()
         }
@@ -161,6 +168,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     /// usable; a simulation that was running then carries on.
     func startSimulatedRoute(points: [(lng: Double, lat: Double)], speedMps: Double, steps: [RouteIQSimulation.Step]) -> Bool {
         guard let next = RouteIQSimulation(points: points, speedMps: speedMps, steps: steps) else { return false }
+        if lab.contains(.noTestDrive) { return true }
         let wasRunning = simulation != nil && simulationTimer != nil
         simulation = next
         // A route that replaces another carries on in the same rhythm: the
@@ -306,7 +314,25 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         if synth.isSpeaking {
             synth.stopSpeaking(at: .immediate)
         }
+        if lab.contains(.noSpeech) {
+            done(false)
+            return
+        }
+        if lab.contains(.audioOffMain) {
+            // Remedy (b) for #136: the session is set up on a queue of its own, then the line is spoken here.
+            audioQueue.async {
+                Self.activateAudio()
+                DispatchQueue.main.async { self.say(text, done) }
+            }
+            return
+        }
+        if !lab.contains(.noAudio) {
+            Self.activateAudio()
+        }
+        say(text, done)
+    }
 
+    private static func activateAudio() {
         let audio = AVAudioSession.sharedInstance()
         do {
             // A spoken prompt over other audio: music is lowered while it
@@ -320,7 +346,9 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         } catch {
             // Still try to speak: the synthesizer may manage by itself.
         }
+    }
 
+    private func say(_ text: String, _ done: @escaping (Bool) -> Void) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         speechNumber += 1
@@ -389,6 +417,13 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
         // Another line has started meanwhile: it needs the session.
         if currentDone != nil { return }
         var released = false
+        if lab.contains(.noAudio) || lab.contains(.noSpeech) { return }
+        if lab.contains(.audioOffMain) {
+            if !synth.isSpeaking {
+                audioQueue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+            }
+            return
+        }
         if !synth.isSpeaking {
             do {
                 try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -409,6 +444,7 @@ final class RouteIQEngine: NSObject, CLLocationManagerDelegate, AVSpeechSynthesi
     // MARK: - Screen
 
     func keepAwake(_ on: Bool) {
+        if lab.contains(.noIdle) { return }
         UIApplication.shared.isIdleTimerDisabled = on
     }
 }

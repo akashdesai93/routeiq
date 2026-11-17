@@ -95,3 +95,34 @@ export const LAYOUT_FIXES: Readonly<Record<string, (doc: Document, win: Window) 
     return 'scrolled to the top'
   },
 }
+
+/** A style sheet the lab adds to the page, kept for the whole run. */
+const addStyle = (doc: Document, css: string) => {
+  const style = doc.createElement('style')
+  style.dataset.routeiqLab = 'early'
+  style.textContent = css
+  doc.head.appendChild(style)
+}
+
+/**
+ * Things a `testdrive-early-<name>` scenario changes on the page BEFORE Start drive is
+ * pressed and keeps for the whole drive (#136: the web view stops presenting at drive start).
+ * Each returns what it did.
+ */
+export const EARLY_FIXES: Readonly<Record<string, (doc: Document, win: Window) => string>> = {
+  /** No map on the screen at any time of the drive: no WebGL canvas is drawn or resized. Is it still black? */
+  nomap: (doc) => {
+    addStyle(doc, '.map { display: none !important; }')
+    return 'no map (.map display: none) from before the start'
+  },
+  /** The page's whole ground red from before the start: a red screen means the page is on the glass but its content is not. */
+  red: (doc) => {
+    addStyle(doc, 'html, body, #root, .app, .app.live, .app.live .main { background: red !important; }')
+    return 'red ground from before the start'
+  },
+  /** The page's ground red AND no map: tells the map's layer apart from the rest of the page in one run. */
+  rednomap: (doc) => {
+    addStyle(doc, '.map { display: none !important; } html, body, #root, .app, .app.live, .app.live .main { background: red !important; }')
+    return 'red ground and no map from before the start'
+  },
+}

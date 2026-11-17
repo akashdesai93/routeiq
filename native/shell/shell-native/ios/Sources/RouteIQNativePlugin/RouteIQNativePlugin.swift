@@ -28,12 +28,17 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stopSimulatedRoute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "lab", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "labReport", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "labReport", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "labNative", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "labKick", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "labSnapshot", returnType: CAPPluginReturnPromise)
     ]
 
     private var engine: RouteIQEngine?
     private var http: RouteIQHttp?
     private var appStateObservers: [NSObjectProtocol] = []
+    /// The phone lab's native probe for #136. Nil unless the app was started in lab mode.
+    private var labMonitor: RouteIQLabMonitor?
 
     override public func load() {
         let setUp = {
@@ -74,6 +79,7 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func startLocation(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
+            self.labMonitor?.driveStarted()
             guard let engine = self.engine else {
                 call.reject("The location engine is not loaded", "unavailable")
                 return
@@ -272,6 +278,9 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 16.4, *) {
             self.bridge?.webView?.isInspectable = true
         }
+        let monitor = RouteIQLabMonitor(webView: self.bridge?.webView)
+        labMonitor = monitor
+        monitor.start()
         guard let folder = RouteIQLab.webDirectory() else { return }
         // Later, not now: the view controller has no bridge yet while plugins load.
         DispatchQueue.main.async {
@@ -285,6 +294,47 @@ public class RouteIQNativePlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["enabled": true, "scenario": scenario])
         } else {
             call.resolve(["enabled": false])
+        }
+    }
+
+    /// The native probe (RouteIQLabMonitor.probe): where the web view is, main-thread stalls,
+    /// process ends and events. Refused when the lab is off.
+    @objc func labNative(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let monitor = self.labMonitor else {
+                call.reject("The lab is off", "not-allowed")
+                return
+            }
+            call.resolve(monitor.probe())
+        }
+    }
+
+    /// Runs one kick on the web view now (RouteIQLabMonitor.kicks). Refused when the lab is off.
+    @objc func labKick(_ call: CAPPluginCall) {
+        let name = call.getString("name") ?? ""
+        DispatchQueue.main.async {
+            guard let monitor = self.labMonitor else {
+                call.reject("The lab is off", "not-allowed")
+                return
+            }
+            guard RouteIQLabMonitor.kicks.contains(name) else {
+                call.reject("Unknown kick", "invalid")
+                return
+            }
+            let did = monitor.kick(name)
+            monitor.note("kick \(name) (asked by the page): \(did)")
+            call.resolve(["did": did])
+        }
+    }
+
+    /// A native snapshot of the web view, written to the lab's snapshot file. Refused when the lab is off.
+    @objc func labSnapshot(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let monitor = self.labMonitor else {
+                call.reject("The lab is off", "not-allowed")
+                return
+            }
+            monitor.snapshot { call.resolve($0) }
         }
     }
 

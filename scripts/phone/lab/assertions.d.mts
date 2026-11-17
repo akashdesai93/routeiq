@@ -1,6 +1,6 @@
 // Types for assertions.mjs, so the tests can import it. The script itself is plain JavaScript.
 
-export const DEFAULT_LAB_CHECKS: Readonly<{ minFixesAway: number; minTicksAway: number; minBeatsPerAwayMinute: number; maxFlatShare: number; maxStallSec: number }>
+export const DEFAULT_LAB_CHECKS: Readonly<{ minFixesAway: number; minTicksAway: number; minBeatsPerAwayMinute: number; maxFlatShare: number; maxDrawnSec: number; drawWatchSec: number; maxStallSec: number }>
 
 export interface DiagnosticsEvent {
   time: string
@@ -33,6 +33,10 @@ export interface ParsedLabReport {
   warnings: number
   history: { time: string; what: string }[]
   diagnostics: ParsedDiagnostics | null
+  /** The native probe's last answer (#136 lab builds), or null. */
+  native: Record<string, any> | null
+  /** Phone clock time of the history line `pressed "Start drive"`, or null. */
+  startPressedAt: string | null
 }
 
 export interface Verdict {
@@ -61,8 +65,18 @@ export function checkSoak(report: ParsedLabReport | null, awayMinutes: number): 
 export interface ScreenLook {
   flat: number
   shade: number
+  /** The commonest colour (lab builds from #136 on), or null. */
+  rgb?: number[] | null
 }
 export function checkScreenDrawn(look: ScreenLook | null | undefined, when: string, max?: number): Verdict
 export function longestStallSec(d: ParsedDiagnostics): number
 export function runMetrics(report: ParsedLabReport | null): [string, string | number][]
 export function redact(line: unknown): string
+
+export interface DrawSample {
+  sec: number
+  look: ScreenLook | null
+}
+export function firstDrawn(samples: readonly DrawSample[], max?: number): { drawnSec: number | null; blackAgain: boolean; watchedSec: number | null; measured: number }
+export function checkDrawnWithin(samples: readonly DrawSample[], limitSec?: number, max?: number): Verdict
+export function nativeMetrics(probe: unknown): [string, string | number][]
