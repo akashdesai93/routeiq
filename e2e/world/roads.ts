@@ -154,9 +154,12 @@ export class World {
   private readonly roads: readonly Road[]
 
   private readonly sideStreet: boolean
+  /** False: the answers say nothing about the class of the roads, as a provider without that data would. */
+  private readonly roadClasses: boolean
 
-  constructor(origin: LngLat, destination: LngLat, options: { sideStreet?: boolean } = {}) {
+  constructor(origin: LngLat, destination: LngLat, options: { sideStreet?: boolean; roadClasses?: boolean } = {}) {
     this.sideStreet = options.sideStreet === true
+    this.roadClasses = options.roadClasses !== false
     this.origin = origin
     this.destination = destination
     this.frame = frameOf(origin, destination)
@@ -360,7 +363,8 @@ export class World {
           location: a,
           instruction: i === 0 ? `Drive along ${name}` : turn === 'straight' ? `Continue onto ${name}` : `Turn ${turn} onto ${name}`,
         },
-        intersections: intersectionsOf(piece, startIndex),
+        // Parallel Street's own stretch and the way back after a wrong turn are local streets; the rest are main roads.
+        intersections: intersectionsOf(piece, startIndex, !this.roadClasses ? null : name === ROAD_NAMES.S || name === ROAD_NAMES['off-route'] ? 'street' : 'primary'),
         bannerInstructions:
           next === null
             ? [{ distanceAlongGeometry: round1(stepM), primary: { text: 'Your destination', type: 'arrive', modifier: 'straight' } }]
@@ -479,10 +483,11 @@ function turnOf(frame: Frame, a: LngLat, b: LngLat, c: LngLat): 'left' | 'right'
   return cross > 0 ? 'left' : 'right'
 }
 
-function intersectionsOf(piece: readonly LngLat[], startIndex: number): IntersectionJson[] {
+function intersectionsOf(piece: readonly LngLat[], startIndex: number, roadClass: string | null): IntersectionJson[] {
   return piece.slice(0, -1).map((location, k) => ({
     location,
     geometry_index: startIndex + k,
+    ...(roadClass === null ? {} : { mapbox_streets_v8: { class: roadClass } }),
     ...((startIndex + k) % SIGNAL_EVERY === 3 ? { traffic_signal: true } : {}),
   }))
 }
@@ -507,6 +512,8 @@ interface IntersectionJson {
   location: LngLat
   geometry_index: number
   traffic_signal?: true
+  /** The class of the road leaving the intersection (Mapbox Streets v8), as the driving profiles send it. */
+  mapbox_streets_v8?: { class: string }
 }
 interface StepJson {
   distance: number

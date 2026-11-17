@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   EMPTY_DRIVE_LOG,
   endDrive,
+  endJams,
+  JAM_RECORDER_IDLE,
   observeDrive,
-  RECORDER_IDLE,
+  observeJams,
   recordDrive,
   type DriveLog,
   type DriveRecord,
-  type DriveRecorder,
-  type RecorderStep,
+  type JamRecorder,
+  type JamRecorderStep,
 } from './core/index.ts'
+import { shellDiagnostics } from './device/native/diagnostics.ts'
 import type { LiveObserver } from './live/runner.ts'
 import type { TextStore } from './storage/local.ts'
 import { clearDriveLog, loadDriveLog, saveDriveLog } from './storage/driveLog.ts'
@@ -41,7 +44,7 @@ export function useDriveLog(store: TextStore, trip: () => { otherAppSec: number 
   const [log, setLog] = useState<DriveLog>(() => loadDriveLog(store))
   const [stored, setStored] = useState(true)
   const latest = useRef(log)
-  const recorder = useRef<DriveRecorder>(RECORDER_IDLE)
+  const recorder = useRef<JamRecorder>(JAM_RECORDER_IDLE)
   const tripRef = useRef(trip)
   useEffect(() => {
     tripRef.current = trip
@@ -53,11 +56,13 @@ export function useDriveLog(store: TextStore, trip: () => { otherAppSec: number 
       latest.current = next
       setLog(next)
       setStored(saveDriveLog(store, next))
+      // The drive diagnostics say the same in one line: totals only, never where.
+      shellDiagnostics.jams(record.jams)
     },
     [store],
   )
   const apply = useCallback(
-    (step: RecorderStep) => {
+    (step: JamRecorderStep) => {
       recorder.current = step.recorder
       if (step.write !== null) write(step.write)
     },
@@ -69,13 +74,14 @@ export function useDriveLog(store: TextStore, trip: () => { otherAppSec: number 
     const context = () => ({ ...tripRef.current(), hourOf: localHour })
     return {
       start: () => {
-        recorder.current = RECORDER_IDLE
+        recorder.current = JAM_RECORDER_IDLE
       },
       change: (state, nowMs) => {
-        const step = observeDrive(recorder.current, state, nowMs, context)
+        // The jam meter (#227) runs beside the recorder and fills in each record it writes.
+        const step = observeJams(recorder.current, state, nowMs, (drive) => observeDrive(drive, state, nowMs, context))
         if (step.recorder !== recorder.current) apply(step)
       },
-      end: (state, nowMs) => apply(endDrive(recorder.current, state, nowMs)),
+      end: (state, nowMs) => apply(endJams(recorder.current, nowMs, (drive) => endDrive(drive, state, nowMs))),
     }
   }, [apply])
 

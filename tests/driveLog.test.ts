@@ -247,6 +247,7 @@ function record(id: number, extra: Partial<DriveRecord> = {}): DriveRecord {
     distanceM: 25_000,
     signals: { count: 14, partial: false },
     otherAppSec: null,
+    jams: null,
     switches: [],
     offRouteEvents: 0,
     requests: 17,
@@ -363,8 +364,8 @@ describe('summaries', () => {
     ].reduce((l, r) => recordDrive(l, r), EMPTY_DRIVE_LOG)
     expect(driveLogCsv(log).split('\n')).toEqual([
       DRIVE_LOG_CSV_HEADER,
-      '2027-01-15T08:00:00.000Z,A,8,arrived,provider,20.0,21.0,1.0,20.0,1.0,25.0,≥3,0,0,,,0,17',
-      '2027-01-15T08:01:40.000Z,A,8,ended,provider,20.0,21.0,,,,25.0,,0,1,,,0,17',
+      '2027-01-15T08:00:00.000Z,A,8,arrived,provider,20.0,21.0,1.0,20.0,1.0,25.0,≥3,0,0,,,0,17,',
+      '2027-01-15T08:01:40.000Z,A,8,ended,provider,20.0,21.0,,,,25.0,,0,1,,,0,17,',
     ])
   })
 })
