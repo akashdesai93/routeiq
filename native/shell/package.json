@@ -17,6 +17,6 @@
   "devDependencies": {
     "@capacitor/cli": "8.6.0",
     "esbuild": "0.28.2",
-    "plist": "5.1.0"
+    "plist": "5.1.1"
   }
 }
