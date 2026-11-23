@@ -10,12 +10,12 @@
     "ios:generate": "node scripts/generate-ios.mjs"
   },
   "dependencies": {
-    "@capacitor/core": "8.6.0",
-    "@capacitor/ios": "8.6.0",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2",
     "routeiq-shell-native": "file:shell-native"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.6.0",
+    "@capacitor/cli": "8.6.2",
     "esbuild": "0.28.2",
     "plist": "5.1.1"
   }
